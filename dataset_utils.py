@@ -93,71 +93,52 @@ def augment_translation(images):
     return tf.tuple(images)
 
 
-def augment_two(first, second, should_rotate_hue, should_translate):
+def augment(should_rotate_hue, should_translate, *images):
+    stacked_images = tf.stack(images, axis=0)
+
     # hue rotation
     if should_rotate_hue:
-        hue_seed = tf.random.uniform(
-            shape=[2], minval=0, maxval=65536, dtype="int32")
-        first = augment_hue_rotation(first, hue_seed)
-        second = augment_hue_rotation(second, hue_seed)
+        hue_seed = tf.random.uniform(shape=[2], minval=0, maxval=65536, dtype="int32")
+        stacked_images_rgb, stacked_images_alpha = stacked_images[..., 0:3], stacked_images[..., 3]
+        stacked_images_rgb = tf.image.stateless_random_hue(stacked_images_rgb, 0.5, hue_seed)
+        stacked_images = tf.concat([stacked_images_rgb, stacked_images_alpha[..., tf.newaxis]], axis=-1)
 
     # translation
     if should_translate:
-        first, second = augment_translation((first, second))
+        concat_channels = tf.concat(tf.unstack(stacked_images, num=len(images)), axis=-1)
+        translate = tf.keras.layers.RandomTranslation(
+            (-0.15 * 3, 0.075 * 3), 0.125 * 3, fill_mode="constant", interpolation="nearest")
+        concat_channels = translate(concat_channels, training=True)
+        stacked_images = tf.split(concat_channels, len(images), axis=-1)
+        stacked_images = tf.stack(stacked_images)
 
-    return first, second
+    images = tf.unstack(stacked_images, num=len(images))
+    return tf.tuple(images)
 
 
-def normalize_two(first, second):
-    return normalize(first), normalize(second)
+def normalize_all(*images):
+    return tuple(map(lambda image: normalize(image), images))
 
 
 def create_augmentation_with_prob(prob=0.8, should_augment_hue=True, should_augment_translation=True):
     prob = tf.constant(prob)
 
-    def augmentation_wrapper(first, second):
+    def augmentation_wrapper(*images):
         choice = tf.random.uniform(shape=[])
         inside_augmentation_probability = choice < prob
         if inside_augmentation_probability:
-            return augment_two(first, second, should_augment_hue, should_augment_translation)
+            return augment(should_augment_hue, should_augment_translation, *images)
         else:
-            return first, second
+            return tf.tuple(images)
 
     return augmentation_wrapper
 
 
-def create_indexed_image_loader(sprite_side_source, sprite_side_target, dataset_sizes, train_or_test_folder,
-                                palette_ordering):
+def create_rgba_image_loader(sprite_side_source, sprite_side_target, dataset_sizes, train_or_test_folder):
     """
     Returns a function which takes an integer in the range of [0, DATASET_SIZE-1] and loads some image file
-    from the corresponding dataset (using image_number and DATASET_SIZES to decide) representing images by
-    its palette and indexed colors.
+    from the corresponding dataset (using image_number and DATASET_SIZES to decide).
     """
-
-    def load_indexed_images(dataset, image_number):
-        folders = DIRECTION_FOLDERS
-        source_path = tf.strings.join(
-            [dataset, train_or_test_folder, folders[sprite_side_source], image_number + ".png"], os.sep)
-        target_path = tf.strings.join(
-            [dataset, train_or_test_folder, folders[sprite_side_target], image_number + ".png"], os.sep)
-
-        source_image = tf.cast(load_image(
-            source_path, should_normalize=False), "int32")
-        target_image = tf.cast(load_image(
-            target_path, should_normalize=False), "int32")
-
-        # concatenates source and target so the colors in one have the same palette indices as the other
-        concatenated_image = tf.concat([source_image, target_image], axis=-1)
-
-        # finds the unique colors in both images
-        palette = io_utils.extract_palette(
-            concatenated_image, palette_ordering)
-
-        # converts source and target_images from RGB into indexed, using the extracted palette
-        source_image = io_utils.rgba_to_indexed(source_image, palette)
-        target_image = io_utils.rgba_to_indexed(target_image, palette)
-
-        return source_image, target_image, palette
 
     def load_images(image_number):
         image_number = tf.cast(image_number, "int32")
@@ -168,8 +149,10 @@ def create_indexed_image_loader(sprite_side_source, sprite_side_target, dataset_
 
         def condition(which_image, which_dataset): return which_image >= tf.gather(
             dataset_sizes, which_dataset)
+
         def body(which_image, which_dataset): return [which_image - tf.gather(dataset_sizes, which_dataset),
                                                       which_dataset + 1]
+
         image_number, dataset_index = tf.while_loop(
             condition, body, [image_number, dataset_index])
 
@@ -178,9 +161,14 @@ def create_indexed_image_loader(sprite_side_source, sprite_side_target, dataset_
         image_number = tf.strings.as_string(image_number)
 
         # loads and transforms the images according to how the generator and discriminator expect them to be
-        source_image, target_image, palette = load_indexed_images(
-            dataset, image_number)
-        return source_image, target_image, palette
+        input_image = load_image(tf.strings.join(
+            [dataset, os.sep, train_or_test_folder, os.sep, DOMAIN_FOLDERS[sprite_side_source], os.sep, image_number,
+             ".png"]), False)
+        real_image = load_image(tf.strings.join(
+            [dataset, os.sep, train_or_test_folder, os.sep, DOMAIN_FOLDERS[sprite_side_target], os.sep, image_number,
+             ".png"]), False)
+
+        return input_image, real_image
 
     return load_images
 
@@ -200,8 +188,10 @@ def create_rgba_image_loader(sprite_side_source, sprite_side_target, dataset_siz
 
         def condition(which_image, which_dataset): return which_image >= tf.gather(
             dataset_sizes, which_dataset)
+
         def body(which_image, which_dataset): return [which_image - tf.gather(dataset_sizes, which_dataset),
                                                       which_dataset + 1]
+
         image_number, dataset_index = tf.while_loop(
             condition, body, [image_number, dataset_index])
 
@@ -211,10 +201,10 @@ def create_rgba_image_loader(sprite_side_source, sprite_side_target, dataset_siz
 
         # loads and transforms the images according to how the generator and discriminator expect them to be
         input_image = load_image(tf.strings.join(
-            [dataset, os.sep, train_or_test_folder, os.sep, DIRECTION_FOLDERS[sprite_side_source], os.sep, image_number,
+            [dataset, os.sep, train_or_test_folder, os.sep, DOMAIN_FOLDERS[sprite_side_source], os.sep, image_number,
              ".png"]), False)
         real_image = load_image(tf.strings.join(
-            [dataset, os.sep, train_or_test_folder, os.sep, DIRECTION_FOLDERS[sprite_side_target], os.sep, image_number,
+            [dataset, os.sep, train_or_test_folder, os.sep, DOMAIN_FOLDERS[sprite_side_target], os.sep, image_number,
              ".png"]), False)
 
         return input_image, real_image
@@ -222,12 +212,54 @@ def create_rgba_image_loader(sprite_side_source, sprite_side_target, dataset_siz
     return load_images
 
 
-def load_rgba_ds(source_direction, target_direction, should_augment_hue=True, should_augment_translation=True):
-    train_dataset = tf.data.Dataset.range(TRAIN_SIZE).shuffle(TRAIN_SIZE)
-    test_dataset = tf.data.Dataset.range(TEST_SIZE).shuffle(TEST_SIZE)
+def create_multi_domain_image_loader(domains, dataset_sizes, train_or_test_folder):
+    """
+    Creates an image loader for the datasets (as configured in configuration.py) in such a way that
+    all directions of the same character are grouped together.
+    """
+
+    def load_single_image(dataset, side_index, image_number):
+        path = tf.strings.join(
+            [dataset, train_or_test_folder, tf.gather(DOMAIN_FOLDERS, side_index), image_number + ".png"], os.sep)
+        image = load_image(path, False)
+        return image
+
+    @tf.function
+    def load_images(image_number):
+        image_number = tf.cast(image_number, "int32")
+
+        dataset_index = tf.constant(0, dtype="int32")
+        condition = lambda which_image, which_dataset: which_image >= tf.gather(dataset_sizes, which_dataset)
+        body = lambda which_image, which_dataset: [which_image - tf.gather(dataset_sizes, which_dataset),
+                                                   which_dataset + 1]
+        image_number, dataset_index = tf.while_loop(condition, body, [image_number, dataset_index])
+
+        # gets the string pointing to the correct images
+        dataset = tf.gather(DATA_FOLDERS, dataset_index)
+        image_number = tf.strings.as_string(image_number)
+
+        # loads all images and return them
+        images = [load_single_image(dataset, i, image_number) for i in range(len(domains))]
+        return tuple(images)
+
+    return load_images
+
+
+def load_multi_domain_ds(options):
+    domains = options.domains
+    should_augment_hue = not options.no_hue
+    should_augment_translation = not options.no_tran
+    train_size = options.train_size
+    test_size = options.test_size
+    train_sizes = options.train_sizes
+    test_sizes = options.test_sizes
+    batch_size = options.batch
+
+    train_dataset = tf.data.Dataset.range(train_size).shuffle(train_size)
+    test_dataset = tf.data.Dataset.range(test_size)
 
     train_dataset = train_dataset \
-        .map(create_rgba_image_loader(source_direction, target_direction, TRAIN_SIZES, "train"),
+        .map(create_multi_domain_image_loader(domains, train_sizes, "train"),
              num_parallel_calls=tf.data.AUTOTUNE)
 
     should_augment = should_augment_hue or should_augment_translation
@@ -237,28 +269,123 @@ def load_rgba_ds(source_direction, target_direction, should_augment_hue=True, sh
                  num_parallel_calls=tf.data.AUTOTUNE)
 
     train_dataset = train_dataset \
-        .map(normalize_two, num_parallel_calls=tf.data.AUTOTUNE) \
-        .batch(BATCH_SIZE)
+        .map(normalize_all, num_parallel_calls=tf.data.AUTOTUNE) \
+        .batch(batch_size)
 
-    test_dataset = test_dataset.map(create_rgba_image_loader(source_direction, target_direction, TEST_SIZES, "test"),
+    test_dataset = test_dataset.map(create_multi_domain_image_loader(domains, test_sizes, "test"),
                                     num_parallel_calls=tf.data.AUTOTUNE) \
-        .map(normalize_two, num_parallel_calls=tf.data.AUTOTUNE) \
-        .batch(BATCH_SIZE)
+        .map(normalize_all, num_parallel_calls=tf.data.AUTOTUNE) \
+        .batch(batch_size)
     return train_dataset, test_dataset
 
-
-def load_indexed_ds(source_direction, target_direction, palette_ordering):
-    train_dataset = tf.data.Dataset.range(TRAIN_SIZE).shuffle(TRAIN_SIZE)
-    test_dataset = tf.data.Dataset.range(TEST_SIZE).shuffle(TEST_SIZE)
-
-    train_dataset = train_dataset \
-        .map(create_indexed_image_loader(source_direction, target_direction, TRAIN_SIZES, "train", palette_ordering),
-             num_parallel_calls=tf.data.AUTOTUNE) \
-        .batch(BATCH_SIZE)
-
-    test_dataset = test_dataset \
-        .map(create_indexed_image_loader(source_direction, target_direction, TEST_SIZES, "test", palette_ordering),
-             num_parallel_calls=tf.data.AUTOTUNE) \
-        .batch(BATCH_SIZE)
-
-    return train_dataset, test_dataset
+# def create_collaborative_image_loader(dataset_sizes, train_or_test_folder, should_normalize=True,
+#                                       input_dropout=[1, 2, 3]):
+#     """
+#     Creates an image loader for the datasets (as configured in configuration.py) in such a way that
+#     all directions of the same character are grouped together.
+#     Used for CollaGAN.
+#     """
+#
+#     # def load_image_and_label(dataset, side_index, image_number):
+#     #     path = tf.strings.join(
+#     #         [dataset, train_or_test_folder, tf.gather(DIRECTION_FOLDERS, side_index), image_number + ".png"], os.sep)
+#     #     image = load_image(path, should_normalize)
+#     #     domain = tf.one_hot(side_index, len(DIRECTION_FOLDERS))
+#     #     return image, domain
+#
+#     def create_input_dropout_index_list(inputs_to_drop):
+#         """
+#         Creates a list shape=(DOMAINS, TO_DROP, ? DOMAINS) that is, per possible target pose index (first dimension),
+#         for each possible number of dropped inputs (second dimension): all permutations of a boolean array that
+#         (a) nullifies the target index and (b) nullifies a number of additional inputs equal to 0, 1 or 2 (determined
+#         by inputs_to_drop).
+#         Parameters
+#         ----------
+#         inputs_to_drop a list of the number of inputs we want to drop. Must be at least [1], but can be [1, 2],
+#         [1, 2, 3], or [1, 3].
+#
+#         Returns a 4d array with all the permutations described.
+#         -------
+#
+#         """
+#         null_lists_per_target_index = []
+#         for target_index in range(NUMBER_OF_DOMAINS):
+#             null_list_for_current_target = []
+#             for number_of_inputs_to_drop in inputs_to_drop:
+#                 tmp_a = []
+#                 if number_of_inputs_to_drop == 1:
+#                     tmp = [bX == target_index for bX in range(NUMBER_OF_DOMAINS)]
+#                     tmp_a.append(tmp)
+#
+#                 elif number_of_inputs_to_drop == 2:
+#                     for i_in in range(NUMBER_OF_DOMAINS):
+#                         if not i_in == target_index:
+#                             tmp = [bX in [i_in, target_index] for bX in range(NUMBER_OF_DOMAINS)]
+#                             tmp_a.append(tmp)
+#
+#                 elif number_of_inputs_to_drop == 3:
+#                     for i_in in range(NUMBER_OF_DOMAINS):
+#                         if not (i_in == target_index):
+#                             tmp = [(bX == target_index or (not bX == i_in)) for bX in range(NUMBER_OF_DOMAINS)]
+#                             tmp_a.append(tmp)
+#
+#                 null_list_for_current_target.append(tmp_a)
+#             null_lists_per_target_index.append(null_list_for_current_target)
+#
+#         return null_lists_per_target_index
+#
+#     def load_a_side_image(dataset, side_index, image_number):
+#         path = tf.strings.join(
+#             [dataset, train_or_test_folder, tf.gather(DIRECTION_FOLDERS, side_index), image_number + ".png"], os.sep
+#         )
+#         return load_image(path, should_normalize)
+#
+#     def channelize_domain(index):
+#         one_hot_domain = tf.one_hot(index, NUMBER_OF_DOMAINS)
+#         channelized_domain = tf.tile(one_hot_domain[tf.newaxis, tf.newaxis, :], [IMG_SIZE, IMG_SIZE, 1])
+#         return channelized_domain
+#
+#     @tf.function
+#     def load_images(dropout_null_list, image_number):
+#         image_number = tf.cast(image_number, "int32")
+#
+#         dataset_index = tf.constant(0, dtype="int32")
+#         condition = lambda which_image, which_dataset: which_image >= tf.gather(dataset_sizes, which_dataset)
+#         body = lambda which_image, which_dataset: [which_image - tf.gather(dataset_sizes, which_dataset),
+#                                                    which_dataset + 1]
+#         image_number, dataset_index = tf.while_loop(condition, body, [image_number, dataset_index])
+#
+#         # gets the string pointing to the correct images
+#         dataset = tf.gather(DATA_FOLDERS, dataset_index)
+#         image_number = tf.strings.as_string(image_number)
+#
+#         # loads all images from the disk
+#         back_image = load_a_side_image(dataset, 0, image_number)
+#         left_image = load_a_side_image(dataset, 1, image_number)
+#         front_image = load_a_side_image(dataset, 2, image_number)
+#         right_image = load_a_side_image(dataset, 3, image_number)
+#
+#         # finds a random target side
+#         target_domain_index = tf.random.uniform(shape=[], maxval=NUMBER_OF_DOMAINS, dtype="int32")
+#         target_domain_mask = channelize_domain(target_domain_index)
+#
+#         # applies input dropout as described in the CollaGAN paper and implemented in the code
+#         #  this is adapted from getBatch_RGB_varInp in CollaGAN
+#         #  a. randomly choose an input dropout mask such as [True, False, False, True]
+#         dropout_null_list_for_target = tf.gather(dropout_null_list, target_domain_index)
+#         random_number_of_inputs_to_drop = tf.random.uniform(shape=[], maxval=tf.shape(dropout_null_list_for_target)[0],
+#                                                             dtype="int32")
+#         dropout_null_list_for_target_and_number_of_inputs = tf.gather(dropout_null_list_for_target,
+#                                                                       random_number_of_inputs_to_drop)
+#         random_permutation_index = tf.random.uniform(shape=[],
+#                                                      maxval=tf.shape(dropout_null_list_for_target_and_number_of_inputs)[
+#                                                          0], dtype="int32")
+#         input_dropout_mask = tf.gather(dropout_null_list_for_target_and_number_of_inputs, random_permutation_index)
+#
+#         #  b. do apply the dropout by creating an input mask
+#         # TODO... the CollaGAN implementation does not do anything with the input images at this point
+#
+#         return back_image, left_image, front_image, right_image, target_domain_index, target_domain_mask, input_dropout_mask
+#
+#     null_list = tf.ragged.constant(create_input_dropout_index_list(input_dropout), ragged_rank=2, dtype="bool")
+#     return partial(load_images, null_list)

@@ -23,47 +23,47 @@ def delete_folder(path):
     shutil.rmtree(path, ignore_errors=True)
 
 
-@tf.function
-def extract_palette(image, palette_ordering, channels=OUTPUT_CHANNELS):
-    """
-    Extracts the unique colors from an image (3D tensor)
-    Parameters
-    ----------
-    image a 3D tensor with shape (height, width, channels)
-    palette_ordering either "grayness", "top2bottom", "bottom2top", or "shuffled"
-    channels the number of channels of the image
-
-    Returns a tensor of colors (RGB) sorted by the number of times each one appears and from dark to light as a
-    second sorting key.
-    -------
-    """
-    # incoming image shape: (IMG_SIZE, IMG_SIZE, channels)
-    # reshaping to: (IMG_SIZE*IMG_SIZE, channels)
-    image = tf.cast(image, "int32")
-    image = tf.reshape(image, [-1, channels])
-
-    if palette_ordering == "top2bottom":
-        # the UniqueWithCountsV2 sweeps the image from the top-left to the bottom-right corner
-        colors, _, count = tf.raw_ops.UniqueWithCountsV2(x=image, axis=[0])
-    elif palette_ordering == "bottom2top":
-        image = image[::-1]  # sorting by appearance: bottom-right to top-left
-        colors, _, count = tf.raw_ops.UniqueWithCountsV2(x=image, axis=[0])
-    elif palette_ordering == "grayness":
-        colors, _, count = tf.raw_ops.UniqueWithCountsV2(x=image, axis=[0])
-        gray_coefficients = tf.constant([0.2989, 0.5870, 0.1140, 0.])[..., tf.newaxis]
-        grayness = tf.squeeze(tf.matmul(tf.cast(colors, "float32"), gray_coefficients))
-        indices_sorted_by_grayness = tf.argsort(grayness, direction="ASCENDING", stable=True)
-        colors = tf.gather(colors, indices_sorted_by_grayness)
-    else:  # shuffled
-        colors, _, count = tf.raw_ops.UniqueWithCountsV2(x=image, axis=[0])
-        colors = tf.random.shuffle(colors)
-
-    # fills the palette to have 256 colors, so batches can be created (otherwise they can't, tf complains)
-    num_colors = tf.shape(colors)[0]
-    fillers = tf.repeat([INVALID_INDEX_COLOR], [MAX_PALETTE_SIZE - num_colors], axis=0)
-    colors = tf.concat([colors, fillers], axis=0)
-
-    return colors
+# @tf.function
+# def extract_palette(image, palette_ordering, channels=OUTPUT_CHANNELS):
+#     """
+#     Extracts the unique colors from an image (3D tensor)
+#     Parameters
+#     ----------
+#     image a 3D tensor with shape (height, width, channels)
+#     palette_ordering either "grayness", "top2bottom", "bottom2top", or "shuffled"
+#     channels the number of channels of the image
+#
+#     Returns a tensor of colors (RGB) sorted by the number of times each one appears and from dark to light as a
+#     second sorting key.
+#     -------
+#     """
+#     # incoming image shape: (IMG_SIZE, IMG_SIZE, channels)
+#     # reshaping to: (IMG_SIZE*IMG_SIZE, channels)
+#     image = tf.cast(image, "int32")
+#     image = tf.reshape(image, [-1, channels])
+#
+#     if palette_ordering == "top2bottom":
+#         # the UniqueWithCountsV2 sweeps the image from the top-left to the bottom-right corner
+#         colors, _, count = tf.raw_ops.UniqueWithCountsV2(x=image, axis=[0])
+#     elif palette_ordering == "bottom2top":
+#         image = image[::-1]  # sorting by appearance: bottom-right to top-left
+#         colors, _, count = tf.raw_ops.UniqueWithCountsV2(x=image, axis=[0])
+#     elif palette_ordering == "grayness":
+#         colors, _, count = tf.raw_ops.UniqueWithCountsV2(x=image, axis=[0])
+#         gray_coefficients = tf.constant([0.2989, 0.5870, 0.1140, 0.])[..., tf.newaxis]
+#         grayness = tf.squeeze(tf.matmul(tf.cast(colors, "float32"), gray_coefficients))
+#         indices_sorted_by_grayness = tf.argsort(grayness, direction="ASCENDING", stable=True)
+#         colors = tf.gather(colors, indices_sorted_by_grayness)
+#     else:  # shuffled
+#         colors, _, count = tf.raw_ops.UniqueWithCountsV2(x=image, axis=[0])
+#         colors = tf.random.shuffle(colors)
+#
+#     # fills the palette to have 256 colors, so batches can be created (otherwise they can't, tf complains)
+#     num_colors = tf.shape(colors)[0]
+#     fillers = tf.repeat([INVALID_INDEX_COLOR], [MAX_PALETTE_SIZE - num_colors], axis=0)
+#     colors = tf.concat([colors, fillers], axis=0)
+#
+#     return colors
 
 
 @tf.function
@@ -119,19 +119,19 @@ def plot_to_image(matplotlib_figure, channels=OUTPUT_CHANNELS):
     # Add the batch dimension
     image = tf.expand_dims(image, 0)
     return image
-    
+
 
 def seconds_to_human_readable(time):
-    days = time // 86400         # (60 * 60 * 24)
-    hours = time // 3600 % 24    # (60 * 60) % 24
-    minutes = time // 60 % 60 
+    days = time // 86400  # (60 * 60 * 24)
+    hours = time // 3600 % 24  # (60 * 60) % 24
+    minutes = time // 60 % 60
     seconds = time % 60
-    
+
     time_string = ""
     if days > 0:
         time_string += f"{days:.0f} day{'s' if days > 1 else ''}, "
     if hours > 0 or days > 0:
         time_string += f"{hours:02.0f}h:"
     time_string += f"{minutes:02.0f}m:{seconds:02.0f}s"
-    
+
     return time_string

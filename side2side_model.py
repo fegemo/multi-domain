@@ -2,13 +2,13 @@ from abc import ABC, abstractmethod
 import tensorflow as tf
 from tensorboard.plugins.custom_scalar import layout_pb2, summary as cs_summary
 import time
-import datetime
 from IPython import display
-from matplotlib import pyplot as plt
+from collections.abc import Iterable
 
 import io_utils
 from configuration import *
 import frechet_inception_distance as fid
+from keras_utils import ConstantThenLinearDecay
 
 
 def show_eta(training_start_time, step_start_time, current_step, training_starting_step, total_steps,
@@ -26,57 +26,115 @@ def show_eta(training_start_time, step_start_time, current_step, training_starti
 
 
 class S2SModel(ABC):
-    def __init__(self, train_ds, test_ds, model_name, architecture_name="s2smodel", keep_checkpoint=False):
-        """
-        Params:
-        - train_ds: the dataset used for training. Should have target images as labels
-        - test_ds: dataset used for validation. Should have target images as labels
-        - model_name: the specific direction of source to target image (eg, front2right).
-                      Should be path-friendly
-        - architecture_name: the network architecture + variation used (eg, pix2pix, pix2pix-wgan).
-                             Should be path-friendly
-        - keep_checkpoint: boolean indicating whether checkpoints should be saved. Default: False.
-        """
+    def __init__(self, config):
         self.generator = None
+        self.generator_optimizer = None
         self.discriminator = None
+        self.discriminator_optimizer = None
 
+        self.best_generator_checkpoint = None
+        self.checkpoint_manager = None
         self.summary_writer = None
-        self.now_string = None
-        self.log_folders = None
+        self.training_metrics = None
+        self.best_generator_checkpoint = None
 
-        self.train_ds = train_ds
-        self.test_ds = test_ds
-        self.model_name = model_name
-        self.architecture_name = architecture_name
-        self.checkpoint_dir = os.sep.join(
-            [TEMP_FOLDER, "training-checkpoints", self.architecture_name, self.model_name])
+        self.config = config
+        self.model_name = config.model_name
+        self.experiment = config.experiment
+        self.checkpoint_dir = self.get_output_folder("training-checkpoints")
         self.layout_summary = S2SModel.create_layout_summary()
-        self.keep_checkpoint = keep_checkpoint
+        self.keep_checkpoint = config.keep_checkpoint
 
-    def fit(self, steps, update_steps, callbacks=[], starting_step=0):
+        self.discriminator = self.create_discriminator()
+        self.generator = self.create_generator()
+
+        generator_params = tf.reduce_sum([tf.reduce_prod(v.get_shape()) for v in self.generator.trainable_weights])
+        discriminator_params = tf.reduce_sum(
+            [tf.reduce_prod(v.get_shape()) for v in self.discriminator.trainable_weights])
+        print(f"Generator: {self.generator.name} with {generator_params:,} parameters")
+        print(f"Discriminator: {self.discriminator.name} with {discriminator_params:,} parameters")
+        # initializes training checkpoint information
+        self.best_generator_checkpoint = tf.train.Checkpoint(generator=self.generator)
+        self.checkpoint_manager = tf.train.CheckpointManager(
+            self.best_generator_checkpoint, directory=self.checkpoint_dir, max_to_keep=1)
+
+    def get_output_folder(self, sub_folder=None, skip_run=False, run=None):
+        log_folder = self.config.log_folder
+        model_name = self.config.model_name
+        experiment = self.config.experiment
+        run_string = run if not (run is None) else self.config.run_string
+
+        folders = [log_folder, model_name, experiment, run_string]
+        if skip_run:
+            folders.pop()
+        if sub_folder is not None:
+            if not isinstance(sub_folder, Iterable):
+                sub_folder = [sub_folder]
+            folders.append(sub_folder)
+
+        return os.sep.join(folders)
+
+    def save_model_description(self, folder_path):
+        io_utils.ensure_folder_structure(folder_path)
+        with open(os.sep.join([folder_path, "model-description.txt"]), "w") as fh:
+            for model in self.models:
+                model.summary(print_fn=lambda x: fh.write(x + "\n"))
+                fh.write("\n" * 3)
+
+    @property
+    def models(self):
+        return [self.discriminator, self.generator]
+
+    def fit(self, train_ds, test_ds, steps, update_steps, callbacks=[], starting_step=0):
         if starting_step == 0:
-            self.log_folders = [TEMP_FOLDER, "logs", self.architecture_name, self.model_name]
-            self.now_string = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            self.summary_writer = tf.summary.create_file_writer(os.sep.join([*self.log_folders, self.now_string]))
+            # initialize generator and discriminator optimizers
+            if self.config.lr_decay == "constant-then-linear":
+                lr_generator = ConstantThenLinearDecay(self.config.lr, steps // self.config.d_steps)
+                lr_discriminator = ConstantThenLinearDecay(self.config.lr, steps)
+            else:
+                lr_generator = self.config.lr
+                lr_discriminator = self.config.lr
+            self.generator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_generator, beta_1=0.5, beta_2=0.999)
+            self.discriminator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_discriminator, beta_1=0.5, beta_2=0.999)
+
+            # initializes tensorboard utilities for logging training statistics
+            self.summary_writer = tf.summary.create_file_writer(self.get_output_folder())
             with self.summary_writer.as_default():
                 tf.summary.experimental.write_raw_pb(
                     self.layout_summary.SerializeToString(), step=0)
+
+            # initialize training metrics (used for saving the best model according to FID or L1)
+            self.training_metrics = dict({
+                "fid": dict({
+                    "best_value": tf.Variable(float("inf"), trainable=False, dtype="float32"),
+                    "step": tf.Variable(int(-1), trainable=False, dtype="int64")
+                }),
+                "l1": dict({
+                    "best_value": tf.Variable(float("inf"), trainable=False, dtype="float32"),
+                    "step": tf.Variable(int(-1), trainable=False, dtype="int64")
+                })
+            })
+
+        # does start training
         try:
-            self.do_fit(steps, update_steps, callbacks, starting_step)
+            self.do_fit(train_ds, test_ds, steps, update_steps, callbacks, starting_step)
         finally:
             self.summary_writer.flush()
 
-    def do_fit(self, steps, update_steps=1000, callbacks=[], starting_step=0):
-        examples = self.select_examples_for_visualization()
+    def do_fit(self, train_ds, test_ds, steps, update_steps=1000, callbacks=[], starting_step=0):
+        num_test_images = min(TEST_SIZE, 136)
+        examples_for_visualization = self.select_examples_for_visualization(train_ds, test_ds)
+        if S2SModel.should_evaluate(callbacks):
+            example_indices_for_evaluation = self.initialize_random_examples_for_evaluation(train_ds, test_ds,
+                                                                                            num_test_images)
 
         training_start_time = time.time()
         step_start_time = training_start_time
 
-        for step, batch in self.train_ds.repeat().take(steps).enumerate():
+        for step, batch in train_ds.repeat().take(steps).enumerate():
             step += starting_step
 
-            # every UPDATE_STEPS and in the beginning, visualize 5x images to see
-            # how training is going...
+            # every UPDATE_STEPS and in the beginning, visualize x images to see how training is going...
             if (step + 1) % update_steps == 0 or step == 0:
                 display.clear_output(wait=True)
 
@@ -86,29 +144,39 @@ class S2SModel(ABC):
                 step_start_time = time.time()
 
                 with self.summary_writer.as_default():
-                    save_image_name = os.sep.join(
-                        [TEMP_FOLDER, "logs", self.architecture_name, self.model_name, self.now_string,
-                         "step_{:06d}.png".format(step + 1)])
-                    print(f"Previewing images generated at step {step + 1} (3 test + 3 train)...")
-                    image_data = self.preview_generated_images_during_training(examples, save_image_name, step + 1)
+                    save_image_name = os.sep.join([
+                        self.get_output_folder(),
+                        "step_{:06d},update_{:03d}.png".format(step + 1, (step + 1) // update_steps)
+                    ])
+                    print(f"Previewing images generated at step {step + 1} (train + test)...")
+                    image_data = self.preview_generated_images_during_training(examples_for_visualization,
+                                                                               save_image_name, step + 1)
                     image_data = io_utils.plot_to_image(image_data)
                     tf.summary.image(save_image_name, image_data, step=(step + 1) // update_steps, max_outputs=5)
 
-                if "show_discriminator_output" in callbacks:
-                    print("Showing discriminator output patches (2 test + 2 train)...")
-                    self.show_discriminated_images("test", 2)
-                    self.show_discriminated_images("train", 2)
+                # check if we need to generate images for evaluation (and do it only once)
+                if S2SModel.should_evaluate(callbacks):
+                    examples_for_evaluation = self.generate_images_for_evaluation(example_indices_for_evaluation)
+
+                # callbacks
+                if "debug_discriminator" in callbacks:
+                    print("Showing discriminator output patches (3 train + 3 test)...")
+                    self.show_discriminated_images(train_ds.unbatch(), "train", step + 1, 3)
+                    self.show_discriminated_images(test_ds.unbatch().shuffle(self.config.test_size), "test",
+                                                   step + 1, 3)
                 if "evaluate_l1" in callbacks:
-                    num_test_images = min(TEST_SIZE, 136)
                     print(f"Comparing L1 between generated images from train and test...", end="", flush=True)
-                    l1_train, l1_test = self.report_l1(step=(step + 1) // update_steps, num_images=num_test_images)
+                    l1_train, l1_test = self.report_l1(examples_for_evaluation, step=(step + 1) // update_steps)
                     print(f" L1: {l1_train:.5f} / {l1_test:.5f} (train/test)")
+                    self.update_training_metrics("l1", l1_test, step + 1, True)
+
                 if "evaluate_fid" in callbacks:
-                    num_test_images = min(TEST_SIZE, 136)
                     print(
-                        f"Calculating Fréchet Inception Distance at {(step + 1) / 1000}k with {num_test_images} examples...")
-                    train_fid, test_fid = self.report_fid(step=(step + 1) // update_steps, num_images=num_test_images)
-                    print(f"FID: {train_fid:.3f} / {test_fid:.3f} (train/test)")
+                        f"Calculating Fréchet Inception Distance at {(step + 1) / 1000}k with {num_test_images} "
+                        f"examples...")
+                    fid_train, fid_test = self.report_fid(examples_for_evaluation, step=(step + 1) // update_steps)
+                    print(f"FID: {fid_train:.3f} / {fid_test:.3f} (train/test)")
+                    self.update_training_metrics("fid", fid_test, step + 1, "evaluate_l1" not in callbacks)
 
                 print(f"Step: {(step + 1) / 1000}k")
                 if step - starting_step < steps - 1:
@@ -121,17 +189,24 @@ class S2SModel(ABC):
             if (step + 1) % 10 == 0 and step - starting_step < steps - 1:
                 print(".", end="", flush=True)
 
-            # saves a training checkpoint UPDATE_STEPS*5
-            if self.keep_checkpoint:
-                if (step + 1) % (update_steps * 5) == 0 or (step - starting_step + 1) == steps:
-                    self.checkpoint_manager.save()
+    def update_training_metrics(self, metric_name, value, step, should_save_checkpoint=False):
+        metric = self.training_metrics[metric_name]
+        if value < metric["best_value"]:
+            metric["best_value"].assign(value)
+            metric["step"].assign(step)
+            if should_save_checkpoint:
+                self.checkpoint_manager.save()
+
+    @staticmethod
+    def should_evaluate(callbacks):
+        return "evaluate_l1" in callbacks or "evaluate_fid" in callbacks
 
     @abstractmethod
-    def train_step(self, batch, step, UPDATE_STEPS):
+    def train_step(self, batch, step, update_steps):
         pass
 
     @abstractmethod
-    def select_examples_for_visualization(self, number_of_examples=6):
+    def select_examples_for_visualization(self, train_ds, test_ds):
         pass
 
     @abstractmethod
@@ -139,34 +214,38 @@ class S2SModel(ABC):
         pass
 
     @abstractmethod
-    def select_examples_for_evaluation(self, num_images, dataset):
+    def initialize_random_examples_for_evaluation(self, train_ds, test_ds, num_images):
+        pass
+
+    @abstractmethod
+    def generate_images_for_evaluation(self, example_indices_for_evaluation):
         pass
 
     @abstractmethod
     def evaluate_l1(self, real_images, fake_images):
         pass
 
-    def report_fid(self, num_images=TEST_SIZE, step=None):
-        train_real_images, train_fake_images = self.select_examples_for_evaluation(num_images, self.train_ds)
-        test_real_images, test_fake_images = self.select_examples_for_evaluation(num_images, self.test_ds)
-        train_value = fid.compare(train_real_images, train_fake_images)
-        test_value = fid.compare(test_real_images, test_fake_images)
+    def report_fid(self, examples_for_evaluation, step=None):
+        train_real_images, train_fake_images = examples_for_evaluation["train"]
+        test_real_images, test_fake_images = examples_for_evaluation["test"]
+        train_value = fid.compare(train_real_images.numpy(), train_fake_images.numpy())
+        test_value = fid.compare(test_real_images.numpy(), test_fake_images.numpy())
 
         if hasattr(self, "summary_writer") and step is not None:
             with self.summary_writer.as_default():
                 with tf.name_scope("fid"):
                     tf.summary.scalar("train", train_value, step=step,
-                                      description=f"Frechét Inception Distance using {num_images} images "
+                                      description=f"Fréchet Inception Distance using images "
                                                   f"from the TRAIN dataset")
                     tf.summary.scalar("test", test_value, step=step,
-                                      description=f"Frechét Inception Distance using {num_images} images "
+                                      description=f"Fréchet Inception Distance using images "
                                                   f"from the TEST dataset")
 
         return train_value, test_value
 
-    def report_l1(self, num_images=TEST_SIZE, step=None):
-        train_real_images, train_fake_images = self.select_examples_for_evaluation(num_images, self.train_ds)
-        test_real_images, test_fake_images = self.select_examples_for_evaluation(num_images, self.test_ds)
+    def report_l1(self, examples_for_evaluation, step=None):
+        train_real_images, train_fake_images = examples_for_evaluation["train"]
+        test_real_images, test_fake_images = examples_for_evaluation["test"]
         train_value = self.evaluate_l1(train_real_images, train_fake_images)
         test_value = self.evaluate_l1(test_real_images, test_fake_images)
 
@@ -180,67 +259,39 @@ class S2SModel(ABC):
 
         return train_value, test_value
 
-    def save_generator(self):
-        py_model_path = os.sep.join([TEMP_FOLDER, "models", "py", "generator", self.architecture_name, self.model_name])
+    def restore_best_generator(self):
+        self.checkpoint_manager.restore_or_initialize()
 
+    def save_generator(self):
+        py_model_path = self.get_output_folder(["models", "py", "generator"], True)
         io_utils.delete_folder(py_model_path)
         io_utils.ensure_folder_structure(py_model_path)
 
         self.generator.save(py_model_path)
+        self.save_model_description(py_model_path)
 
     def load_generator(self):
-        self.generator = tf.keras.models.load_model(
-            os.sep.join(["models", "py", "generator", self.architecture_name, self.model_name]))
-
-    def save_discriminator(self):
-        py_model_path = os.sep.join(["models", "py", "discriminator", self.architecture_name, self.model_name])
-
-        io_utils.delete_folder(py_model_path)
-        io_utils.ensure_folder_structure(py_model_path)
-
-        self.discriminator.save(py_model_path)
-
-    def load_discriminator(self):
-        self.discriminator = tf.keras.models.load_model(
-            os.sep.join(["models", "py", "discriminator", self.architecture_name, self.model_name]))
-
-    def generate_images_from_dataset(self, dataset_name="test", num_images=None, steps=None):
-        is_test = dataset_name == "test"
-
-        if num_images is None:
-            num_images = TEST_SIZE if is_test else TRAIN_SIZE
-        num_images = min(num_images, TEST_SIZE if is_test else TRAIN_SIZE)
-
-        dataset = self.test_ds if is_test else self.train_ds
-        dataset = list(dataset.unbatch().take(num_images).batch(1).as_numpy_iterator())
-
-        base_image_path = os.sep.join([TEMP_FOLDER, "generated-images", self.architecture_name, self.model_name])
-
-        io_utils.delete_folder(base_image_path)
-        io_utils.ensure_folder_structure(base_image_path)
-
-        for i, images in enumerate(dataset):
-            image_path = os.sep.join([base_image_path, f"{i}.png"])
-            fig = self.preview_generated_images_during_training([images], image_path, steps)
-            plt.close(fig)
-
-        print(f"Generated {i + 1} images (using \"{dataset_name}\" dataset)")
+        py_model_path = self.get_output_folder(["models", "py", "generator"], True)
+        self.generator = tf.keras.models.load_model(py_model_path)
 
     @abstractmethod
-    def debug_discriminator_patches(self, batch_of_one):
+    def generate_images_from_dataset(self, dataset, num_images=None):
         pass
 
-    def show_discriminated_images(self, dataset_name="test", num_images=2):
-        is_test = dataset_name == "test"
+    @abstractmethod
+    def debug_discriminator_patches(self, batch, image_path):
+        pass
 
+    def show_discriminated_images(self, dataset, ds_name, step, num_images=3):
         if num_images is None:
-            num_images = min(num_images, TEST_SIZE if is_test else TRAIN_SIZE)
+            num_images = dataset.cardinality()
 
-        dataset = self.test_ds if is_test else self.train_ds
-        dataset = list(dataset.unbatch().take(num_images).batch(1).as_numpy_iterator())
+        base_path = self.get_output_folder("discriminated-images")
+        image_path = os.sep.join([base_path, f"discriminated_{ds_name}_at_step_{step}.png"])
+        io_utils.ensure_folder_structure(base_path)
 
-        for images in dataset:
-            self.debug_discriminator_patches(images)
+        batch = list(dataset.take(num_images).as_numpy_iterator())
+        self.debug_discriminator_patches(batch, image_path)
 
     @staticmethod
     def create_layout_summary():
@@ -276,3 +327,11 @@ class S2SModel(ABC):
                 ]
             )
         )
+
+    @abstractmethod
+    def create_discriminator(self):
+        pass
+
+    @abstractmethod
+    def create_generator(self):
+        pass
