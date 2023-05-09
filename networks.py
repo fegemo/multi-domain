@@ -2,6 +2,8 @@ import tensorflow as tf
 from tensorflow.keras import layers
 from tensorflow_addons import layers as tfalayers
 
+import keras_utils
+
 
 def resblock(x, filters, kernel_size, init):
     original_x = x
@@ -50,8 +52,13 @@ def stargan_resnet_discriminator(number_of_domains, image_size, output_channels)
 def stargan_resnet_generator(image_size, output_channels, number_of_domains):
     init = tf.random_normal_initializer(0., 0.02)
 
-    source_image = layers.Input(shape=[image_size, image_size, output_channels + number_of_domains])
-    x = source_image
+    source_image_input = layers.Input(shape=[image_size, image_size, output_channels], name="source_image")
+    target_domain_input = layers.Input(shape=[1], name="target_domain")
+    target_domain = layers.CategoryEncoding(num_tokens=number_of_domains, output_mode="one_hot")(target_domain_input)
+    target_domain = keras_utils.TileLayer(image_size)(target_domain)
+    target_domain = keras_utils.TileLayer(image_size)(target_domain)
+
+    x = layers.Concatenate(axis=-1)([source_image_input, target_domain])
 
     filters = 64
     x = layers.Conv2D(filters, kernel_size=7, strides=1, padding="same", kernel_initializer=init, use_bias=False)(x)
@@ -81,4 +88,4 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains):
                       use_bias=False)(x)
     activation = layers.Activation("tanh", name="generated_image")(x)
 
-    return tf.keras.Model(inputs=source_image, outputs=activation, name="StarGANGenerator")
+    return tf.keras.Model(inputs=[source_image_input, target_domain_input], outputs=activation, name="StarGANGenerator")

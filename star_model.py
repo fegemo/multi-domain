@@ -96,6 +96,7 @@ class UnpairedStarGANModel(S2SModel):
 
     @tf.function
     def train_step(self, batch, step, update_steps):
+        number_of_domains = self.config.number_of_domains
         batch_size = tf.shape(batch[0])[0]
 
         # back, left, front, right for pixel-sides
@@ -105,13 +106,13 @@ class UnpairedStarGANModel(S2SModel):
         # ==========================
         #
         # 1. select a random source domain with a random target
-        random_input, real_domain, real_image, target_domain = self.sampler.sample(domain_images)
+        real_domain, real_image, target_domain = self.sampler.sample(domain_images)
 
         # 2. calculate gradient penalty as we're using wgan-gp to train
         gp_epsilon = tf.random.uniform(shape=[batch_size, 1, 1, 1], minval=0, maxval=1)
         with tf.GradientTape() as disc_tape:
             with tf.GradientTape() as gp_tape:
-                fake_image = self.generator(random_input, training=True)
+                fake_image = self.generator([real_image, target_domain], training=True)
                 fake_image_mixed = gp_epsilon * real_image + (1 - gp_epsilon) * fake_image
                 fake_mixed_predicted, _ = self.discriminator(fake_image_mixed, training=True)
 
@@ -125,7 +126,8 @@ class UnpairedStarGANModel(S2SModel):
             real_predicted_patches, real_predicted_domain = self.discriminator(real_image, training=True)
             fake_predicted_patches, fake_predicted_domain = self.discriminator(fake_image, training=True)
 
-            c_loss = self.discriminator_loss(real_predicted_patches, real_predicted_domain, real_domain,
+            c_loss = self.discriminator_loss(real_predicted_patches, real_predicted_domain,
+                                             tf.one_hot(real_domain, number_of_domains),
                                              fake_predicted_patches, gradient_penalty)
             critic_total_loss, critic_real_loss, critic_fake_loss, critic_real_domain_loss, gp_regularization = c_loss
 
@@ -155,16 +157,16 @@ class UnpairedStarGANModel(S2SModel):
             # random_input, real_domain, real_image = self.select_random_input(domain_images)
             with tf.GradientTape() as gen_tape:
                 # 2. feed forward the generator and critic
-                fake_image = self.generator(random_input, training=True)
+                fake_image = self.generator([real_image, target_domain], training=True)
                 fake_predicted_patches, fake_predicted_domain = self.discriminator(fake_image, training=True)
 
                 # 3. reconstruct the image to the original domain
-                reconstruction_input = self.sampler.concat_image_and_domain(fake_image, real_domain)
-                reconstructed_image = self.generator(reconstruction_input, training=True)
+                recreated_image = self.generator([fake_image, real_domain], training=True)
 
                 # 4. calculate the loss
-                g_loss = self.generator_loss(fake_predicted_patches, fake_predicted_domain, target_domain, real_image,
-                                             reconstructed_image)
+                g_loss = self.generator_loss(fake_predicted_patches, fake_predicted_domain,
+                                             tf.one_hot(target_domain, number_of_domains),
+                                             real_image, recreated_image)
                 generator_total_loss, generator_adversarial_loss, generator_domain_loss, \
                     generator_reconstruction_loss = g_loss
 
@@ -196,16 +198,13 @@ class UnpairedStarGANModel(S2SModel):
             source_image, source_domain, target_image, target_domain = example
             target_domain_name = self.config.domains[target_domain]
 
-            source_domain = tf.one_hot(tf.constant(source_domain)[tf.newaxis, ...], self.config.number_of_domains)
-            target_domain = tf.one_hot(tf.constant(target_domain)[tf.newaxis, ...], self.config.number_of_domains)
+            source_domain = tf.expand_dims(source_domain, 0)
+            target_domain = tf.expand_dims(target_domain, 0)
+            source_image = tf.expand_dims(source_image, 0)
+            generated_image = self.generator([source_image, target_domain], training=True)
+            recreated_image = self.generator([generated_image, source_domain[tf.newaxis, ...]], training=True)
 
-            image_and_label = self.sampler.concat_image_and_domain(source_image[tf.newaxis, ...], target_domain)
-            generated_image = self.generator(image_and_label, training=True)
-
-            image_and_label = self.sampler.concat_image_and_domain(generated_image, source_domain)
-            reconstructed_image = self.generator(image_and_label, training=True)
-
-            images = [source_image, target_image, generated_image[0], reconstructed_image[0]]
+            images = [source_image[0], target_image, generated_image[0], recreated_image[0]]
             for j in range(num_columns):
                 idx = i * num_columns + j + 1
                 plt.subplot(num_images, num_columns, idx)
@@ -246,9 +245,7 @@ class UnpairedStarGANModel(S2SModel):
             source_images = tf.gather(domain_images, random_source_indices)
             target_images = tf.gather(domain_images, random_target_indices)
 
-            target_domains_one_hot = tf.one_hot(random_target_indices, number_of_domains)
-            images_and_domains = self.sampler.concat_image_and_domain(source_images, target_domains_one_hot)
-            return target_images, images_and_domains
+            return target_images, source_images, random_target_indices
 
         return dict({
             "train": initialize_random_examples_from_dataset(train_ds),
@@ -259,9 +256,9 @@ class UnpairedStarGANModel(S2SModel):
         generator = self.generator
 
         def generate_images_from_dataset(dataset_name):
-            real_images, generator_input = example_indices_for_evaluation[dataset_name]
-            fake_images = generator(generator_input, training=True)
-            return real_images, fake_images
+            target_images, source_images, target_domains = example_indices_for_evaluation[dataset_name]
+            fake_images = generator([source_images, target_domains], training=True)
+            return target_images, fake_images
 
         return dict({
             "train": generate_images_from_dataset("train"),
@@ -278,10 +275,7 @@ class UnpairedStarGANModel(S2SModel):
         target_indices = tf.random.uniform(shape=[batch_size], minval=0, maxval=number_of_domains, dtype="int32")
         source_images = tf.gather(domain_images, source_indices, batch_dims=1)
         target_images = tf.gather(domain_images, target_indices, batch_dims=1)
-        target_domains = tf.one_hot(target_indices, number_of_domains)
-        generator_input = self.sampler.concat_image_and_domain(source_images, target_domains)
-
-        fake_images = self.generator(generator_input, training=True)
+        fake_images = self.generator([source_images, target_indices], training=True)
 
         real_predicted_patches, real_predicted_domain = self.discriminator(target_images)
         fake_predicted_patches, fake_predicted_domain = self.discriminator(fake_images)
@@ -387,10 +381,9 @@ class UnpairedStarGANModel(S2SModel):
                     if source_index == target_index:
                         image = source_image
                     else:
-                        target_domain = tf.one_hot(tf.constant(target_index)[tf.newaxis, ...], number_of_domains)
-                        image_and_label = self.sampler.concat_image_and_domain(source_image[tf.newaxis, ...],
-                                                                               target_domain)
-                        generated_image = self.generator(image_and_label, training=True)
+                        source_input = tf.expand_dims(source_image, 0)
+                        target_domain = tf.expand_dims(target_index, 0)
+                        generated_image = self.generator([source_input, target_domain], training=True)
                         image = generated_image
                     plt.imshow(tf.squeeze(image) * 0.5 + 0.5)
                     plt.axis("off")
@@ -408,17 +401,6 @@ class ExampleSampler(ABC):
     def sample(self, batch):
         pass
 
-    # def domain_index_one_hot(self, domain_index):
-    #     number_of_domains = self.config.number_of_domains
-    #     domain_one_hot = tf.one_hot(domain_index, number_of_domains, dtype="int32")
-    #     return domain_one_hot
-
-    def concat_image_and_domain(self, image, domain_one_hot_batched):
-        image_size = self.config.image_size
-        domain_one_hot_batched = domain_one_hot_batched[:, tf.newaxis, tf.newaxis, :]
-        domain_as_channels = tf.tile(tf.cast(domain_one_hot_batched, "float32"), [1, image_size, image_size, 1])
-        return tf.concat([image, domain_as_channels], axis=-1)
-
 
 class SingleTargetSampler(ExampleSampler):
     def __init__(self, config):
@@ -429,18 +411,13 @@ class SingleTargetSampler(ExampleSampler):
         number_of_domains, batch_size = batch_shape[0], batch_shape[1]
 
         random_source_index = tf.random.uniform(shape=[], dtype="int32", minval=0, maxval=number_of_domains)
-        random_source_index = tf.tile(random_source_index[tf.newaxis, ...], [batch_size,])
+        random_source_index = tf.tile(random_source_index[tf.newaxis, ...], [batch_size, ])
         transposed_batch = tf.transpose(batch, [1, 0, 2, 3, 4])
         random_source_image = tf.gather(transposed_batch, random_source_index, axis=1, batch_dims=1)
-
-        random_source_index = tf.one_hot(random_source_index, number_of_domains, dtype="int32")
         random_target_index = tf.random.uniform(shape=[], dtype="int32", minval=0, maxval=number_of_domains)
-        random_target_index = tf.tile(random_target_index[tf.newaxis, ...], [batch_size,])
-        random_target_index = tf.one_hot(random_target_index, number_of_domains, dtype="int32")
+        random_target_index = tf.tile(random_target_index[tf.newaxis, ...], [batch_size, ])
 
-        image_and_domain = self.concat_image_and_domain(random_source_image, random_target_index)
-
-        return image_and_domain, random_source_index, random_source_image, random_target_index
+        return random_source_index, random_source_image, random_target_index
 
 
 class MultiTargetSampler(ExampleSampler):
@@ -454,11 +431,6 @@ class MultiTargetSampler(ExampleSampler):
         random_source_index = tf.random.uniform(shape=[batch_size], dtype="int32", minval=0, maxval=number_of_domains)
         transposed_batch = tf.transpose(batch, [1, 0, 2, 3, 4])
         random_source_image = tf.gather(transposed_batch, random_source_index, axis=1, batch_dims=1)
-
-        random_source_index = tf.one_hot(random_source_index, number_of_domains, dtype="int32")
         random_target_index = tf.random.uniform(shape=[batch_size], dtype="int32", minval=0, maxval=number_of_domains)
-        random_target_index = tf.one_hot(random_target_index, number_of_domains, dtype="int32")
 
-        image_and_domain = self.concat_image_and_domain(random_source_image, random_target_index)
-
-        return image_and_domain, random_source_index, random_source_image, random_target_index
+        return random_source_index, random_source_image, random_target_index
