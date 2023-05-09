@@ -9,10 +9,10 @@ from configuration import OptionParser
 from star_model import UnpairedStarGANModel
 import setup
 
-options, parser = OptionParser().parse(sys.argv[1:], True)
+config, parser = OptionParser().parse(sys.argv[1:], True)
 print("Running with options:", parser.get_description(", ", ":"))
-if options.verbose:
-    print("Running with options: ", options)
+if config.verbose:
+    print("Running with options: ", config)
     print("Tensorflow version: ", tf.__version__)
 
     if tf.test.gpu_device_name():
@@ -21,17 +21,17 @@ if options.verbose:
         print("Not using a GPU - it will take long!!")
 
 # check if datasets need unzipping
-if options.verbose:
-    print("Datasets used: ", options.datasets_used)
-setup.ensure_datasets(options.verbose)
+if config.verbose:
+    print("Datasets used: ", config.datasets_used)
+setup.ensure_datasets(config.verbose)
 
 # setting the seed
-if options.verbose:
-    print("SEED set to: ", options.seed)
-tf.random.set_seed(options.seed)
+if config.verbose:
+    print("SEED set to: ", config.seed)
+tf.random.set_seed(config.seed)
 
 # loading the dataset according to the required model
-train_ds, test_ds = load_multi_domain_ds(options)
+train_ds, test_ds = load_multi_domain_ds(config)
 
 # previews one batch of images from the test dataset
 # sample_batch = next(iter(test_ds))
@@ -53,9 +53,9 @@ train_ds, test_ds = load_multi_domain_ds(options)
 # instantiates the proper model
 # architecture_name = f"{options.source}-to-{options.target}"
 
-model = UnpairedStarGANModel(options)
+model = UnpairedStarGANModel(config)
 model.save_model_description(model.get_output_folder())
-if options.verbose:
+if config.verbose:
     model.discriminator.summary()
     model.generator.summary()
 parser.save_configuration(model.get_output_folder())
@@ -83,17 +83,17 @@ parser.save_configuration(model.get_output_folder())
 # plt.show()
 
 # configuration for training
-steps = ceil(options.train_size / options.batch) * options.epochs
+steps = ceil(config.train_size / config.batch) * config.epochs
 update_steps = steps // 40
 
 print(
-    f"Starting training for {options.epochs} epochs in {steps} steps, updating visualization every "
+    f"Starting training for {config.epochs} epochs in {steps} steps, updating visualization every "
     f"{update_steps} steps...")
 
 # starting training
 callbacks = [c[len("callback_"):] for c in ["callback_debug_discriminator", "callback_evaluate_fid",
                                             "callback_evaluate_l1"] if
-             getattr(options, c)]
+             getattr(config, c)]
 
 # tf.random.set_seed(11)
 # image_and_domain, random_source_index, random_source_image, random_target_index = model.select_random_input(next(iter(train_ds)), 4)
@@ -109,7 +109,7 @@ model.restore_best_generator()
 # generating resulting images
 model.generate_images_from_dataset(test_ds)
 
-if options.save_model:
+if config.save_model:
     print(f"Saving the generator...")
     model.save_generator()
 

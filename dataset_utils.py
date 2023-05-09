@@ -1,7 +1,8 @@
+import os
+
 import tensorflow as tf
 
 import io_utils
-from configuration import *
 
 
 # Some images have transparent pixels with colors other than black
@@ -10,7 +11,7 @@ from configuration import *
 # The TFJS imported model was having bad inference because of this
 def blacken_transparent_pixels(image):
     mask = tf.math.equal(image[:, :, 3], 0)
-    repeated_mask = tf.repeat(mask, INPUT_CHANNELS)
+    repeated_mask = tf.repeat(mask, 4)
     condition = tf.reshape(repeated_mask, image.shape)
 
     image = tf.where(
@@ -23,7 +24,7 @@ def blacken_transparent_pixels(image):
 # replaces the alpha channel with a white color (only 100% transparent pixels)
 def replace_alpha_with_white(image):
     mask = tf.math.equal(image[:, :, 3], 0)
-    repeated_mask = tf.repeat(mask, INPUT_CHANNELS)
+    repeated_mask = tf.repeat(mask, 4)
     condition = tf.reshape(repeated_mask, image.shape)
 
     image = tf.where(
@@ -63,13 +64,15 @@ def denormalize(image):
 # loads an image from the file system and transforms it for the network:
 # (a) casts to float, (b) ensures transparent pixels are black-transparent, and (c)
 # puts the values in the range of [-1, 1]
-def load_image(path, should_normalize=True):
+def load_image(path, image_size, input_channels, should_normalize=True):
+    image = None
     try:
         image = tf.io.read_file(path)
-        image = tf.image.decode_png(image, channels=INPUT_CHANNELS)
-        image = tf.reshape(image, (IMG_SIZE, IMG_SIZE, INPUT_CHANNELS))
+        image = tf.image.decode_png(image, channels=input_channels)
+        image = tf.reshape(image, [image_size, image_size, input_channels])
         image = tf.cast(image, "float32")
-        image = blacken_transparent_pixels(image)
+        if input_channels == 4:
+            image = blacken_transparent_pixels(image)
         if should_normalize:
             image = normalize(image)
     except UnicodeDecodeError:
@@ -134,94 +137,23 @@ def create_augmentation_with_prob(prob=0.8, should_augment_hue=True, should_augm
     return augmentation_wrapper
 
 
-def create_rgba_image_loader(sprite_side_source, sprite_side_target, dataset_sizes, train_or_test_folder):
-    """
-    Returns a function which takes an integer in the range of [0, DATASET_SIZE-1] and loads some image file
-    from the corresponding dataset (using image_number and DATASET_SIZES to decide).
-    """
-
-    def load_images(image_number):
-        image_number = tf.cast(image_number, "int32")
-
-        # finds the dataset index and image number considering the param is an int
-        # in an imaginary concatenated array of all datasets
-        dataset_index = tf.constant(0, dtype="int32")
-
-        def condition(which_image, which_dataset): return which_image >= tf.gather(
-            dataset_sizes, which_dataset)
-
-        def body(which_image, which_dataset): return [which_image - tf.gather(dataset_sizes, which_dataset),
-                                                      which_dataset + 1]
-
-        image_number, dataset_index = tf.while_loop(
-            condition, body, [image_number, dataset_index])
-
-        # gets the string pointing to the correct images
-        dataset = tf.gather(DATA_FOLDERS, dataset_index)
-        image_number = tf.strings.as_string(image_number)
-
-        # loads and transforms the images according to how the generator and discriminator expect them to be
-        input_image = load_image(tf.strings.join(
-            [dataset, os.sep, train_or_test_folder, os.sep, DOMAIN_FOLDERS[sprite_side_source], os.sep, image_number,
-             ".png"]), False)
-        real_image = load_image(tf.strings.join(
-            [dataset, os.sep, train_or_test_folder, os.sep, DOMAIN_FOLDERS[sprite_side_target], os.sep, image_number,
-             ".png"]), False)
-
-        return input_image, real_image
-
-    return load_images
-
-
-def create_rgba_image_loader(sprite_side_source, sprite_side_target, dataset_sizes, train_or_test_folder):
-    """
-    Returns a function which takes an integer in the range of [0, DATASET_SIZE-1] and loads some image file
-    from the corresponding dataset (using image_number and DATASET_SIZES to decide).
-    """
-
-    def load_images(image_number):
-        image_number = tf.cast(image_number, "int32")
-
-        # finds the dataset index and image number considering the param is an int
-        # in an imaginary concatenated array of all datasets
-        dataset_index = tf.constant(0, dtype="int32")
-
-        def condition(which_image, which_dataset): return which_image >= tf.gather(
-            dataset_sizes, which_dataset)
-
-        def body(which_image, which_dataset): return [which_image - tf.gather(dataset_sizes, which_dataset),
-                                                      which_dataset + 1]
-
-        image_number, dataset_index = tf.while_loop(
-            condition, body, [image_number, dataset_index])
-
-        # gets the string pointing to the correct images
-        dataset = tf.gather(DATA_FOLDERS, dataset_index)
-        image_number = tf.strings.as_string(image_number)
-
-        # loads and transforms the images according to how the generator and discriminator expect them to be
-        input_image = load_image(tf.strings.join(
-            [dataset, os.sep, train_or_test_folder, os.sep, DOMAIN_FOLDERS[sprite_side_source], os.sep, image_number,
-             ".png"]), False)
-        real_image = load_image(tf.strings.join(
-            [dataset, os.sep, train_or_test_folder, os.sep, DOMAIN_FOLDERS[sprite_side_target], os.sep, image_number,
-             ".png"]), False)
-
-        return input_image, real_image
-
-    return load_images
-
-
-def create_multi_domain_image_loader(domains, dataset_sizes, train_or_test_folder):
+def create_multi_domain_image_loader(config, train_or_test_folder):
     """
     Creates an image loader for the datasets (as configured in configuration.py) in such a way that
     all directions of the same character are grouped together.
     """
 
+    domains = config.domains
+    domain_folders = config.domain_folders
+    data_folders = config.data_folders
+    dataset_sizes = config.dataset_sizes
+    image_size = config.image_size
+    input_channels = config.input_channels
+
     def load_single_image(dataset, side_index, image_number):
         path = tf.strings.join(
-            [dataset, train_or_test_folder, tf.gather(DOMAIN_FOLDERS, side_index), image_number + ".png"], os.sep)
-        image = load_image(path, False)
+            [dataset, train_or_test_folder, tf.gather(domain_folders, side_index), image_number + ".png"], os.sep)
+        image = load_image(path, image_size, input_channels, False)
         return image
 
     @tf.function
@@ -235,7 +167,7 @@ def create_multi_domain_image_loader(domains, dataset_sizes, train_or_test_folde
         image_number, dataset_index = tf.while_loop(condition, body, [image_number, dataset_index])
 
         # gets the string pointing to the correct images
-        dataset = tf.gather(DATA_FOLDERS, dataset_index)
+        dataset = tf.gather(data_folders, dataset_index)
         image_number = tf.strings.as_string(image_number)
 
         # loads all images and return them
@@ -245,38 +177,35 @@ def create_multi_domain_image_loader(domains, dataset_sizes, train_or_test_folde
     return load_images
 
 
-def load_multi_domain_ds(options):
-    domains = options.domains
-    should_augment_hue = not options.no_hue
-    should_augment_translation = not options.no_tran
-    train_size = options.train_size
-    test_size = options.test_size
-    train_sizes = options.train_sizes
-    test_sizes = options.test_sizes
-    batch_size = options.batch
+def load_multi_domain_ds(config):
+    should_augment_hue = not config.no_hue
+    should_augment_translation = not config.no_tran
+    train_size = config.train_size
+    test_size = config.test_size
+    batch_size = config.batch
 
-    train_dataset = tf.data.Dataset.range(train_size).shuffle(train_size)
-    test_dataset = tf.data.Dataset.range(test_size)
+    train_ds = tf.data.Dataset.range(train_size).shuffle(train_size)
+    test_ds = tf.data.Dataset.range(test_size)
 
-    train_dataset = train_dataset \
-        .map(create_multi_domain_image_loader(domains, train_sizes, "train"),
+    train_ds = train_ds \
+        .map(create_multi_domain_image_loader(config, "train"),
              num_parallel_calls=tf.data.AUTOTUNE)
 
     should_augment = should_augment_hue or should_augment_translation
     if should_augment:
-        train_dataset = train_dataset \
+        train_ds = train_ds \
             .map(create_augmentation_with_prob(0.8, should_augment_hue, should_augment_translation),
                  num_parallel_calls=tf.data.AUTOTUNE)
 
-    train_dataset = train_dataset \
+    train_ds = train_ds \
         .map(normalize_all, num_parallel_calls=tf.data.AUTOTUNE) \
         .batch(batch_size)
 
-    test_dataset = test_dataset.map(create_multi_domain_image_loader(domains, test_sizes, "test"),
-                                    num_parallel_calls=tf.data.AUTOTUNE) \
+    test_ds = test_ds.map(create_multi_domain_image_loader(config, "test"),
+                          num_parallel_calls=tf.data.AUTOTUNE) \
         .map(normalize_all, num_parallel_calls=tf.data.AUTOTUNE) \
         .batch(batch_size)
-    return train_dataset, test_dataset
+    return train_ds, test_ds
 
 # def create_collaborative_image_loader(dataset_sizes, train_or_test_folder, should_normalize=True,
 #                                       input_dropout=[1, 2, 3]):

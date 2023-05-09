@@ -1,9 +1,8 @@
+import os
 import shutil
 import io
 import tensorflow as tf
 from matplotlib import pyplot as plt
-
-from configuration import *
 
 
 def ensure_folder_structure(*folders):
@@ -104,7 +103,7 @@ def indexed_to_rgba(indexed_image, palette):
     return image_rgb
 
 
-def plot_to_image(matplotlib_figure, channels=OUTPUT_CHANNELS):
+def plot_to_image(matplotlib_figure, channels):
     """Converts the matplotlib plot specified by 'figure' to a PNG image and
     returns it. The supplied figure is closed and inaccessible after this call."""
     # Save the plot to a PNG in memory.

@@ -7,33 +7,8 @@ from math import ceil
 SEED = 42
 
 DATASET_NAMES = ["tiny-hero", "rpg-maker-2000", "rpg-maker-xp", "rpg-maker-vxace", "miscellaneous"]
-DATA_FOLDERS = [
-    os.sep.join(["datasets", folder])
-    for folder
-    in DATASET_NAMES
-]
-
 DOMAINS = ["back", "left", "front", "right"]
-DOMAIN_BACK = DOMAINS.index("back")  # 0
-DOMAIN_LEFT = DOMAINS.index("left")  # 1
-DOMAIN_FRONT = DOMAINS.index("front")  # 2
-DOMAIN_RIGHT = DOMAINS.index("right")  # 3
-# ["0-back", "1-left", "2-front", "3-right"]
-DOMAIN_FOLDERS = [f"{i}-{name}" for i, name in enumerate(DOMAINS)]
-
-DATASET_MASK = [1, 1, 1, 1, 1]
-DATASET_SIZES = [912, 216, 294, 408, 12372]
-DATASET_SIZES = [n * m for n, m in zip(DATASET_SIZES, DATASET_MASK)]
-
-DATASET_SIZE = sum(DATASET_SIZES)
 TRAIN_PERCENTAGE = 0.85
-TRAIN_SIZES = [ceil(n * TRAIN_PERCENTAGE) for n in DATASET_SIZES]
-TRAIN_SIZE = sum(TRAIN_SIZES)
-TEST_SIZES = [DATASET_SIZES[i] - TRAIN_SIZES[i]
-              for i, n in enumerate(DATASET_SIZES)]
-TEST_SIZE = sum(TEST_SIZES)
-
-BUFFER_SIZE = DATASET_SIZE
 BATCH_SIZE = 4
 
 IMG_SIZE = 64
@@ -180,42 +155,40 @@ class OptionParser(metaclass=SingletonMeta):
         setattr(self.values, "datasets_used", datasets_used)
         if len(datasets_used) == 0:
             raise Exception("No dataset was supplied with: --tiny, --rm2k, --rmxp, --rmvx, --misc")
+        setattr(self.values, "dataset_names", DATASET_NAMES)
+        setattr(self.values, "data_folders", [
+            os.sep.join(["datasets", folder])
+            for folder
+            in self.values.dataset_names
+        ])
+        setattr(self.values, "domain_folders", [f"{i}-{name}" for i, name in enumerate(self.values.domains)])
         setattr(self.values, "run_string", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
 
-        global DATASET_MASK
-        global DATASET_SIZES
-        global DATASET_SIZE
-        global TRAIN_SIZES
-        global TEST_SIZES
-        global TRAIN_SIZE
-        global TEST_SIZE
-        global BUFFER_SIZE
-
-        DATASET_MASK = list(
+        dataset_mask = list(
             map(lambda opt: 1 if getattr(self.values, opt) else 0, ["tiny", "rm2k", "rmxp", "rmvx", "misc"]))
-        DATASET_SIZES = [912, 216, 294, 408, 12372]
-        DATASET_SIZES = [n * m for n, m in zip(DATASET_SIZES, DATASET_MASK)]
-        DATASET_SIZE = sum(DATASET_SIZES)
-        TRAIN_SIZES = [ceil(n * TRAIN_PERCENTAGE) for n in DATASET_SIZES]
-        TRAIN_SIZE = sum(TRAIN_SIZES)
-        TEST_SIZES = [DATASET_SIZES[i] - TRAIN_SIZES[i]
-                      for i, n in enumerate(DATASET_SIZES)]
+        dataset_sizes = [912, 216, 294, 408, 12372]
+        dataset_sizes = [n * m for n, m in zip(dataset_sizes, dataset_mask)]
+        train_sizes = [ceil(n * TRAIN_PERCENTAGE) for n in dataset_sizes]
+        train_size = sum(train_sizes)
+        test_sizes = [dataset_sizes[i] - train_sizes[i]
+                      for i, n in enumerate(dataset_sizes)]
         if self.values.rmxp_validation:
-            TEST_SIZES = [0, 0, 44, 0, 0]
+            test_sizes = [0, 0, 44, 0, 0]
         elif self.values.rm2k_validation:
-            TEST_SIZES = [0, 32, 0, 0, 0]
+            test_sizes = [0, 32, 0, 0, 0]
         elif self.values.rmvx_validation:
-            TEST_SIZES = [0, 0, 0, 61, 0]
+            test_sizes = [0, 0, 0, 61, 0]
         elif self.values.tiny_validation:
-            TEST_SIZES = [136, 0, 0, 0, 0]
+            test_sizes = [136, 0, 0, 0, 0]
 
-        TEST_SIZE = sum(TEST_SIZES)
-        BUFFER_SIZE = DATASET_SIZE
+        test_size = sum(test_sizes)
 
-        setattr(self.values, "train_sizes", TRAIN_SIZES)
-        setattr(self.values, "train_size", TRAIN_SIZE)
-        setattr(self.values, "test_sizes", TEST_SIZES)
-        setattr(self.values, "test_size", TEST_SIZE)
+        setattr(self.values, "dataset_sizes", dataset_sizes)
+        setattr(self.values, "dataset_mask", dataset_mask)
+        setattr(self.values, "train_sizes", train_sizes)
+        setattr(self.values, "train_size", train_size)
+        setattr(self.values, "test_sizes", test_sizes)
+        setattr(self.values, "test_size", test_size)
         if return_parser:
             return self.values, self
         else:
@@ -243,11 +216,3 @@ def in_notebook():
     except AttributeError:
         return False
     return True
-
-
-# if not in_notebook():
-#     options = OptionParser([]).parse()
-#
-#     BATCH_SIZE = options.batch
-#     # MAX_PALETTE_SIZE = options.max_palette_size
-#     LOG_FOLDER = options.log_folder

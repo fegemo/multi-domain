@@ -154,7 +154,7 @@ class S2SModel(ABC):
                     print(f"Previewing images generated at step {step + 1} (train + test)...")
                     image_data = self.preview_generated_images_during_training(examples_for_visualization,
                                                                                save_image_name, step + 1)
-                    image_data = io_utils.plot_to_image(image_data)
+                    image_data = io_utils.plot_to_image(image_data, self.config.output_channels)
                     tf.summary.image(save_image_name, image_data, step=(step + 1) // update_steps, max_outputs=5)
 
                 # check if we need to generate images for evaluation (and do it only once)

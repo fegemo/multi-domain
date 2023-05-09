@@ -39,7 +39,7 @@ class UnpairedStarGANModel(S2SModel):
     def create_discriminator(self):
         config = self.config
         if config.discriminator == "resnet" or config.discriminator == "":
-            return stargan_resnet_discriminator(config.number_of_domains)
+            return stargan_resnet_discriminator(config.number_of_domains, config.image_size, config.output_channels)
         else:
             raise ValueError(f"The provided {config.discriminator} type for discriminator has not been implemented.")
 

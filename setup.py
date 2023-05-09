@@ -1,11 +1,14 @@
-from configuration import *
 import os
+import sys
 import zipfile
 from tqdm import tqdm
 
+from configuration import OptionParser
+
 
 def ensure_datasets(verbose=True):
-    for name, folder, mask in zip(DATASET_NAMES, DATA_FOLDERS, DATASET_MASK):
+    config = OptionParser().parse(sys.argv[1:])
+    for name, folder, mask in zip(config.dataset_names, config.data_folders, config.dataset_mask):
         if mask != 1:
             continue
 
