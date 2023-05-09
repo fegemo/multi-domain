@@ -1,12 +1,11 @@
+import os
 from abc import ABC, abstractmethod
 import tensorflow as tf
 from tensorboard.plugins.custom_scalar import layout_pb2, summary as cs_summary
 import time
 from IPython import display
-from collections.abc import Iterable
 
 import io_utils
-from configuration import *
 import frechet_inception_distance as fid
 from keras_utils import ConstantThenLinearDecay
 
@@ -53,7 +52,9 @@ class S2SModel(ABC):
             [tf.reduce_prod(v.get_shape()) for v in self.discriminator.trainable_weights])
         print(f"Generator: {self.generator.name} with {generator_params:,} parameters")
         print(f"Discriminator: {self.discriminator.name} with {discriminator_params:,} parameters")
+
         # initializes training checkpoint information
+        io_utils.ensure_folder_structure(self.checkpoint_dir)
         self.best_generator_checkpoint = tf.train.Checkpoint(generator=self.generator)
         self.checkpoint_manager = tf.train.CheckpointManager(
             self.best_generator_checkpoint, directory=self.checkpoint_dir, max_to_keep=1)
@@ -68,9 +69,9 @@ class S2SModel(ABC):
         if skip_run:
             folders.pop()
         if sub_folder is not None:
-            if not isinstance(sub_folder, Iterable):
+            if not isinstance(sub_folder, list):
                 sub_folder = [sub_folder]
-            folders.append(sub_folder)
+            folders += sub_folder
 
         return os.sep.join(folders)
 
@@ -122,8 +123,10 @@ class S2SModel(ABC):
             self.summary_writer.flush()
 
     def do_fit(self, train_ds, test_ds, steps, update_steps=1000, callbacks=[], starting_step=0):
-        num_test_images = min(TEST_SIZE, 136)
+        num_test_images = min(self.config.test_size, 136)
         examples_for_visualization = self.select_examples_for_visualization(train_ds, test_ds)
+        example_indices_for_evaluation = []
+        examples_for_evaluation = []
         if S2SModel.should_evaluate(callbacks):
             example_indices_for_evaluation = self.initialize_random_examples_for_evaluation(train_ds, test_ds,
                                                                                             num_test_images)
@@ -188,6 +191,10 @@ class S2SModel(ABC):
             # dot feedback for every 10 training steps
             if (step + 1) % 10 == 0 and step - starting_step < steps - 1:
                 print(".", end="", flush=True)
+
+        # if no evaluation callback was used, we save a single checkpoint with the end of the training
+        if not S2SModel.should_evaluate(callbacks):
+            self.checkpoint_manager.save()
 
     def update_training_metrics(self, metric_name, value, step, should_save_checkpoint=False):
         metric = self.training_metrics[metric_name]
