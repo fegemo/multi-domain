@@ -183,7 +183,7 @@ class S2SModel(ABC):
 
                 print(f"Step: {(step + 1) / 1000}k")
                 if step - starting_step < steps - 1:
-                    print("˯" * (update_steps // 10))
+                    print("_" * (update_steps // 10))
 
             # actually TRAIN
             self.train_step(batch, step, update_steps)

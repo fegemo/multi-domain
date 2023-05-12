@@ -18,6 +18,7 @@ OUTPUT_CHANNELS = 4
 LAMBDA_GP = 10.
 LAMBDA_DOMAIN = 1.
 LAMBDA_RECONSTRUCTION = 10.
+LAMBDA_L1 = 10.
 DISCRIMINATOR_STEPS = 5
 EPOCHS = 160
 LR_DECAY = "constant-then-linear"
@@ -107,7 +108,9 @@ class OptionParser(metaclass=SingletonMeta):
                                  help="value for λdomain used in stargan", default=LAMBDA_DOMAIN)
         self.parser.add_argument("--lambda-reconstruction", type=float,
                                  help="value for λreconstruction used in stargan", default=LAMBDA_RECONSTRUCTION)
-        self.parser.add_argument("--d-steps", type=float,
+        self.parser.add_argument("--lambda-l1", type=float, help="value for λl1 used in paired stargan",
+                                 default=LAMBDA_L1)
+        self.parser.add_argument("--d-steps", type=int,
                                  help="number of discriminator updates for each generator in stargan",
                                  default=DISCRIMINATOR_STEPS)
         self.parser.add_argument("--epochs", type=int, help="number of epochs to train", default=EPOCHS)
