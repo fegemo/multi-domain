@@ -15,10 +15,10 @@ if config.verbose:
     print("Running with options: ", config)
     print("Tensorflow version: ", tf.__version__)
 
-    if tf.test.gpu_device_name():
-        print("Default GPU: {}".format(tf.test.gpu_device_name()))
-    else:
-        print("Not using a GPU - it will take long!!")
+if tf.test.gpu_device_name():
+    print("Default GPU: {}".format(tf.test.gpu_device_name()))
+else:
+    print("Not using a GPU - it will take long!!")
 
 # check if datasets need unzipping
 if config.verbose:

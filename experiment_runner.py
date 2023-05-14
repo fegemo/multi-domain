@@ -171,7 +171,7 @@ class Experimenter:
         log_path = os.sep.join([self.output_path, f"{self.hash_checkpoint_name()}-{specific_params_string}-log.txt"])
         return open(log_path, "w", encoding="utf-8")
 
-    def lookup_start_and_total_runs(self, checkpoint_file) -> tuple[int, int]:
+    def lookup_start_and_total_runs(self, checkpoint_file):
         # the file should have the format like: 25 of 121
         tokens = next(checkpoint_file).split()
         completed, amount = int(tokens[0]), int(tokens[2])
