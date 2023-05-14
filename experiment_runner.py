@@ -14,7 +14,7 @@ from tqdm import tqdm
 import io_utils
 
 
-def dict_hash(dictionary: Dict[str, Any]) -> str:
+def dict_hash(dictionary):
     """MD5 hash of a dictionary."""
     dhash = hashlib.md5()
     encoded = json.dumps(dictionary, sort_keys=True).encode()
@@ -23,9 +23,7 @@ def dict_hash(dictionary: Dict[str, Any]) -> str:
 
 
 class Experimenter:
-    def __init__(self, script_to_run, path_to_python,
-                 default_params: Dict[str, Union[list[Any], Any]],
-                 search_grid: Dict[str, list[Any]]):
+    def __init__(self, script_to_run, path_to_python, default_params, search_grid):
         self.path_to_python = path_to_python
         self.script_to_run = script_to_run
         self.output_path = default_params["log-folder"]
