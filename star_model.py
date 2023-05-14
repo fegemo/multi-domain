@@ -43,26 +43,31 @@ class UnpairedStarGANModel(S2SModel):
         else:
             raise ValueError(f"The provided {config.discriminator} type for discriminator has not been implemented.")
 
-    def generator_loss(self, critic_fake_patches, critic_fake_domain, fake_domain, real_image, reconstructed_image):
-        fake_loss = -tf.reduce_mean(critic_fake_patches)
-        fake_domain_loss = tf.reduce_mean(self.domain_classification_loss(fake_domain, critic_fake_domain))
-        reconstruction_loss = tf.reduce_mean(tf.abs(real_image - reconstructed_image))
+    # def generator_loss(self, critic_fake_patches, critic_fake_domain, fake_domain, real_image, reconstructed_image):
+    def generator_loss(self, critic_fake_patches, critic_fake_domain, fake_domain, real_image, recreated_image,
+                       fake_image, source_image):
+        adversarial_loss = -tf.reduce_mean(critic_fake_patches)
+        domain_loss = tf.reduce_mean(self.domain_classification_loss(fake_domain, critic_fake_domain))
+        recreation_loss = tf.reduce_mean(tf.abs(real_image - recreated_image))
 
-        total_loss = fake_loss + \
-                     self.lambda_domain * fake_domain_loss + \
-                     self.lambda_reconstruction * reconstruction_loss
-        return total_loss, fake_loss, fake_domain_loss, reconstruction_loss
+        total_loss = adversarial_loss + \
+                     self.lambda_domain * domain_loss + \
+                     self.lambda_reconstruction * recreation_loss
+
+        return {"total": total_loss, "adversarial": adversarial_loss, "domain": domain_loss,
+                "recreation": recreation_loss}
 
     def discriminator_loss(self, critic_real_patches, critic_real_domain, real_domain, critic_fake_patches,
                            gradient_penalty):
         real_loss = -tf.reduce_mean(critic_real_patches)
         fake_loss = tf.reduce_mean(critic_fake_patches)
-        real_domain_loss = tf.reduce_mean(self.domain_classification_loss(real_domain, critic_real_domain))
+        domain_loss = tf.reduce_mean(self.domain_classification_loss(real_domain, critic_real_domain))
 
         total_loss = fake_loss + real_loss + \
-                     self.lambda_domain * real_domain_loss + \
+                     self.lambda_domain * domain_loss + \
                      self.lambda_gp * gradient_penalty
-        return total_loss, real_loss, fake_loss, real_domain_loss, gradient_penalty
+        return {"total": total_loss, "real": real_loss, "fake": fake_loss, "domain": domain_loss,
+                "gp": gradient_penalty}
 
     def select_examples_for_visualization(self, train_ds, test_ds):
         number_of_domains = self.config.number_of_domains
@@ -106,14 +111,14 @@ class UnpairedStarGANModel(S2SModel):
         # ==========================
         #
         # 1. select a random source domain with a random target
-        real_domain, real_image, target_domain = self.sampler.sample(domain_images)
+        source_domain, source_image, target_domain = self.sampler.sample(domain_images)
 
         # 2. calculate gradient penalty as we're using wgan-gp to train
         gp_epsilon = tf.random.uniform(shape=[batch_size, 1, 1, 1], minval=0, maxval=1)
         with tf.GradientTape() as disc_tape:
             with tf.GradientTape() as gp_tape:
-                fake_image = self.generator([real_image, target_domain], training=True)
-                fake_image_mixed = gp_epsilon * real_image + (1 - gp_epsilon) * fake_image
+                genned_image = self.generator([source_image, target_domain], training=True)
+                fake_image_mixed = gp_epsilon * source_image + (1 - gp_epsilon) * genned_image
                 fake_mixed_predicted, _ = self.discriminator(fake_image_mixed, training=True)
 
             # computing the gradient penalty from the wasserstein-gp GAN
@@ -123,26 +128,25 @@ class UnpairedStarGANModel(S2SModel):
 
             # 3. now we actually do a feed forward with real and fake to the critic and check the loss
             # passing real and fake images through the critic
-            real_predicted_patches, real_predicted_domain = self.discriminator(real_image, training=True)
-            fake_predicted_patches, fake_predicted_domain = self.discriminator(fake_image, training=True)
+            real_predicted_patches, real_predicted_domain = self.discriminator(source_image, training=True)
+            fake_predicted_patches, fake_predicted_domain = self.discriminator(genned_image, training=True)
 
             c_loss = self.discriminator_loss(real_predicted_patches, real_predicted_domain,
-                                             tf.one_hot(real_domain, number_of_domains),
+                                             tf.one_hot(source_domain, number_of_domains),
                                              fake_predicted_patches, gradient_penalty)
-            critic_total_loss, critic_real_loss, critic_fake_loss, critic_real_domain_loss, gp_regularization = c_loss
 
         # 4. apply the gradients to the critic weights
-        discriminator_gradients = disc_tape.gradient(critic_total_loss, self.discriminator.trainable_variables)
+        discriminator_gradients = disc_tape.gradient(c_loss["total"], self.discriminator.trainable_variables)
         self.discriminator_optimizer.apply_gradients(
             zip(discriminator_gradients, self.discriminator.trainable_variables))
 
         with tf.name_scope("discriminator"):
             with self.summary_writer.as_default():
-                tf.summary.scalar("total_loss", critic_total_loss, step=step // update_steps)
-                tf.summary.scalar("real_loss", critic_real_loss, step=step // update_steps)
-                tf.summary.scalar("fake_loss", critic_fake_loss, step=step // update_steps)
-                tf.summary.scalar("real_domain_loss", critic_real_domain_loss, step=step // update_steps)
-                tf.summary.scalar("gradient_penalty", gp_regularization, step=step // update_steps)
+                tf.summary.scalar("total_loss", c_loss["total"], step=step // update_steps)
+                tf.summary.scalar("real_loss", c_loss["real"], step=step // update_steps)
+                tf.summary.scalar("fake_loss", c_loss["fake"], step=step // update_steps)
+                tf.summary.scalar("real_domain_loss", c_loss["domain"], step=step // update_steps)
+                tf.summary.scalar("gradient_penalty", c_loss["gp"], step=step // update_steps)
 
         # TRAINING THE GENERATOR
         # ======================
@@ -157,29 +161,33 @@ class UnpairedStarGANModel(S2SModel):
             # random_input, real_domain, real_image = self.select_random_input(domain_images)
             with tf.GradientTape() as gen_tape:
                 # 2. feed forward the generator and critic
-                fake_image = self.generator([real_image, target_domain], training=True)
-                fake_predicted_patches, fake_predicted_domain = self.discriminator(fake_image, training=True)
+                genned_image = self.generator([source_image, target_domain], training=True)
+                fake_predicted_patches, fake_predicted_domain = self.discriminator(genned_image, training=True)
 
                 # 3. reconstruct the image to the original domain
-                recreated_image = self.generator([fake_image, real_domain], training=True)
+                remade_image = self.generator([genned_image, source_domain], training=True)
 
                 # 4. calculate the loss
                 g_loss = self.generator_loss(fake_predicted_patches, fake_predicted_domain,
                                              tf.one_hot(target_domain, number_of_domains),
-                                             real_image, recreated_image)
-                generator_total_loss, generator_adversarial_loss, generator_domain_loss, \
-                    generator_reconstruction_loss = g_loss
+                                             source_image, remade_image, genned_image, source_image)
 
             # 5. update the generator weights using the gradients
-            generator_gradients = gen_tape.gradient(generator_total_loss, self.generator.trainable_variables)
+            generator_gradients = gen_tape.gradient(g_loss["total"], self.generator.trainable_variables)
             self.generator_optimizer.apply_gradients(zip(generator_gradients, self.generator.trainable_variables))
 
             with tf.name_scope("generator"):
                 with self.summary_writer.as_default():
-                    tf.summary.scalar("total_loss", generator_total_loss, step=step // update_steps)
-                    tf.summary.scalar("adversarial_loss", generator_adversarial_loss, step=step // update_steps)
-                    tf.summary.scalar("domain_loss", generator_domain_loss, step=step // update_steps)
-                    tf.summary.scalar("reconstruction_loss", generator_reconstruction_loss, step=step // update_steps)
+                    tf.summary.scalar("total_loss", g_loss["total"], step=step // update_steps)
+                    tf.summary.scalar("adversarial_loss", g_loss["adversarial"], step=step // update_steps)
+                    tf.summary.scalar("domain_loss", g_loss["domain"], step=step // update_steps)
+                    tf.summary.scalar("recreation_loss", g_loss["recreation"], step=step // update_steps)
+
+        else:
+            dummy = tf.constant(0.)
+            g_loss = {"total": dummy, "adversarial": dummy, "domain": dummy, "recreation": dummy, "l1": dummy}
+
+        return c_loss, g_loss
 
     def preview_generated_images_during_training(self, examples, save_name, step):
         title = ["Input", "Target", "Generated", "Reconstructed"]
@@ -434,3 +442,25 @@ class MultiTargetSampler(ExampleSampler):
         random_target_index = tf.random.uniform(shape=[batch_size], dtype="int32", minval=0, maxval=number_of_domains)
 
         return random_source_index, random_source_image, random_target_index
+
+
+class PairedStarGANModel(UnpairedStarGANModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.lambda_l1 = config.lambda_l1
+
+    def generator_loss(self, critic_fake_patches, critic_fake_domain, fake_domain, real_image, recreated_image,
+                       fake_image, source_image):
+        g_loss = super().generator_loss(critic_fake_patches, critic_fake_domain, fake_domain, real_image,
+                                        recreated_image, fake_image, source_image)
+        l1_loss = tf.reduce_mean(tf.abs(real_image - fake_image))
+
+        total_loss = g_loss["total"] + self.lambda_l1 * l1_loss
+        return {"total": total_loss, "adversarial": g_loss["adversarial"], "domain": g_loss["domain"],
+                "recreation": g_loss["recreation"], "l1": l1_loss}
+
+    def train_step(self, batch, step, update_steps):
+        _, g_loss = super().train_step(batch, step, update_steps)
+        with tf.name_scope("generator"):
+            with self.summary_writer.as_default():
+                tf.summary.scalar("l1_loss", g_loss["l1"], step=step // update_steps)

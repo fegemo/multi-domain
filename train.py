@@ -6,7 +6,7 @@ import tensorflow as tf
 
 from dataset_utils import load_multi_domain_ds
 from configuration import OptionParser
-from star_model import UnpairedStarGANModel
+from star_model import UnpairedStarGANModel, PairedStarGANModel
 import setup
 
 config, parser = OptionParser().parse(sys.argv[1:], True)
@@ -51,9 +51,15 @@ train_ds, test_ds = load_multi_domain_ds(config)
 
 
 # instantiates the proper model
-# architecture_name = f"{options.source}-to-{options.target}"
+if config.model == "stargan-unpaired":
+    class_name = UnpairedStarGANModel
+elif config.model == "stargan-paired":
+    class_name = PairedStarGANModel
+else:
+    raise Exception(f"The asked model of {config.model} was not found.")
 
-model = UnpairedStarGANModel(config)
+model = class_name(config)
+
 model.save_model_description(model.get_output_folder())
 if config.verbose:
     model.discriminator.summary()
