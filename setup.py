@@ -7,7 +7,7 @@ from configuration import OptionParser
 
 
 def ensure_datasets(verbose=True):
-    config = OptionParser().parse(sys.argv[1:])
+    config = OptionParser(datasets_only=True).parse(sys.argv[1:])
     for name, folder, mask in zip(config.dataset_names, config.data_folders, config.dataset_mask):
         if mask != 1:
             continue

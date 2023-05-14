@@ -49,27 +49,74 @@ class SingletonMeta(type):
 
 
 class OptionParser(metaclass=SingletonMeta):
-    def __init__(self) -> None:
+    def __init__(self, datasets_only=False) -> None:
         self.parser = argparse.ArgumentParser()
+        self.datasets_only = datasets_only
         self.initialized = False
         self.values = {}
 
     def initialize(self):
-        self.parser.add_argument(
-            "model", help="one from { stargan-unpaired, stargan-paired, collagan-unpaired, collagan-paired }"
-                          "- the model to train")
-        self.parser.add_argument("--generator", help="network from { resnet, unet } for stargan or "
-                                                     "{ XXXX } for collagan", default="")
-        self.parser.add_argument("--discriminator", help="network from { resnet, unet } for stargan or "
+        if not self.datasets_only:
+            self.parser.add_argument(
+                "model", help="one from { stargan-unpaired, stargan-paired, collagan-unpaired, collagan-paired }"
+                              "- the model to train")
+            self.parser.add_argument("--generator", help="network from { resnet, unet } for stargan or "
                                                          "{ XXXX } for collagan", default="")
-        self.parser.add_argument("--image-size", help="size of squared images", default=IMG_SIZE, type=int)
-        self.parser.add_argument("--output-channels", help="size of squared images", default=OUTPUT_CHANNELS, type=int)
-        self.parser.add_argument("--input-channels", help="size of squared images", default=INPUT_CHANNELS, type=int)
-        self.parser.add_argument("--domains", help="domain folder names (w/o number, but in order)",
-                                 default=DOMAINS, nargs="+")
-        self.parser.add_argument("--verbose", help="outputs verbosity information",
-                                 default=False, action="store_true")
+            self.parser.add_argument("--discriminator", help="network from { resnet, unet } for stargan or "
+                                                             "{ XXXX } for collagan", default="")
+            self.parser.add_argument("--image-size", help="size of squared images", default=IMG_SIZE, type=int)
+            self.parser.add_argument("--output-channels", help="size of squared images", default=OUTPUT_CHANNELS, type=int)
+            self.parser.add_argument("--input-channels", help="size of squared images", default=INPUT_CHANNELS, type=int)
+            self.parser.add_argument("--domains", help="domain folder names (w/o number, but in order)",
+                                     default=DOMAINS, nargs="+")
+            self.parser.add_argument("--verbose", help="outputs verbosity information",
+                                     default=False, action="store_true")
 
+            self.parser.add_argument("--batch", type=int, help="the batch size", default=BATCH_SIZE)
+            self.parser.add_argument("--lr-decay", help="one from {none, constant-then-linear}", default=LR_DECAY)
+            self.parser.add_argument("--lr", type=float, help="(initial) learning rate", default=LR)
+            self.parser.add_argument(
+                "--lambda-gp", type=float, help="value for λgradient_penalty used in stargan", default=LAMBDA_GP)
+            self.parser.add_argument("--lambda-domain", type=float,
+                                     help="value for λdomain used in stargan", default=LAMBDA_DOMAIN)
+            self.parser.add_argument("--lambda-reconstruction", type=float,
+                                     help="value for λreconstruction used in stargan", default=LAMBDA_RECONSTRUCTION)
+            self.parser.add_argument("--lambda-l1", type=float, help="value for λl1 used in paired stargan",
+                                     default=LAMBDA_L1)
+            self.parser.add_argument("--d-steps", type=int,
+                                     help="number of discriminator updates for each generator in stargan",
+                                     default=DISCRIMINATOR_STEPS)
+            self.parser.add_argument("--epochs", type=int, help="number of epochs to train", default=EPOCHS)
+            self.parser.add_argument("--no-aug", action="store_true", help="Disables all augmentation", default=False)
+            self.parser.add_argument("--no-hue", action="store_true", help="Disables hue augmentation", default=False)
+            self.parser.add_argument("--no-tran", action="store_true", help="Disables translation augmentation",
+                                     default=False)
+            self.parser.add_argument("--sampler", help="one from {multi-target, single-target} indicating whether "
+                                                       "batches are trained with the same target (single) or with "
+                                                       "each sample having its own (multi)", default=TRAINING_SAMPLER)
+
+            self.parser.add_argument("--callback-debug-discriminator",
+                                     help="every few update steps, show the discriminator output with some images from "
+                                          "the train and test sets",
+                                     default=False, action="store_true")
+            self.parser.add_argument("--callback-evaluate-fid",
+                                     help="every few update steps, evaluate with the FID metric the performance "
+                                          "on the train and test sets",
+                                     default=False, action="store_true")
+            self.parser.add_argument("--callback-evaluate-l1",
+                                     help="every few update steps, evaluate with the L1 metric the performance "
+                                          "on the train and test sets",
+                                     default=False, action="store_true")
+            self.parser.add_argument("--save-model", help="saves the model at the end", default=False,
+                                     action="store_true")
+            self.parser.add_argument("--keep-checkpoint", help="checkpoints training", default=False,
+                                     action="store_true")
+            self.parser.add_argument("--model-name", help="architecture name", default="some-architecture")
+            self.parser.add_argument("--experiment", help="description of this experiment", default="playground")
+            self.parser.add_argument(
+                "--log-folder", help="the folder in which the training procedure saves the logs", default=LOG_FOLDER)
+
+        # the datasets - used for setup (to download) and for training (masking and validation set)
         self.parser.add_argument("--rmxp", action="store_true", default=False, help="Uses RPG Maker XP dataset")
         self.parser.add_argument("--rm2k", action="store_true", default=False, help="Uses RPG Maker 2000"
                                                                                     " dataset")
@@ -93,53 +140,13 @@ class OptionParser(metaclass=SingletonMeta):
                                                                                                "validation and to "
                                                                                                "generate images in "
                                                                                                "the end")
-        self.parser.add_argument("--tiny-validation", action="store_true", default=False, help="Uses only tiny (136 "
-                                                                                               "test examples) for "
-                                                                                               "validation and to "
-                                                                                               "generate images in "
-                                                                                               "the end")
+        self.parser.add_argument("--tiny-validation", action="store_true", default=False,
+                                 help="Uses only tiny (136 "
+                                      "test examples) for "
+                                      "validation and to "
+                                      "generate images in "
+                                      "the end")
 
-        self.parser.add_argument("--batch", type=int, help="the batch size", default=BATCH_SIZE)
-        self.parser.add_argument("--lr-decay", help="one from {none, constant-then-linear}", default=LR_DECAY)
-        self.parser.add_argument("--lr", type=float, help="(initial) learning rate", default=LR)
-        self.parser.add_argument(
-            "--lambda-gp", type=float, help="value for λgradient_penalty used in stargan", default=LAMBDA_GP)
-        self.parser.add_argument("--lambda-domain", type=float,
-                                 help="value for λdomain used in stargan", default=LAMBDA_DOMAIN)
-        self.parser.add_argument("--lambda-reconstruction", type=float,
-                                 help="value for λreconstruction used in stargan", default=LAMBDA_RECONSTRUCTION)
-        self.parser.add_argument("--lambda-l1", type=float, help="value for λl1 used in paired stargan",
-                                 default=LAMBDA_L1)
-        self.parser.add_argument("--d-steps", type=int,
-                                 help="number of discriminator updates for each generator in stargan",
-                                 default=DISCRIMINATOR_STEPS)
-        self.parser.add_argument("--epochs", type=int, help="number of epochs to train", default=EPOCHS)
-        self.parser.add_argument("--no-aug", action="store_true", help="Disables all augmentation", default=False)
-        self.parser.add_argument("--no-hue", action="store_true", help="Disables hue augmentation", default=False)
-        self.parser.add_argument("--no-tran", action="store_true", help="Disables translation augmentation",
-                                 default=False)
-        self.parser.add_argument("--sampler", help="one from {multi-target, single-target} indicating whether batches "
-                                                   "are trained with the same target (single) or with each sample"
-                                                   "having its own (multi)", default=TRAINING_SAMPLER)
-
-        self.parser.add_argument("--callback-debug-discriminator",
-                                 help="every few update steps, show the discriminator output with some images from "
-                                      "the train and test sets",
-                                 default=False, action="store_true")
-        self.parser.add_argument("--callback-evaluate-fid",
-                                 help="every few update steps, evaluate with the FID metric the performance "
-                                      "on the train and test sets",
-                                 default=False, action="store_true")
-        self.parser.add_argument("--callback-evaluate-l1",
-                                 help="every few update steps, evaluate with the L1 metric the performance "
-                                      "on the train and test sets",
-                                 default=False, action="store_true")
-        self.parser.add_argument("--save-model", help="saves the model at the end", default=False, action="store_true")
-        self.parser.add_argument("--keep-checkpoint", help="checkpoints training", default=False, action="store_true")
-        self.parser.add_argument("--model-name", help="architecture name", default="some-architecture")
-        self.parser.add_argument("--experiment", help="description of this experiment", default="playground")
-        self.parser.add_argument(
-            "--log-folder", help="the folder in which the training procedure saves the logs", default=LOG_FOLDER)
         self.initialized = True
 
     def parse(self, args=None, return_parser=False):
