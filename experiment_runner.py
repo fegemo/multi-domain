@@ -23,9 +23,10 @@ def dict_hash(dictionary: Dict[str, Any]) -> str:
 
 
 class Experimenter:
-    def __init__(self, script_to_run,
+    def __init__(self, script_to_run, path_to_python,
                  default_params: Dict[str, Union[list[Any], Any]],
                  search_grid: Dict[str, list[Any]]):
+        self.path_to_python = path_to_python
         self.script_to_run = script_to_run
         self.output_path = default_params["log-folder"]
         self.default_params = default_params
@@ -75,7 +76,7 @@ class Experimenter:
         log_file = self.open_log_file(specific_params)
         log_file.seek(0)
         try:
-            command = f"venv/Scripts/python {self.script_to_run}.py {run_params_string}"
+            command = f"{self.path_to_python} {self.script_to_run}.py {run_params_string}"
             log_file.write(command + "\n" * 2)
             process = subprocess.Popen(command, stdout=log_file, stderr=log_file, encoding="utf-8")
             process.wait()
