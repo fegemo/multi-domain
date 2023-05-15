@@ -21,11 +21,11 @@ if __name__ == "__main__":
             "log-folder": config.output if config.output is not None else "output/dsteps-study",
             "epochs": 240,
             "model-name": "@model",
-            "experiment": "&l1",
+            "experiment": "&lambda-l1",
         }, {
             "d-steps": [1],
             # "lr": [0.0005, 0.0003, 0.0002, 0.00005]
             "lr": [0.0001],
-            "l1": [10., 1., 20., 30., 50., 100.]
+            "lambda-l1": [10., 1., 20., 30., 50., 100.]
         })
     runner.execute(config)

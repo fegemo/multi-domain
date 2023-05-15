@@ -76,7 +76,7 @@ class Experimenter:
         try:
             command = f"{self.path_to_python} {self.script_to_run}.py {run_params_string}"
             log_file.write(command + "\n" * 2)
-            process = subprocess.Popen(command, stdout=log_file, stderr=log_file, encoding="utf-8")
+            process = subprocess.Popen(command, stdout=log_file, stderr=log_file, encoding="utf-8", shell=True)
             process.wait()
             if process.returncode != 0:
                 raise ChildProcessError()
@@ -84,6 +84,7 @@ class Experimenter:
             print(f"Error running command: {command}:", error)
         finally:
             log_file.close()
+
     def generate_run_params_string(self, run_params):
         interpolated_params = self.interpolate_param_values(run_params)
         run_params_string = ""
@@ -207,7 +208,6 @@ class Experimenter:
         else:
             self.run()
 
-
 # example experiments with stargan: d-steps
 # runner = Experimenter("train", {
 #     "model": "stargan-paired",
@@ -220,4 +220,3 @@ class Experimenter:
 #     "d-steps": [5, 1],
 #     "lr": [0.0001, 0.00002]
 # })
-
