@@ -18,13 +18,13 @@ if __name__ == "__main__":
         {
             "model": "stargan-paired",
             "adhoc": ["rm2k", "no-aug", "callback-evaluate-fid", "callback-evaluate-l1"],
-            "log-folder": config.output if config.output is not None else "output/dsteps-study",
+            "log-folder": config.output if config.output is not None else "output",
             "epochs": 240,
             "model-name": "@model",
-            "experiment": "&d-steps&lr",
+            "experiment": "@model&sampler",
             "d-steps": 1,
             "lr": 0.0001,
-            "l1": 10.
+            "lambda-l1": 10.
         }, {
             "sampler": ["single-target", "multi-target"]
         })
