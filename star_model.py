@@ -22,6 +22,8 @@ class UnpairedStarGANModel(S2SModel):
             self.sampler = MultiTargetSampler(config)
         else:
             self.sampler = SingleTargetSampler(config)
+        self.gen_supplier = NParamsSupplier(3 if config.source_domain_aware_generator else 2)
+        self.crit_supplier = NParamsSupplier(2 if config.conditional_discriminator else 1)
 
     @property
     def models(self):
@@ -30,7 +32,8 @@ class UnpairedStarGANModel(S2SModel):
     def create_generator(self):
         config = self.config
         if config.generator == "resnet" or config.generator == "":
-            return stargan_resnet_generator(config.image_size, config.output_channels, config.number_of_domains)
+            return stargan_resnet_generator(config.image_size, config.output_channels, config.number_of_domains,
+                                            config.source_domain_aware_generator)
         # elif config.generator_type == "unet":
         #     return StarGANUnetGenerator()
         else:
@@ -39,16 +42,16 @@ class UnpairedStarGANModel(S2SModel):
     def create_discriminator(self):
         config = self.config
         if config.discriminator == "resnet" or config.discriminator == "":
-            return stargan_resnet_discriminator(config.number_of_domains, config.image_size, config.output_channels)
+            return stargan_resnet_discriminator(config.number_of_domains, config.image_size, config.output_channels,
+                                                config.conditional_discriminator)
         else:
             raise ValueError(f"The provided {config.discriminator} type for discriminator has not been implemented.")
 
-    # def generator_loss(self, critic_fake_patches, critic_fake_domain, fake_domain, real_image, reconstructed_image):
     def generator_loss(self, critic_fake_patches, critic_fake_domain, fake_domain, real_image, recreated_image,
                        fake_image, source_image):
         adversarial_loss = -tf.reduce_mean(critic_fake_patches)
         domain_loss = tf.reduce_mean(self.domain_classification_loss(fake_domain, critic_fake_domain))
-        recreation_loss = tf.reduce_mean(tf.abs(real_image - recreated_image))
+        recreation_loss = tf.reduce_mean(tf.abs(source_image - recreated_image))
 
         total_loss = adversarial_loss + \
                      self.lambda_domain * domain_loss + \
@@ -111,15 +114,17 @@ class UnpairedStarGANModel(S2SModel):
         # ==========================
         #
         # 1. select a random source domain with a random target
-        source_domain, source_image, target_domain = self.sampler.sample(domain_images)
+        source_domain, source_image, target_domain, target_image = self.sampler.sample(domain_images)
 
         # 2. calculate gradient penalty as we're using wgan-gp to train
         gp_epsilon = tf.random.uniform(shape=[batch_size, 1, 1, 1], minval=0, maxval=1)
         with tf.GradientTape() as disc_tape:
             with tf.GradientTape() as gp_tape:
-                genned_image = self.generator([source_image, target_domain], training=True)
+                genned_image = self.generator(
+                    self.gen_supplier(source_image, target_domain, source_domain), training=True)
                 fake_image_mixed = gp_epsilon * source_image + (1 - gp_epsilon) * genned_image
-                fake_mixed_predicted, _ = self.discriminator(fake_image_mixed, training=True)
+                fake_mixed_predicted, _ = self.discriminator(
+                    self.crit_supplier(fake_image_mixed, source_image), training=True)
 
             # computing the gradient penalty from the wasserstein-gp GAN
             gp_grads = gp_tape.gradient(fake_mixed_predicted, fake_image_mixed)
@@ -128,8 +133,10 @@ class UnpairedStarGANModel(S2SModel):
 
             # 3. now we actually do a feed forward with real and fake to the critic and check the loss
             # passing real and fake images through the critic
-            real_predicted_patches, real_predicted_domain = self.discriminator(source_image, training=True)
-            fake_predicted_patches, fake_predicted_domain = self.discriminator(genned_image, training=True)
+            real_predicted_patches, real_predicted_domain = self.discriminator(
+                self.crit_supplier(source_image, source_image), training=True)
+            fake_predicted_patches, fake_predicted_domain = self.discriminator(
+                self.crit_supplier(genned_image, source_image), training=True)
 
             c_loss = self.discriminator_loss(real_predicted_patches, real_predicted_domain,
                                              tf.one_hot(source_domain, number_of_domains),
@@ -154,23 +161,22 @@ class UnpairedStarGANModel(S2SModel):
         # we only train the generator at every x discriminator update steps
         if step % self.discriminator_steps == 0:
             # 1. use previously selected random generator input (random source image/domain + random target domain)
-            # target_domain = tf.random.uniform([batch_size, ], minval=0, maxval=self.config.number_of_domains,
-            #                                   dtype="int32")
-            # target_domain = tf.one_hot(target_domain, self.config.number_of_domains)
-            # random_input = self.concat_image_and_domain(real_image, target_domain)
-            # random_input, real_domain, real_image = self.select_random_input(domain_images)
             with tf.GradientTape() as gen_tape:
                 # 2. feed forward the generator and critic
-                genned_image = self.generator([source_image, target_domain], training=True)
-                fake_predicted_patches, fake_predicted_domain = self.discriminator(genned_image, training=True)
+                genned_image = self.generator(self.gen_supplier(source_image, target_domain, source_domain),
+                                              training=True)
+                fake_predicted_patches, fake_predicted_domain = self.discriminator(
+                    self.crit_supplier(genned_image, source_image),
+                    training=True)
 
                 # 3. reconstruct the image to the original domain
-                remade_image = self.generator([genned_image, source_domain], training=True)
+                remade_image = self.generator(self.gen_supplier(genned_image, source_domain, target_domain),
+                                              training=True)
 
                 # 4. calculate the loss
                 g_loss = self.generator_loss(fake_predicted_patches, fake_predicted_domain,
                                              tf.one_hot(target_domain, number_of_domains),
-                                             source_image, remade_image, genned_image, source_image)
+                                             target_image, remade_image, genned_image, source_image)
 
             # 5. update the generator weights using the gradients
             generator_gradients = gen_tape.gradient(g_loss["total"], self.generator.trainable_variables)
@@ -182,6 +188,7 @@ class UnpairedStarGANModel(S2SModel):
                     tf.summary.scalar("adversarial_loss", g_loss["adversarial"], step=step // update_steps)
                     tf.summary.scalar("domain_loss", g_loss["domain"], step=step // update_steps)
                     tf.summary.scalar("recreation_loss", g_loss["recreation"], step=step // update_steps)
+            g_loss["l1"] = tf.constant(0.)
 
         else:
             dummy = tf.constant(0.)
@@ -209,10 +216,12 @@ class UnpairedStarGANModel(S2SModel):
             source_domain = tf.expand_dims(source_domain, 0)
             target_domain = tf.expand_dims(target_domain, 0)
             source_image = tf.expand_dims(source_image, 0)
-            generated_image = self.generator([source_image, target_domain], training=True)
-            recreated_image = self.generator([generated_image, source_domain[tf.newaxis, ...]], training=True)
+            genned_image = self.generator(
+                self.gen_supplier(source_image, target_domain, source_domain), training=True)
+            remade_image = self.generator(
+                self.gen_supplier(genned_image, source_domain[tf.newaxis, ...], target_domain), training=True)
 
-            images = [source_image[0], target_image, generated_image[0], recreated_image[0]]
+            images = [source_image[0], target_image, genned_image[0], remade_image[0]]
             for j in range(num_columns):
                 idx = i * num_columns + j + 1
                 plt.subplot(num_images, num_columns, idx)
@@ -253,7 +262,7 @@ class UnpairedStarGANModel(S2SModel):
             source_images = tf.gather(domain_images, random_source_indices)
             target_images = tf.gather(domain_images, random_target_indices)
 
-            return target_images, source_images, random_target_indices
+            return target_images, source_images, random_target_indices, random_source_indices
 
         return dict({
             "train": initialize_random_examples_from_dataset(train_ds),
@@ -264,8 +273,8 @@ class UnpairedStarGANModel(S2SModel):
         generator = self.generator
 
         def generate_images_from_dataset(dataset_name):
-            target_images, source_images, target_domains = example_indices_for_evaluation[dataset_name]
-            fake_images = generator([source_images, target_domains], training=True)
+            target_images, source_images, target_domains, source_domains = example_indices_for_evaluation[dataset_name]
+            fake_images = generator(self.gen_supplier(source_images, target_domains, source_domains), training=True)
             return target_images, fake_images
 
         return dict({
@@ -283,10 +292,12 @@ class UnpairedStarGANModel(S2SModel):
         target_indices = tf.random.uniform(shape=[batch_size], minval=0, maxval=number_of_domains, dtype="int32")
         source_images = tf.gather(domain_images, source_indices, batch_dims=1)
         target_images = tf.gather(domain_images, target_indices, batch_dims=1)
-        fake_images = self.generator([source_images, target_indices], training=True)
+        fake_images = self.generator(self.gen_supplier(source_images, target_indices, source_indices), training=True)
 
-        real_predicted_patches, real_predicted_domain = self.discriminator(target_images)
-        fake_predicted_patches, fake_predicted_domain = self.discriminator(fake_images)
+        real_predicted_patches, real_predicted_domain = self.discriminator(
+            self.crit_supplier(target_images, source_images), training=True)
+        fake_predicted_patches, fake_predicted_domain = self.discriminator(
+            self.crit_supplier(fake_images, source_images), training=True)
 
         # finds the mean value of the patches (to display on the titles)
         real_predicted_patches = tf.math.sigmoid(real_predicted_patches)
@@ -391,7 +402,9 @@ class UnpairedStarGANModel(S2SModel):
                     else:
                         source_input = tf.expand_dims(source_image, 0)
                         target_domain = tf.expand_dims(target_index, 0)
-                        generated_image = self.generator([source_input, target_domain], training=True)
+                        source_domain = tf.expand_dims(source_index, 0)
+                        generated_image = self.generator(
+                            self.gen_supplier(source_input, target_domain, source_domain), training=True)
                         image = generated_image
                     plt.imshow(tf.squeeze(image) * 0.5 + 0.5)
                     plt.axis("off")
@@ -424,8 +437,9 @@ class SingleTargetSampler(ExampleSampler):
         random_source_image = tf.gather(transposed_batch, random_source_index, axis=1, batch_dims=1)
         random_target_index = tf.random.uniform(shape=[], dtype="int32", minval=0, maxval=number_of_domains)
         random_target_index = tf.tile(random_target_index[tf.newaxis, ...], [batch_size, ])
+        random_target_image = tf.gather(transposed_batch, random_target_index, axis=1, batch_dims=1)
 
-        return random_source_index, random_source_image, random_target_index
+        return random_source_index, random_source_image, random_target_index, random_target_image
 
 
 class MultiTargetSampler(ExampleSampler):
@@ -436,12 +450,13 @@ class MultiTargetSampler(ExampleSampler):
         batch_shape = tf.shape(batch)
         number_of_domains, batch_size = batch_shape[0], batch_shape[1]
 
-        random_source_index = tf.random.uniform(shape=[batch_size], dtype="int32", minval=0, maxval=number_of_domains)
         transposed_batch = tf.transpose(batch, [1, 0, 2, 3, 4])
+        random_source_index = tf.random.uniform(shape=[batch_size], dtype="int32", minval=0, maxval=number_of_domains)
         random_source_image = tf.gather(transposed_batch, random_source_index, axis=1, batch_dims=1)
         random_target_index = tf.random.uniform(shape=[batch_size], dtype="int32", minval=0, maxval=number_of_domains)
+        random_target_image = tf.gather(transposed_batch, random_target_index, axis=1, batch_dims=1)
 
-        return random_source_index, random_source_image, random_target_index
+        return random_source_index, random_source_image, random_target_index, random_target_image
 
 
 class PairedStarGANModel(UnpairedStarGANModel):
@@ -449,18 +464,84 @@ class PairedStarGANModel(UnpairedStarGANModel):
         super().__init__(config)
         self.lambda_l1 = config.lambda_l1
 
-    def generator_loss(self, critic_fake_patches, critic_fake_domain, fake_domain, real_image, recreated_image,
+    def generator_loss(self, critic_fake_patches, critic_fake_domain, fake_domain, target_image, recreated_image,
                        fake_image, source_image):
-        g_loss = super().generator_loss(critic_fake_patches, critic_fake_domain, fake_domain, real_image,
+        g_loss = super().generator_loss(critic_fake_patches, critic_fake_domain, fake_domain, target_image,
                                         recreated_image, fake_image, source_image)
-        l1_loss = tf.reduce_mean(tf.abs(real_image - fake_image))
+        l1_loss = tf.reduce_mean(tf.abs(target_image - fake_image))
 
         total_loss = g_loss["total"] + self.lambda_l1 * l1_loss
         return {"total": total_loss, "adversarial": g_loss["adversarial"], "domain": g_loss["domain"],
                 "recreation": g_loss["recreation"], "l1": l1_loss}
 
+    @tf.function
     def train_step(self, batch, step, update_steps):
-        _, g_loss = super().train_step(batch, step, update_steps)
+        number_of_domains = self.config.number_of_domains
+        batch_size = tf.shape(batch[0])[0]
+
+        # back, left, front, right for pixel-sides
+        domain_images = batch
+
+        # 1. select a random source domain with a random target
+        source_domain, source_image, target_domain, target_image = self.sampler.sample(domain_images)
+
+        # 2. calculate gradient penalty as we're using wgan-gp to train
+        gp_epsilon = tf.random.uniform(shape=[batch_size, 1, 1, 1], minval=0, maxval=1)
+        with tf.GradientTape() as disc_tape, tf.GradientTape() as gen_tape:
+            with tf.GradientTape() as gp_tape:
+                genned_image = self.generator(self.gen_supplier(source_image, target_domain, source_domain),
+                                              training=True)
+                remade_image = self.generator(self.gen_supplier(genned_image, source_domain, target_domain),
+                                              training=True)
+                fake_image_mixed = gp_epsilon * source_image + (1 - gp_epsilon) * genned_image
+                fake_mixed_predicted, _ = self.discriminator(
+                    self.crit_supplier(fake_image_mixed, source_image), training=True)
+
+            # computing the gradient penalty from the wasserstein-gp GAN
+            gp_grads = gp_tape.gradient(fake_mixed_predicted, fake_image_mixed)
+            gp_grad_norms = tf.sqrt(tf.reduce_sum(tf.square(gp_grads), axis=[1, 2, 3]))
+            gradient_penalty = tf.reduce_mean(tf.square(gp_grad_norms - 1))
+
+            # 3. now we actually do a feed forward with real and fake to the critic and check the loss
+            real_predicted_patches, real_predicted_domain = self.discriminator(
+                self.crit_supplier(source_image, target_image), training=True)
+            fake_predicted_patches, fake_predicted_domain = self.discriminator(
+                self.crit_supplier(genned_image, source_image), training=True)
+
+            c_loss = self.discriminator_loss(real_predicted_patches, real_predicted_domain,
+                                             tf.one_hot(source_domain, number_of_domains),
+                                             fake_predicted_patches, gradient_penalty)
+            g_loss = self.generator_loss(fake_predicted_patches, fake_predicted_domain,
+                                         tf.one_hot(target_domain, number_of_domains),
+                                         target_image, remade_image, genned_image, source_image)
+
+        # 4. apply the gradients to the critic and generator weights
+        critic_gradients = disc_tape.gradient(c_loss["total"], self.discriminator.trainable_variables)
+        self.discriminator_optimizer.apply_gradients(zip(critic_gradients, self.discriminator.trainable_variables))
+
+        generator_gradients = gen_tape.gradient(g_loss["total"], self.generator.trainable_variables)
+        self.generator_optimizer.apply_gradients(zip(generator_gradients, self.generator.trainable_variables))
+
+        with tf.name_scope("discriminator"):
+            with self.summary_writer.as_default():
+                tf.summary.scalar("total_loss", c_loss["total"], step=step // update_steps)
+                tf.summary.scalar("real_loss", c_loss["real"], step=step // update_steps)
+                tf.summary.scalar("fake_loss", c_loss["fake"], step=step // update_steps)
+                tf.summary.scalar("real_domain_loss", c_loss["domain"], step=step // update_steps)
+                tf.summary.scalar("gradient_penalty", c_loss["gp"], step=step // update_steps)
+
         with tf.name_scope("generator"):
             with self.summary_writer.as_default():
+                tf.summary.scalar("total_loss", g_loss["total"], step=step // update_steps)
+                tf.summary.scalar("adversarial_loss", g_loss["adversarial"], step=step // update_steps)
+                tf.summary.scalar("domain_loss", g_loss["domain"], step=step // update_steps)
+                tf.summary.scalar("recreation_loss", g_loss["recreation"], step=step // update_steps)
                 tf.summary.scalar("l1_loss", g_loss["l1"], step=step // update_steps)
+
+
+class NParamsSupplier:
+    def __init__(self, supply_first_n_params):
+        self.n = supply_first_n_params
+
+    def __call__(self, *args, **kwargs):
+        return [*args[:self.n]]
