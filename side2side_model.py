@@ -42,7 +42,6 @@ class S2SModel(ABC):
         self.experiment = config.experiment
         self.checkpoint_dir = self.get_output_folder("training-checkpoints")
         self.layout_summary = S2SModel.create_layout_summary()
-        self.keep_checkpoint = config.keep_checkpoint
 
         self.discriminator = self.create_discriminator()
         self.generator = self.create_generator()

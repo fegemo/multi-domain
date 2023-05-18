@@ -112,8 +112,6 @@ class OptionParser(metaclass=SingletonMeta):
                                  default=False, action="store_true")
         self.parser.add_argument("--save-model", help="saves the model at the end", default=False,
                                  action="store_true")
-        self.parser.add_argument("--keep-checkpoint", help="checkpoints training", default=False,
-                                 action="store_true")
         self.parser.add_argument("--model-name", help="architecture name", default="some-architecture")
         self.parser.add_argument("--experiment", help="description of this experiment", default="playground")
         self.parser.add_argument(
