@@ -1,7 +1,8 @@
 from unittest.mock import patch
 import tensorflow as tf
 
-from dataset_utils import load_image
+from configuration import OptionParser
+from dataset_utils import load_image, create_multi_domain_image_loader
 
 
 class TestDatasetUtils(tf.test.TestCase):
@@ -15,7 +16,7 @@ class TestDatasetUtils(tf.test.TestCase):
             [
                 [0, 127, 255],
                 [0, 127, 255]
-             ]
+            ]
         ])
         # mock_tf_read_file.return_value = None
         mock_tf_decode_png.return_value = sample_decoded_png
@@ -50,6 +51,27 @@ class TestDatasetUtils(tf.test.TestCase):
 
     def tearDown(self):
         pass
+
+
+class TestMultiImageLoader(tf.test.TestCase):
+    @patch("dataset_utils.load_image")
+    def test_multiple_datasets(self, mock_load_image):
+        mock_load_image.side_effect = lambda path, i, c, norm: path
+        # mock_load_image.return_value = lambda path, i, c, norm: path
+
+        config = OptionParser().parse(["stargan-paired", "--rm2k", "--tiny"])
+        loader = create_multi_domain_image_loader(config, "train")
+        last_tiny = loader(775)
+        first_rm2k = loader(776)
+
+        self.assertIn("tiny-hero", last_tiny[0].numpy().decode("utf-8"))
+        self.assertIn("rpg-maker-2000", first_rm2k[0].numpy().decode("utf-8"))
+
+    def setUp(self):
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
 
 
 if __name__ == '__main__':

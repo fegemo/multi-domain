@@ -146,7 +146,7 @@ def create_multi_domain_image_loader(config, train_or_test_folder):
     domains = config.domains
     domain_folders = config.domain_folders
     data_folders = config.data_folders
-    dataset_sizes = config.dataset_sizes
+    dataset_sizes = config.train_sizes if train_or_test_folder == "train" else config.test_sizes  #config.dataset_sizes
     image_size = config.image_size
     input_channels = config.input_channels
 
@@ -156,7 +156,7 @@ def create_multi_domain_image_loader(config, train_or_test_folder):
         image = load_image(path, image_size, input_channels, False)
         return image
 
-    @tf.function
+    # @tf.function
     def load_images(image_number):
         image_number = tf.cast(image_number, "int32")
 
