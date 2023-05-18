@@ -17,15 +17,21 @@ if __name__ == "__main__":
         config.python,
         {
             "model": "stargan-paired",
-            "adhoc": ["rm2k", "no-aug", "callback-evaluate-fid", "callback-evaluate-l1"],
-            "log-folder": config.output if config.output is not None else "output/dsteps-study",
-            "epochs": 240,
+            "adhoc": [
+                "tiny", "rm2k", "rmxp", "rmvx", "misc",
+                "no-tran",
+                "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
+                "conditional-discriminator", "source-domain-aware-generator",
+                "save-model"
+            ],
+            "log-folder": config.output if config.output is not None else "output/sampler-study",
+            "epochs": 30,
+            "d-steps": 1,
+            "lr": 0.0001,
+            "sampler": "multi-target",
             "model-name": "@model",
-            "experiment": "&lambda-l1",
+            "experiment": "@model&lambda-l1",
         }, {
-            "d-steps": [1],
-            # "lr": [0.0005, 0.0003, 0.0002, 0.00005]
-            "lr": [0.0001],
-            "lambda-l1": [10., 1., 20., 30., 50., 100.]
+            "lambda-l1": [1., 10., 20., 30., 50., 100.]
         })
     runner.execute(config)
