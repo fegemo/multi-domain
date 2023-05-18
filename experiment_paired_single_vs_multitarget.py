@@ -25,7 +25,7 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "epochs": 240,
+            "epochs": 30,
             "model-name": "@model",
             "experiment": "@model&sampler",
             "d-steps": 1,
