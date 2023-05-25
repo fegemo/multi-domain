@@ -185,7 +185,8 @@ class S2SModel(ABC):
                     print("_" * (update_steps // 10))
 
             # actually TRAIN
-            self.train_step(batch, step, update_steps)
+            t = tf.cast(step / steps, tf.float32)
+            self.train_step(batch, step, update_steps, t)
 
             # dot feedback for every 10 training steps
             if (step + 1) % 10 == 0 and step - starting_step < steps - 1:
@@ -208,7 +209,7 @@ class S2SModel(ABC):
         return "evaluate_l1" in callbacks or "evaluate_fid" in callbacks
 
     @abstractmethod
-    def train_step(self, batch, step, update_steps):
+    def train_step(self, batch, step, update_steps, t):
         pass
 
     @abstractmethod

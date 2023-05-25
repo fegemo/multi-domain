@@ -156,7 +156,7 @@ def create_multi_domain_image_loader(config, train_or_test_folder):
         image = load_image(path, image_size, input_channels, False)
         return image
 
-    # @tf.function
+    @tf.function
     def load_images(image_number):
         image_number = tf.cast(image_number, "int32")
 

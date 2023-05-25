@@ -5,6 +5,7 @@ import tensorflow as tf
 from matplotlib import pyplot as plt
 
 import io_utils
+import palette
 from networks import stargan_resnet_generator, stargan_resnet_discriminator
 from side2side_model import S2SModel
 
@@ -48,7 +49,7 @@ class UnpairedStarGANModel(S2SModel):
             raise ValueError(f"The provided {config.discriminator} type for discriminator has not been implemented.")
 
     def generator_loss(self, critic_fake_patches, critic_fake_domain, fake_domain, real_image, recreated_image,
-                       fake_image, source_image):
+                       fake_image, source_image, target_palette, t):
         adversarial_loss = -tf.reduce_mean(critic_fake_patches)
         domain_loss = tf.reduce_mean(self.domain_classification_loss(fake_domain, critic_fake_domain))
         recreation_loss = tf.reduce_mean(tf.abs(source_image - recreated_image))
@@ -103,12 +104,18 @@ class UnpairedStarGANModel(S2SModel):
         return train_examples + test_examples
 
     @tf.function
-    def train_step(self, batch, step, update_steps):
-        number_of_domains = self.config.number_of_domains
-        batch_size = tf.shape(batch[0])[0]
+    def train_step(self, batch, step, update_steps, t):
+        batch_shape = tf.shape(batch)
+        number_of_domains, batch_size, channels = batch_shape[0], batch_shape[1], batch_shape[4]
 
-        # back, left, front, right for pixel-sides
+        # back, left, front, right for pixel-sides: [d, b, s, s, c]
         domain_images = batch
+        # extracts the palette from the combined images of each sample in the batch: (1) prepare and (2) extract
+        # (1) prepare the batch so it is: [b, d*s*s, c]
+        combined_images = tf.reshape(tf.transpose(batch, [1, 0, 2, 3, 4]), [batch_size, -1, channels])
+        # (2) extract the palette for each image in the batch: [b, (p), c]
+        target_palette = tf.map_fn(palette.batch_extract_palette, combined_images)
+        # # print("palettes", palettes)
 
         # TRAINING THE DISCRIMINATOR
         # ==========================
@@ -176,7 +183,7 @@ class UnpairedStarGANModel(S2SModel):
                 # 4. calculate the loss
                 g_loss = self.generator_loss(fake_predicted_patches, fake_predicted_domain,
                                              tf.one_hot(target_domain, number_of_domains),
-                                             target_image, remade_image, genned_image, source_image)
+                                             target_image, remade_image, genned_image, source_image, target_palette, t)
 
             # 5. update the generator weights using the gradients
             generator_gradients = gen_tape.gradient(g_loss["total"], self.generator.trainable_variables)
@@ -189,10 +196,12 @@ class UnpairedStarGANModel(S2SModel):
                     tf.summary.scalar("domain_loss", g_loss["domain"], step=step // update_steps)
                     tf.summary.scalar("recreation_loss", g_loss["recreation"], step=step // update_steps)
             g_loss["l1"] = tf.constant(0.)
+            g_loss["palette_loss"] = tf.constant(0.)
 
         else:
             dummy = tf.constant(0.)
-            g_loss = {"total": dummy, "adversarial": dummy, "domain": dummy, "recreation": dummy, "l1": dummy}
+            g_loss = {"total": dummy, "adversarial": dummy, "domain": dummy, "recreation": dummy, "l1": dummy,
+                      "palette": dummy}
 
         return c_loss, g_loss
 
@@ -463,24 +472,34 @@ class PairedStarGANModel(UnpairedStarGANModel):
     def __init__(self, config):
         super().__init__(config)
         self.lambda_l1 = config.lambda_l1
+        self.lambda_palette = config.lambda_palette
 
     def generator_loss(self, critic_fake_patches, critic_fake_domain, fake_domain, target_image, recreated_image,
-                       fake_image, source_image):
+                       fake_image, source_image, target_palette, t):
         g_loss = super().generator_loss(critic_fake_patches, critic_fake_domain, fake_domain, target_image,
-                                        recreated_image, fake_image, source_image)
+                                        recreated_image, fake_image, source_image, target_palette, t)
         l1_loss = tf.reduce_mean(tf.abs(target_image - fake_image))
+        palette_loss = palette.calculate_palette_loss(target_palette, fake_image)
 
-        total_loss = g_loss["total"] + self.lambda_l1 * l1_loss
+        total_loss = g_loss["total"] + self.lambda_l1 * l1_loss + (self.lambda_palette * t) * palette_loss
         return {"total": total_loss, "adversarial": g_loss["adversarial"], "domain": g_loss["domain"],
-                "recreation": g_loss["recreation"], "l1": l1_loss}
+                "recreation": g_loss["recreation"], "l1": l1_loss, "palette": palette_loss}
 
     @tf.function
-    def train_step(self, batch, step, update_steps):
-        number_of_domains = self.config.number_of_domains
-        batch_size = tf.shape(batch[0])[0]
+    def train_step(self, batch, step, update_steps, t):
+        # [d, b, s, s, c] = domain, batch, size, size, channels
+        batch_shape = tf.shape(batch)
+        number_of_domains, batch_size, channels = batch_shape[0], batch_shape[1], batch_shape[4]
 
         # back, left, front, right for pixel-sides
         domain_images = batch
+
+        # extracts the palette from the combined images of each sample in the batch: (1) prepare and (2) extract
+        # (1) prepare the batch so it is: [b, d*s*s, c]
+        combined_images = tf.reshape(tf.transpose(batch, [1, 0, 2, 3, 4]), [batch_size, -1, channels])
+        # (2) extract the palette for each image in the batch: [b, (p), c]
+        palettes = palette.batch_extract_palette(combined_images)
+        # print("palettes", palettes)
 
         # 1. select a random source domain with a random target
         source_domain, source_image, target_domain, target_image = self.sampler.sample(domain_images)
@@ -513,7 +532,7 @@ class PairedStarGANModel(UnpairedStarGANModel):
                                              fake_predicted_patches, gradient_penalty)
             g_loss = self.generator_loss(fake_predicted_patches, fake_predicted_domain,
                                          tf.one_hot(target_domain, number_of_domains),
-                                         target_image, remade_image, genned_image, source_image)
+                                         target_image, remade_image, genned_image, source_image, palettes, t)
 
         # 4. apply the gradients to the critic and generator weights
         critic_gradients = disc_tape.gradient(c_loss["total"], self.discriminator.trainable_variables)
@@ -537,6 +556,7 @@ class PairedStarGANModel(UnpairedStarGANModel):
                 tf.summary.scalar("domain_loss", g_loss["domain"], step=step // update_steps)
                 tf.summary.scalar("recreation_loss", g_loss["recreation"], step=step // update_steps)
                 tf.summary.scalar("l1_loss", g_loss["l1"], step=step // update_steps)
+                tf.summary.scalar("palette_loss", g_loss["palette"], step=step // update_steps)
 
 
 class NParamsSupplier:

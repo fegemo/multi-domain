@@ -19,6 +19,7 @@ LAMBDA_GP = 10.
 LAMBDA_DOMAIN = 1.
 LAMBDA_RECONSTRUCTION = 10.
 LAMBDA_L1 = 10.
+LAMBDA_PALETTE = 0.
 DISCRIMINATOR_STEPS = 5
 EPOCHS = 160
 LR_DECAY = "constant-then-linear"
@@ -86,6 +87,8 @@ class OptionParser(metaclass=SingletonMeta):
                                  help="value for λreconstruction used in stargan", default=LAMBDA_RECONSTRUCTION)
         self.parser.add_argument("--lambda-l1", type=float, help="value for λl1 used in paired stargan",
                                  default=LAMBDA_L1)
+        self.parser.add_argument("--lambda-palette", type=float, help="value for λpalette used in paired stargan",
+                                 default=LAMBDA_PALETTE)
         self.parser.add_argument("--d-steps", type=int,
                                  help="number of discriminator updates for each generator in stargan",
                                  default=DISCRIMINATOR_STEPS)
