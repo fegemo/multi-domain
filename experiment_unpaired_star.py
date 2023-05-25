@@ -23,7 +23,7 @@ if __name__ == "__main__":
                 # "conditional-discriminator", "source-domain-aware-generator",
                 "save-model"
             ],
-            "log-folder": config.output if config.output is not None else "output/unpaired",
+            "log-folder": config.output if config.output is not None else "output",
             "epochs": 30,
             "d-steps": 5,
             "lr": 0.0001,

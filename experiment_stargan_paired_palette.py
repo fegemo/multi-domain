@@ -25,13 +25,14 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "epochs": 30,
+            "epochs": 50,
             "d-steps": 1,
             "lr": 0.0001,
+            "lambda-l1": 100.,
             "sampler": "multi-target",
             "model-name": "@model",
-            "experiment": "@model&lambda-l1",
+            "experiment": "@model&lambda-l1&lambda-palette",
         }, {
-            "lambda-l1": [1., 10., 20., 30., 50., 100.]
+            "lambda-palette": [10., 50., 100., 200.]
         })
     runner.execute(config)

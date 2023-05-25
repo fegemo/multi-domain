@@ -18,7 +18,7 @@ if __name__ == "__main__":
         {
             "model": "stargan-paired",
             "adhoc": ["rm2k", "no-aug", "callback-evaluate-fid", "callback-evaluate-l1"],
-            "log-folder": config.output if config.output is not None else "output/dsteps-study",
+            "log-folder": config.output if config.output is not None else "output",
             "epochs": 240,
             "model-name": "@model",
             "experiment": "&d-steps&lr",
