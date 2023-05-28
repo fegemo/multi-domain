@@ -17,7 +17,8 @@ class UnpairedStarGANModel(S2SModel):
         self.lambda_gp = config.lambda_gp
         self.lambda_domain = config.lambda_domain
         self.lambda_reconstruction = config.lambda_reconstruction
-        self.palette_loss = config.lambda_palette
+        self.lambda_palette = config.lambda_palette
+        self.lambda_tv = config.lambda_tv
         self.discriminator_steps = config.d_steps
         self.domain_classification_loss = tf.keras.losses.BinaryCrossentropy(from_logits=True)
         if config.sampler == "multi-target":
@@ -55,14 +56,16 @@ class UnpairedStarGANModel(S2SModel):
         domain_loss = tf.reduce_mean(self.domain_classification_loss(fake_domain, critic_fake_domain))
         recreation_loss = tf.reduce_mean(tf.abs(source_image - recreated_image))
         palette_loss = palette.calculate_palette_loss(target_palette, fake_image)
+        tv_loss = tf.reduce_mean(tf.image.total_variation(fake_image))
 
         total_loss = adversarial_loss + \
                      self.lambda_domain * domain_loss + \
                      self.lambda_reconstruction * recreation_loss + \
-                     (self.lambda_palette * t) * palette_loss
+                     (self.lambda_palette * t) * palette_loss + \
+                     self.lambda_tv * tv_loss
 
         return {"total": total_loss, "adversarial": adversarial_loss, "domain": domain_loss,
-                "recreation": recreation_loss, "palette": palette_loss}
+                "recreation": recreation_loss, "palette": palette_loss, "total_variation": tv_loss}
 
     def discriminator_loss(self, critic_real_patches, critic_real_domain, real_domain, critic_fake_patches,
                            gradient_penalty):
@@ -199,12 +202,13 @@ class UnpairedStarGANModel(S2SModel):
                     tf.summary.scalar("domain_loss", g_loss["domain"], step=step // update_steps)
                     tf.summary.scalar("recreation_loss", g_loss["recreation"], step=step // update_steps)
                     tf.summary.scalar("palette_loss", g_loss["palette"], step=step // update_steps)
+                    tf.summary.scalar("tv_loss", g_loss["total_variation"], step=step // update_steps)
             g_loss["l1"] = tf.constant(0.)
 
         else:
             dummy = tf.constant(0.)
             g_loss = {"total": dummy, "adversarial": dummy, "domain": dummy, "recreation": dummy, "l1": dummy,
-                      "palette": dummy}
+                      "palette": dummy, "total_variation": dummy}
 
         return c_loss, g_loss
 
@@ -484,7 +488,8 @@ class PairedStarGANModel(UnpairedStarGANModel):
 
         total_loss = g_loss["total"] + self.lambda_l1 * l1_loss
         return {"total": total_loss, "adversarial": g_loss["adversarial"], "domain": g_loss["domain"],
-                "recreation": g_loss["recreation"], "l1": l1_loss, "palette": g_loss["palette"]}
+                "recreation": g_loss["recreation"], "l1": l1_loss, "palette": g_loss["palette"],
+                "total_variation": g_loss["total_variation"]}
 
     @tf.function
     def train_step(self, batch, step, update_steps, t):
@@ -557,6 +562,7 @@ class PairedStarGANModel(UnpairedStarGANModel):
                 tf.summary.scalar("recreation_loss", g_loss["recreation"], step=step // update_steps)
                 tf.summary.scalar("l1_loss", g_loss["l1"], step=step // update_steps)
                 tf.summary.scalar("palette_loss", g_loss["palette"], step=step // update_steps)
+                tf.summary.scalar("tv_loss", g_loss["total_variation"], step=step // update_steps)
 
 
 class NParamsSupplier:
