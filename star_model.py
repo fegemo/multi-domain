@@ -120,8 +120,7 @@ class UnpairedStarGANModel(S2SModel):
         # (1) prepare the batch so it is: [b, d*s*s, c]
         combined_images = tf.reshape(tf.transpose(batch, [1, 0, 2, 3, 4]), [batch_size, -1, channels])
         # (2) extract the palette for each image in the batch: [b, (p), c]
-        target_palette = tf.map_fn(palette.batch_extract_palette, combined_images)
-        # # print("palettes", palettes)
+        palettes = palette.batch_extract_palette(combined_images)
 
         # TRAINING THE DISCRIMINATOR
         # ==========================
@@ -189,7 +188,7 @@ class UnpairedStarGANModel(S2SModel):
                 # 4. calculate the loss
                 g_loss = self.generator_loss(fake_predicted_patches, fake_predicted_domain,
                                              tf.one_hot(target_domain, number_of_domains),
-                                             target_image, remade_image, genned_image, source_image, target_palette, t)
+                                             target_image, remade_image, genned_image, source_image, palettes, t)
 
             # 5. update the generator weights using the gradients
             generator_gradients = gen_tape.gradient(g_loss["total"], self.generator.trainable_variables)
