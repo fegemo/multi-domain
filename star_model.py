@@ -62,7 +62,7 @@ class UnpairedStarGANModel(S2SModel):
                      self.lambda_domain * domain_loss + \
                      self.lambda_reconstruction * recreation_loss + \
                      (self.lambda_palette * t) * palette_loss + \
-                     self.lambda_tv * tv_loss
+                     (self.lambda_tv * t) * tv_loss
 
         return {"total": total_loss, "adversarial": adversarial_loss, "domain": domain_loss,
                 "recreation": recreation_loss, "palette": palette_loss, "total_variation": tv_loss}
