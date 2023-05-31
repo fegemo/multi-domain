@@ -90,7 +90,8 @@ parser.save_configuration(model.get_output_folder())
 
 # configuration for training
 steps = ceil(config.train_size / config.batch) * config.epochs
-update_steps = steps // 40
+# update_steps = steps // 40
+update_steps = 1000
 
 print(
     f"Starting training for {config.epochs} epochs in {steps} steps, updating visualization every "

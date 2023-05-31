@@ -25,7 +25,7 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "epochs": 350,
+            "epochs": 500,
             "d-steps": 1,
             "lr": 0.0001,
             "lambda-l1": 100.,
@@ -34,6 +34,6 @@ if __name__ == "__main__":
             "model-name": "@model",
             "experiment": "rm2k@model&lambda-tv",
         }, {
-            "lambda-tv": [0, 0.001, 0.002, 0.003, 0.0008, 0.0005]
+            "lambda-tv": [0, 0.005, 0.0025, 0.001, 0.0005, 0.0001]
         })
     runner.execute(config)
