@@ -90,31 +90,28 @@ parser.save_configuration(model.get_output_folder())
 
 # configuration for training
 steps = ceil(config.train_size / config.batch) * config.epochs
-# update_steps = steps // 40
-update_steps = 1000
+# evaluate_steps = steps // 40
+evaluate_steps = 1000
 
 print(
     f"Starting training for {config.epochs} epochs in {steps} steps, updating visualization every "
-    f"{update_steps} steps...")
+    f"{evaluate_steps} steps...")
 
 # starting training
 callbacks = [c[len("callback_"):] for c in ["callback_debug_discriminator", "callback_evaluate_fid",
                                             "callback_evaluate_l1"] if
              getattr(config, c)]
 
-# tf.random.set_seed(11)
-# image_and_domain, random_source_index, random_source_image, random_target_index = model.select_random_input(next(iter(train_ds)), 4)
-# print("random_source_index", random_source_index)
-# print("random_target_index", random_target_index)
 
-
-model.fit(train_ds, test_ds, steps, update_steps, callbacks=callbacks)
+model.fit(train_ds, test_ds, steps, evaluate_steps, callbacks=callbacks)
 
 # restores the best generator (best l1 - priority, or best fid)
-model.restore_best_generator()
+step = model.restore_best_generator()
+print(f"Restored the BEST generator, which was in step {step}.")
 
 # generating resulting images
-model.generate_images_from_dataset(test_ds)
+print(f"Starting to generate the images from the test dataset with generator from step {step}...")
+model.generate_images_from_dataset(test_ds, step)
 
 if config.save_model:
     print(f"Saving the generator...")

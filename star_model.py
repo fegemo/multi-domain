@@ -3,7 +3,9 @@ from abc import ABC, abstractmethod
 
 import tensorflow as tf
 from matplotlib import pyplot as plt
+from tqdm import tqdm
 
+import dataset_utils
 import io_utils
 import palette
 from networks import stargan_resnet_generator, stargan_resnet_discriminator
@@ -388,7 +390,7 @@ class UnpairedStarGANModel(S2SModel):
         plt.savefig(image_path, transparent=True)
         plt.close(fig)
 
-    def generate_images_from_dataset(self, dataset, num_images=None):
+    def generate_images_from_dataset(self, dataset, step, num_images=None):
         dataset = dataset.unbatch()
         if num_images is None:
             num_images = dataset.cardinality()
@@ -402,8 +404,8 @@ class UnpairedStarGANModel(S2SModel):
 
         number_of_domains = self.config.number_of_domains
         # for each image in the dataset...
-        for i, domain_images in enumerate(dataset):
-            image_path = os.sep.join([base_image_path, f"{i}.png"])
+        for i, domain_images in enumerate(tqdm(dataset, total=len(dataset))):
+            image_path = os.sep.join([base_image_path, f"{i}_at_step_{step}.png"])
             fig = plt.figure(figsize=(4 * number_of_domains, 4 * number_of_domains))
             for source_index in range(number_of_domains):
                 source_image = tf.gather(domain_images, source_index)

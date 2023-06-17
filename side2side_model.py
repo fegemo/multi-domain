@@ -121,7 +121,7 @@ class S2SModel(ABC):
         finally:
             self.summary_writer.flush()
 
-    def do_fit(self, train_ds, test_ds, steps, update_steps=1000, callbacks=[], starting_step=0):
+    def do_fit(self, train_ds, test_ds, steps, evaluate_steps=1000, callbacks=[], starting_step=0):
         num_test_images = min(self.config.test_size, 136)
         examples_for_visualization = self.select_examples_for_visualization(train_ds, test_ds)
         example_indices_for_evaluation = []
@@ -137,26 +137,27 @@ class S2SModel(ABC):
             step += starting_step
 
             # every UPDATE_STEPS and in the beginning, visualize x images to see how training is going...
-            if (step + 1) % update_steps == 0 or step == 0:
+            it_is_time_to_evaluate = (step + 1) % evaluate_steps == 0 or step == 0 or step == steps - 1
+            if it_is_time_to_evaluate:
                 display.clear_output(wait=True)
 
                 if step != 0:
-                    show_eta(training_start_time, step_start_time, step, starting_step, steps, update_steps)
+                    show_eta(training_start_time, step_start_time, step, starting_step, steps, evaluate_steps)
 
                 step_start_time = time.time()
 
                 with self.summary_writer.as_default():
                     save_image_name = os.sep.join([
                         self.get_output_folder(),
-                        "step_{:06d},update_{:03d}.png".format(step + 1, (step + 1) // update_steps)
+                        "step_{:06d},update_{:03d}.png".format(step + 1, (step + 1) // evaluate_steps)
                     ])
                     print(f"Previewing images generated at step {step + 1} (train + test)...")
                     image_data = self.preview_generated_images_during_training(examples_for_visualization,
                                                                                save_image_name, step + 1)
                     image_data = io_utils.plot_to_image(image_data, self.config.output_channels)
-                    tf.summary.image(save_image_name, image_data, step=(step + 1) // update_steps, max_outputs=5)
+                    tf.summary.image(save_image_name, image_data, step=(step + 1) // evaluate_steps, max_outputs=5)
 
-                # check if we need to generate images for evaluation (and do it only once)
+                # check if we need to generate images for evaluation (and do it only once before the callback ifs)
                 if S2SModel.should_evaluate(callbacks):
                     examples_for_evaluation = self.generate_images_for_evaluation(example_indices_for_evaluation)
 
@@ -168,7 +169,7 @@ class S2SModel(ABC):
                                                    step + 1, 3)
                 if "evaluate_l1" in callbacks:
                     print(f"Comparing L1 between generated images from train and test...", end="", flush=True)
-                    l1_train, l1_test = self.report_l1(examples_for_evaluation, step=(step + 1) // update_steps)
+                    l1_train, l1_test = self.report_l1(examples_for_evaluation, step=(step + 1) // evaluate_steps)
                     print(f" L1: {l1_train:.5f} / {l1_test:.5f} (train/test)")
                     self.update_training_metrics("l1", l1_test, step + 1, True)
 
@@ -176,25 +177,27 @@ class S2SModel(ABC):
                     print(
                         f"Calculating Fréchet Inception Distance at {(step + 1) / 1000}k with {num_test_images} "
                         f"examples...")
-                    fid_train, fid_test = self.report_fid(examples_for_evaluation, step=(step + 1) // update_steps)
+                    fid_train, fid_test = self.report_fid(examples_for_evaluation, step=(step + 1) // evaluate_steps)
                     print(f"FID: {fid_train:.3f} / {fid_test:.3f} (train/test)")
                     self.update_training_metrics("fid", fid_test, step + 1, "evaluate_l1" not in callbacks)
 
                 print(f"Step: {(step + 1) / 1000}k")
                 if step - starting_step < steps - 1:
-                    print("_" * (update_steps // 10))
+                    print("_" * (evaluate_steps // 10))
 
             # actually TRAIN
             t = tf.cast(step / steps, tf.float32)
-            self.train_step(batch, step, update_steps, t)
+            self.train_step(batch, step, evaluate_steps, t)
 
             # dot feedback for every 10 training steps
             if (step + 1) % 10 == 0 and step - starting_step < steps - 1:
                 print(".", end="", flush=True)
 
+        print("\nAbout to exit the training loop...")
+
         # if no evaluation callback was used, we save a single checkpoint with the end of the training
         if not S2SModel.should_evaluate(callbacks):
-            self.checkpoint_manager.save()
+            self.save_generator_checkpoint(steps)
 
     def update_training_metrics(self, metric_name, value, step, should_save_checkpoint=False):
         metric = self.training_metrics[metric_name]
@@ -202,7 +205,7 @@ class S2SModel(ABC):
             metric["best_value"].assign(value)
             metric["step"].assign(step)
             if should_save_checkpoint:
-                self.checkpoint_manager.save()
+                self.save_generator_checkpoint(step)
 
     @staticmethod
     def should_evaluate(callbacks):
@@ -269,6 +272,20 @@ class S2SModel(ABC):
     def restore_best_generator(self):
         self.checkpoint_manager.restore_or_initialize()
 
+        file_path = os.sep.join([self.checkpoint_manager.directory, "step_of_best_generator.txt"])
+        if os.path.isfile(file_path):
+            file = open(file_path, "r", encoding="utf-8")
+            step_of_best_generator = int(next(file))
+        else:
+            step_of_best_generator = None
+        return step_of_best_generator
+
+    def save_generator_checkpoint(self, step):
+        self.checkpoint_manager.save()
+        file_path = os.sep.join([self.checkpoint_manager.directory, "step_of_best_generator.txt"])
+        file = open(file_path, "w", encoding="utf-8")
+        file.write(str(step.numpy()))
+
     def save_generator(self):
         py_model_path = self.get_output_folder(["models", "py", "generator"], True)
         io_utils.delete_folder(py_model_path)
@@ -282,7 +299,7 @@ class S2SModel(ABC):
         self.generator = tf.keras.models.load_model(py_model_path)
 
     @abstractmethod
-    def generate_images_from_dataset(self, dataset, num_images=None):
+    def generate_images_from_dataset(self, dataset, step, num_images=None):
         pass
 
     @abstractmethod
