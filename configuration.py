@@ -65,11 +65,14 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--discriminator", help="network from { resnet, unet } for stargan or "
                                                          "{ XXXX } for collagan", default="")
         self.parser.add_argument("--conditional-discriminator", help="Makes the discriminator receive the source image"
-                                                                     " just like in Pix2Pix (only for stargan-paired).",
+                                                                     " just like in Pix2Pix (only for stargan-paired)",
                                  action="store_true", default=False)
         self.parser.add_argument("--source-domain-aware-generator", help="Makes the generator receive the source domain"
                                                                          " besides the target and source image"
                                                                          " (only for stargan-paired)",
+                                 action="store_true", default=False)
+        self.parser.add_argument("--palette-aware-generator", help="Makes the generator receive the target palette to "
+                                                                   "use when generating images",
                                  action="store_true", default=False)
         self.parser.add_argument("--image-size", help="size of squared images", default=IMG_SIZE, type=int)
         self.parser.add_argument("--output-channels", help="size of squared images", default=OUTPUT_CHANNELS, type=int)
@@ -164,6 +167,9 @@ class OptionParser(metaclass=SingletonMeta):
             self.initialize()
         self.values = self.parser.parse_args(args)
 
+        setattr(self.values, "d_steps", self.values.d_steps if self.values.model == "stargan-unpaired" else 1)
+        setattr(self.values, "source_domain_aware_generator", True if self.values.source_domain_aware_generator
+                                                                      or self.values.palette_aware_generator else False)
         setattr(self.values, "number_of_domains", len(self.values.domains))
         setattr(self.values, "seed", SEED)
         if self.values.no_aug:

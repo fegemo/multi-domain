@@ -1,4 +1,9 @@
 import tensorflow as tf
+from matplotlib import pyplot as plt
+
+from configuration import OptionParser
+from dataset_utils import load_multi_domain_ds
+from star_model import MultiTargetSampler, PairedStarGANModel
 
 # from matplotlib import pyplot as plt
 #
@@ -32,6 +37,7 @@ import tensorflow as tf
 a1 = tf.ragged.constant(
     [[[b'a1', b'a2', b'a3'], [b'b1', b'b2', b'b3'], [b'c1', b'c2', 'c3']], [[b'd1'], [b'e1', b'e2']]])
 b1 = tf.ragged.constant([[[b't1', b't2', b't3'], [b'u1', b'u2'], [b'v1', b'v2']], [[b'w1'], [b'x1', b'x2', b'x3']]])
+
 
 # @tf.function
 # def tile_nd_ragged(a, b):
@@ -72,11 +78,67 @@ b1 = tf.ragged.constant([[[b't1', b't2', b't3'], [b'u1', b'u2'], [b'v1', b'v2']]
 # print("result.shape", result.shape)
 # print("result", result)
 
-elems = tf.constant([[3], [5], [0], [2]])
-result = tf.map_fn(tf.range, elems,
-                   fn_output_signature=tf.RaggedTensorSpec(shape=[None],
-                                                           dtype=tf.int32))
+# elems = tf.constant([[3], [5], [0], [2]])
+# result = tf.map_fn(tf.range, elems,
+#                    fn_output_signature=tf.RaggedTensorSpec(shape=[None],
+#                                                            dtype=tf.int32))
+#
+# print("elems", elems)
+# print("result.shape", result.shape)
+# print("result", result)
 
-print("elems", elems)
-print("result.shape", result.shape)
-print("result", result)
+
+def testing_palette_extraction_from_augmented_target():
+    config = OptionParser().parse(["stargan-paired", "--rm2k"])
+    tf.random.set_seed(config.seed)
+
+    # loading the dataset according to the required model
+    train_ds, test_ds = load_multi_domain_ds(config)
+    sampler = MultiTargetSampler(config)
+    # model = PairedStarGANModel(config)
+
+    batch = next(iter(train_ds))
+    sampler.sample(batch)
+    source_domain, source_image, target_domain, target_image, palettes = sampler.sample(batch)
+
+    for i in range(config.batch):
+        sampler = source_domain[i]
+        t = target_domain[i]
+        # print(f"input {i} of batch has source {sampler} and target {t}")
+
+        fig = plt.figure(figsize=(4 * 3, 4))
+        plt.subplot(1, 3, 1)
+        plt.imshow(source_image[i] * 0.5 + 0.5)
+        plt.axis("off")
+        plt.subplot(1, 3, 2)
+        plt.imshow(target_image[i] * 0.5 + 0.5)
+        plt.axis("off")
+
+        # draw color swatches
+        ax_swatches = plt.subplot(1, 3, 3)
+        swatch_index = 0
+        swatch_size = 7
+        swatch_margin = 1
+        swatch_box = swatch_size + swatch_margin
+        swatches_per_row = config.image_size // swatch_box
+        num_rows = config.image_size // swatch_box
+        for color in palettes[i].numpy():
+            if color[0] > 1.:
+                continue
+            swatch_row = swatch_index // swatches_per_row
+            swatch_col = swatch_index % swatches_per_row
+            ax_swatches.hlines((num_rows - swatch_row) * swatch_box + swatch_margin, swatch_col * swatch_box,
+                               swatch_col * swatch_box + swatch_size,
+                               color=color * 0.5 + 0.5, linewidth=swatch_size)
+
+            swatch_index += 1
+        ax_swatches.set_xlim(0, config.image_size)
+        ax_swatches.set_ylim(0, config.image_size)
+        plt.axis("off")
+
+        fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
+
+    plt.show(transparent=True)
+
+
+testing_palette_extraction_from_augmented_target()

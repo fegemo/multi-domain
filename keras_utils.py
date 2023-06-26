@@ -40,3 +40,46 @@ class TileLayer(keras.layers.Layer):
     def compute_output_shape(self, input_shape):
         input_shape = tf.TensorShape(input_shape).as_list()
         return tf.TensorShape([input_shape[0], self.number] + input_shape[1:])
+
+
+class AdaptiveMixing(keras.layers.Layer):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.reshape = None
+        self.dense_scale = None
+        self.dense_bias = None
+        self.x_channels = None
+
+    def build(self, input_shapes):
+        self.x_channels = input_shapes[0][-1]
+        self.dense_scale = keras.layers.Dense(self.x_channels)
+        self.dense_bias = keras.layers.Dense(self.x_channels)
+        self.reshape = keras.layers.Reshape([1, 1, -1])
+        
+    def call(self, inputs, **kwargs):
+        x, w = inputs
+        ys = self.dense_scale(w)
+        yb = self.dense_bias(w)
+        ys = self.reshape(ys)
+        yb = self.reshape(yb)
+
+        return ys * x + yb
+
+
+
+# import tensorflow as tf
+# import keras_utils as ku
+#
+# image_input = tf.keras.layers.Input(shape=[2, 2, 3])
+# palet_input = tf.keras.layers.Input(shape=[64, 3])
+# x = image_input
+# w = palet_input
+# w = tf.keras.layers.Flatten()(w)
+# w = tf.keras.layers.Dense(10)(w)
+# output = ku.AdaptiveMixing()([x, w])
+# model = tf.keras.models.Model(inputs=[image_input, palet_input], outputs=[output])
+#
+# example_image = tf.expand_dims(tf.constant([[[0, 0, 0], [0.1, 0.2, 0.3]], [[0.4, 0.5, 0.6], [1., 1., 1.]]], dtype=tf.float32), 0)
+# # example_palet = tf.RaggedTensor.from_row_splits(values=[[.5, .5, .5], [.2, .2, .2]], row_splits=[0, 2])
+# example_palet = tf.expand_dims(tf.concat([tf.constant([[.5, .5, .5,], [.2, .2, .2]]), tf.ones([62, 3]) * 1000.], axis=0), 0)
+# model([example_image, example_palet])

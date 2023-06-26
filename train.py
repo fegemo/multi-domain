@@ -121,3 +121,4 @@ print("Finished executing.")
 
 # python train.py stargan-unpaired --rm2k --log-folder output --epochs 240 --no-aug --model-name stargan-unpaired --experiment rm2k-240ep-noaug-lrdecay-lr0.0001-tfadd0.18.0-discwithdecay-bce-singletargetdomain --sampler single-target
 # python train.py stargan-paired --rm2k --log-folder output --epochs 4 --no-aug --model-name playground --experiment playground
+# python train.py stargan-paired --rm2k --log-folder output --epochs 4 --no-aug --model-name playground --experiment adain --palette-aware-generator --source-domain-aware-generator --d-steps 1 --verbose

@@ -15,7 +15,7 @@ def extract_palette(image):
     batched 4D tensor, in which case it looks for the combined (single) palette for all such images (this is useful
     if we have front/right/back/left of a sprite and want a combined palette).
 
-    Returns a tensor of colors (RGB) representing an image's palette
+    Returns a tensor of colors (RGBA) representing an image's palette
     -------
     """
     channels = tf.shape(image)[-1]
@@ -34,8 +34,8 @@ def extract_palette(image):
 def batch_extract_palette(images):
     """
     Extracts the palette of each image in the batch, returning a ragged tensor of shape [b, (colors), c]
-    :param images:
-    :return:
+    :param images: a batch of images with shape [b, s, s, c]
+    :return: a ragged tensor containing the palette colors for each image in the batch, with shape [b, (colors), c]
     """
     images = dataset_utils.denormalize(images)
     images = tf.cast(images, tf.int32)
@@ -45,6 +45,27 @@ def batch_extract_palette(images):
                                     ragged_rank=0,
                                     dtype=tf.int32))
     palettes = tf.RaggedTensor.to_tensor(palettes_ragged, default_value=INVALID_COLOR)
+    palettes = tf.cast(palettes, tf.float32)
+    palettes = dataset_utils.normalize(palettes)
+
+    return palettes
+
+
+def batch_extract_palette_padded(images):
+    """
+    Extracts the palette of each image in the batch, returning a ragged tensor of shape [b, (colors), c]
+    :param images: a batch of images with shape [b, s, s, c]
+    :return: a ragged tensor containing the palette colors for each image in the batch, with shape [b, (colors), c]
+    """
+    b, image_shape = tf.shape(images)[0], tf.shape(images)[1:]
+    images = dataset_utils.denormalize(images)
+    images = tf.cast(images, tf.int32)
+
+    palettes_ragged = tf.map_fn(fn=extract_palette, elems=images,
+                                fn_output_signature=RaggedTensorSpec(
+                                    ragged_rank=0,
+                                    dtype=tf.int32))
+    palettes = tf.RaggedTensor.to_tensor(palettes_ragged, default_value=INVALID_COLOR, shape=[b, 16, image_shape[-1]])
     palettes = tf.cast(palettes, tf.float32)
     palettes = dataset_utils.normalize(palettes)
 
