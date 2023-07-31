@@ -4,6 +4,7 @@ from math import ceil
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
+from colla_model import CollaGANModel
 from dataset_utils import load_multi_domain_ds
 from configuration import OptionParser
 from star_model import UnpairedStarGANModel, PairedStarGANModel
@@ -55,6 +56,8 @@ if config.model == "stargan-unpaired":
     class_name = UnpairedStarGANModel
 elif config.model == "stargan-paired":
     class_name = PairedStarGANModel
+elif config.model == "collagan":
+    class_name = CollaGANModel
 else:
     raise Exception(f"The asked model of {config.model} was not found.")
 
@@ -121,3 +124,8 @@ print("Finished executing.")
 
 # python train.py stargan-unpaired --rm2k --log-folder output --epochs 240 --no-aug --model-name stargan-unpaired --experiment rm2k-240ep-noaug-lrdecay-lr0.0001-tfadd0.18.0-discwithdecay-bce-singletargetdomain --sampler single-target
 # python train.py stargan-paired --rm2k --log-folder output --epochs 4 --no-aug --model-name playground --experiment playground
+# python train.py collagan --rm2k --log-folder output --epochs 40 --no-aug --model-name collagan --experiment playground
+# python train.py collagan --rm2k --log-folder output --epochs 40 --no-aug --model-name collagan --experiment b4,l1100,lr0.0002,dom10 --batch 4 --lambda-l1 100 --lr 0.0002 --lambda-domain 10
+# python train.py collagan --rm2k --log-folder output --epochs 300 --no-aug --model-name collagan --experiment playground --lambda-l1 100 --lr 0.0002 --lr-decay none --callback-evaluate-l1 --callback-evaluate-fid --callback-debug-discriminator
+# python train.py collagan --rm2k --log-folder output --epochs 400 --no-tran --model-name collagan --experiment l1100,d10,s10,lr0001,decayctl,indrop
+# python train.py collagan --rm2k --log-folder output --epochs 400 --no-tran --model-name collagan --experiment l1100,d10,s10,lr0001,decayctl,indrop,correctssim,correctdomain --lambda-l1 100 --lambda-domain 10 --lambda-ssim 10 --lr 0.0001 --lr-decay constant-than-linear --callback-evaluate-l1 --callback-evaluate-fid --callback-debug-discriminator --input-dropout

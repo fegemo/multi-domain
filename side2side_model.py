@@ -89,13 +89,19 @@ class S2SModel(ABC):
         if starting_step == 0:
             # initialize generator and discriminator optimizers
             if self.config.lr_decay == "constant-then-linear":
+                # configuration as used by stargan
                 lr_generator = ConstantThenLinearDecay(self.config.lr, steps // self.config.d_steps)
                 lr_discriminator = ConstantThenLinearDecay(self.config.lr, steps)
+            elif self.config.lr_decay == "exponential":
+                # configuration as used by collagan
+                lr_generator = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr, 400, 0.99, True)
+                lr_discriminator = lr_generator
             else:
                 lr_generator = self.config.lr
                 lr_discriminator = self.config.lr
             self.generator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_generator, beta_1=0.5, beta_2=0.999)
-            self.discriminator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_discriminator, beta_1=0.5, beta_2=0.999)
+            self.discriminator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_discriminator, beta_1=0.5,
+                                                                    beta_2=0.999)
 
             # initializes tensorboard utilities for logging training statistics
             self.summary_writer = tf.summary.create_file_writer(self.get_output_folder())
@@ -231,9 +237,8 @@ class S2SModel(ABC):
     def generate_images_for_evaluation(self, example_indices_for_evaluation):
         pass
 
-    @abstractmethod
-    def evaluate_l1(self, real_images, fake_images):
-        pass
+    def evaluate_l1(self, real_image, fake_image):
+        return tf.reduce_mean(tf.abs(fake_image - real_image))
 
     def report_fid(self, examples_for_evaluation, step=None):
         train_real_images, train_fake_images = examples_for_evaluation["train"]
@@ -303,7 +308,7 @@ class S2SModel(ABC):
         pass
 
     @abstractmethod
-    def debug_discriminator_patches(self, batch, image_path):
+    def debug_discriminator_output(self, batch, image_path):
         pass
 
     def show_discriminated_images(self, dataset, ds_name, step, num_images=3):
@@ -315,7 +320,7 @@ class S2SModel(ABC):
         io_utils.ensure_folder_structure(base_path)
 
         batch = list(dataset.take(num_images).as_numpy_iterator())
-        self.debug_discriminator_patches(batch, image_path)
+        self.debug_discriminator_output(batch, image_path)
 
     @staticmethod
     def create_layout_summary():

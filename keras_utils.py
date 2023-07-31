@@ -40,3 +40,11 @@ class TileLayer(keras.layers.Layer):
     def compute_output_shape(self, input_shape):
         input_shape = tf.TensorShape(input_shape).as_list()
         return tf.TensorShape([input_shape[0], self.number] + input_shape[1:])
+
+
+class NParamsSupplier:
+    def __init__(self, supply_first_n_params):
+        self.n = supply_first_n_params
+
+    def __call__(self, *args, **kwargs):
+        return [*args[:self.n]]

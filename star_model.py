@@ -5,9 +5,9 @@ import tensorflow as tf
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-import dataset_utils
 import io_utils
 import palette
+from keras_utils import NParamsSupplier
 from networks import stargan_resnet_generator, stargan_resnet_discriminator
 from side2side_model import S2SModel
 
@@ -262,9 +262,6 @@ class UnpairedStarGANModel(S2SModel):
 
         return figure
 
-    def evaluate_l1(self, real_images, fake_images):
-        return tf.reduce_mean(tf.abs(fake_images - real_images))
-
     def initialize_random_examples_for_evaluation(self, train_ds, test_ds, num_images):
         number_of_domains = self.config.number_of_domains
 
@@ -299,7 +296,7 @@ class UnpairedStarGANModel(S2SModel):
             "test": generate_images_from_dataset("test")
         })
 
-    def debug_discriminator_patches(self, batch, image_path):
+    def debug_discriminator_output(self, batch, image_path):
         # generates the fake image and the discriminations of the real and fake
         domain_images = batch
         number_of_domains = self.config.number_of_domains
@@ -566,9 +563,3 @@ class PairedStarGANModel(UnpairedStarGANModel):
                 tf.summary.scalar("tv_loss", g_loss["total_variation"], step=step // update_steps)
 
 
-class NParamsSupplier:
-    def __init__(self, supply_first_n_params):
-        self.n = supply_first_n_params
-
-    def __call__(self, *args, **kwargs):
-        return [*args[:self.n]]

@@ -6,7 +6,8 @@ from unittest.mock import patch
 import tensorflow as tf
 
 from configuration import OptionParser
-from star_model import UnpairedStarGANModel, NParamsSupplier
+from star_model import UnpairedStarGANModel
+from keras_utils import NParamsSupplier
 
 
 class StarGANModelTest(tf.test.TestCase):

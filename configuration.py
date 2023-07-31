@@ -19,10 +19,12 @@ LAMBDA_GP = 10.
 LAMBDA_DOMAIN = 1.
 LAMBDA_RECONSTRUCTION = 10.
 LAMBDA_L1 = 10.
+LAMBDA_SSIM = 10.
 LAMBDA_PALETTE = 0.
 LAMBDA_TV = 0.
 DISCRIMINATOR_STEPS = 5
 EPOCHS = 160
+PRETRAIN_EPOCHS = 0  # 30 in colla's code
 LR_DECAY = "constant-then-linear"
 LR = 0.0001
 TRAINING_SAMPLER = "multi-target"
@@ -58,12 +60,12 @@ class OptionParser(metaclass=SingletonMeta):
 
     def initialize(self):
         self.parser.add_argument(
-            "model", help="one from { stargan-unpaired, stargan-paired, collagan-unpaired, collagan-paired }"
+            "model", help="one from { stargan-unpaired, stargan-paired, collagan, fegegan }"
                           "- the model to train")
         self.parser.add_argument("--generator", help="network from { resnet, unet } for stargan or "
-                                                     "{ XXXX } for collagan", default="")
+                                                     "{ affluent } for collagan", default="")
         self.parser.add_argument("--discriminator", help="network from { resnet, unet } for stargan or "
-                                                         "{ XXXX } for collagan", default="")
+                                                         "{ original } for collagan", default="")
         self.parser.add_argument("--conditional-discriminator", help="Makes the discriminator receive the source image"
                                                                      " just like in Pix2Pix (only for stargan-paired).",
                                  action="store_true", default=False)
@@ -83,11 +85,16 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument(
             "--lambda-gp", type=float, help="value for λgradient_penalty used in stargan", default=LAMBDA_GP)
         self.parser.add_argument("--lambda-domain", type=float,
-                                 help="value for λdomain used in stargan", default=LAMBDA_DOMAIN)
+                                 help="value for λdomain used in stargan and collagan", default=LAMBDA_DOMAIN)
         self.parser.add_argument("--lambda-reconstruction", type=float,
                                  help="value for λreconstruction used in stargan", default=LAMBDA_RECONSTRUCTION)
-        self.parser.add_argument("--lambda-l1", type=float, help="value for λl1 used in paired stargan",
+        self.parser.add_argument("--lambda-l1", type=float, help="value for λl1 used in paired stargan and for "
+                                                                 "λl1_forward in collagan",
                                  default=LAMBDA_L1)
+        self.parser.add_argument("--lambda-l1-backward", type=float, help="value for λl1_backward (cyclic) used "
+                                                                          "in collagan")
+        self.parser.add_argument("--lambda-ssim", type=float, help="value for λssim used in collagan",
+                                 default=LAMBDA_SSIM)
         self.parser.add_argument("--lambda-palette", type=float, help="value for λpalette used in paired stargan",
                                  default=LAMBDA_PALETTE)
         self.parser.add_argument("--lambda-tv", type=float, help="value for λtotal-variation used in paired stargan",
@@ -96,6 +103,8 @@ class OptionParser(metaclass=SingletonMeta):
                                  help="number of discriminator updates for each generator in stargan",
                                  default=DISCRIMINATOR_STEPS)
         self.parser.add_argument("--epochs", type=int, help="number of epochs to train", default=EPOCHS)
+        self.parser.add_argument("--pretrain-epochs", type=int, help="number of epochs pretraining (used by collagan)",
+                                 default=PRETRAIN_EPOCHS)
         self.parser.add_argument("--no-aug", action="store_true", help="Disables all augmentation", default=False)
         self.parser.add_argument("--no-hue", action="store_true", help="Disables hue augmentation", default=False)
         self.parser.add_argument("--no-tran", action="store_true", help="Disables translation augmentation",
@@ -125,6 +134,17 @@ class OptionParser(metaclass=SingletonMeta):
 
         self.parser.add_argument("--domains", help="domain folder names (w/o number, but in order)",
                                  default=DOMAINS, nargs="+")
+
+        # --- colla: specific options
+        self.parser.add_argument("--input-dropout", help="applies dropout to the input as in the CollaGAN paper",
+                                 action="store_true", default=False)
+        self.parser.add_argument("--cycled-source-replacer",
+                                 help="one from {forward, dropout} indicating which images should be replace by the"
+                                      "forward generated one when computing the cycled images. Colla's paper does not"
+                                      "specify this, but its code shows that it replaces all that have been"
+                                      "dropped out", default="dropout")
+
+        # --- all: regarding the datasets to use for training and evaluation
         self.parser.add_argument("--rmxp", action="store_true", default=False, help="Uses RPG Maker XP dataset")
         self.parser.add_argument("--rm2k", action="store_true", default=False, help="Uses RPG Maker 2000"
                                                                                     " dataset")
@@ -149,10 +169,7 @@ class OptionParser(metaclass=SingletonMeta):
                                                                                                "generate images in "
                                                                                                "the end")
         self.parser.add_argument("--tiny-validation", action="store_true", default=False,
-                                 help="Uses only tiny (136 "
-                                      "test examples) for "
-                                      "validation and to "
-                                      "generate images in "
+                                 help="Uses only tiny (136 test examples) for validation and to generate images in "
                                       "the end")
 
         self.initialized = True
@@ -164,6 +181,12 @@ class OptionParser(metaclass=SingletonMeta):
             self.initialize()
         self.values = self.parser.parse_args(args)
 
+        if self.values.model != "stargan-unpaired":
+            setattr(self.values, "d_steps", 1)
+        if self.values.model != "collagan":
+            setattr(self.values, "pretrain_epochs", 0)
+        if self.values.lambda_l1_backward is None:
+            self.values.lambda_l1_backward = self.values.lambda_l1 / 10.
         setattr(self.values, "number_of_domains", len(self.values.domains))
         setattr(self.values, "seed", SEED)
         if self.values.no_aug:
@@ -207,6 +230,9 @@ class OptionParser(metaclass=SingletonMeta):
         setattr(self.values, "train_size", train_size)
         setattr(self.values, "test_sizes", test_sizes)
         setattr(self.values, "test_size", test_size)
+
+        setattr(self.values, "steps", self.values.epochs * self.values.train_size / self.values.batch)
+        setattr(self.values, "pretrain_steps", self.values.pretrain_epochs * self.values.train_size // self.values.batch)
         if return_parser:
             return self.values, self
         else:

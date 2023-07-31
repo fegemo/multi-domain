@@ -173,7 +173,7 @@ class Pix2PixModel(S2SModel):
 
         return figure
 
-    def debug_discriminator_patches(self, batch_of_one):
+    def debug_discriminator_output(self, batch_of_one):
         # generates the fake image and the discriminations of the real and fake
         source_image, real_image = batch_of_one
         fake_image = self.generator(source_image, training=True)
@@ -394,7 +394,7 @@ class Pix2PixIndexedModel(Pix2PixModel):
 
         return figure
 
-    def debug_discriminator_patches(self, batch_of_one):
+    def debug_discriminator_output(self, batch_of_one):
         # generates the fake image and the discriminations of the real and fake
         source_image, real_image, palette = batch_of_one
 
