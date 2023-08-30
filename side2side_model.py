@@ -26,16 +26,13 @@ def show_eta(training_start_time, step_start_time, current_step, training_starti
 
 class S2SModel(ABC):
     def __init__(self, config):
-        self.generator = None
         self.generator_optimizer = None
-        self.discriminator = None
         self.discriminator_optimizer = None
 
         self.best_generator_checkpoint = None
         self.checkpoint_manager = None
         self.summary_writer = None
         self.training_metrics = None
-        self.best_generator_checkpoint = None
 
         self.config = config
         self.model_name = config.model_name

@@ -2,7 +2,7 @@ from unittest.mock import patch
 import tensorflow as tf
 
 from configuration import OptionParser
-from dataset_utils import load_image, create_multi_domain_image_loader
+from dataset_utils import load_image, create_multi_domain_image_loader, blacken_transparent_pixels
 
 
 class TestDatasetUtils(tf.test.TestCase):
@@ -66,6 +66,27 @@ class TestMultiImageLoader(tf.test.TestCase):
 
         self.assertIn("tiny-hero", last_tiny[0].numpy().decode("utf-8"))
         self.assertIn("rpg-maker-2000", first_rm2k[0].numpy().decode("utf-8"))
+
+    def setUp(self):
+        super().setUp()
+
+    def tearDown(self):
+        super().tearDown()
+
+
+class TestBlackenTransparentPixels(tf.test.TestCase):
+    def test_blacken_transparent_pixels(self):
+        image_with_transparency = tf.constant([
+            [[1., 1., 1., 0.], [0., 0., 0., 0.]],
+            [[.4, .4, .4, .1], [0., 0., 0., 1.]]
+        ])
+        expected_blackened = tf.constant([
+            [[0., 0., 0., 0.], [0., 0., 0., 0.]],
+            [[.4, .4, .4, .1], [0., 0., 0., 1.]]
+        ])
+
+        result = blacken_transparent_pixels(image_with_transparency)
+        self.assertAllEqual(result, expected_blackened)
 
     def setUp(self):
         super().setUp()

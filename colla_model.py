@@ -483,6 +483,10 @@ class CollaGANModel(S2SModel):
         fake_predicted_mean = tf.reduce_mean(fake_predicted_patches, axis=[1, 2, 3])
         back_predicted_mean = tf.reduce_mean(back_predicted_patches, axis=[1, 2, 3])
 
+        real_predicted_domain_logit = tf.math.reduce_max(tf.nn.softmax(real_predicted_domain), axis=1)
+        fake_predicted_domain_logit = tf.math.reduce_max(tf.nn.softmax(fake_predicted_domain), axis=1)
+        back_predicted_domain_logit = tf.math.reduce_max(tf.nn.softmax(back_predicted_domain), axis=1)
+
         real_predicted_domain = tf.math.argmax(real_predicted_domain, axis=1, output_type=tf.int32)
         fake_predicted_domain = tf.math.argmax(fake_predicted_domain, axis=1, output_type=tf.int32)
         back_predicted_domain = tf.math.argmax(back_predicted_domain, axis=1, output_type=tf.int32)
@@ -531,14 +535,20 @@ class CollaGANModel(S2SModel):
                         titles[j],
                         " ",
                         tf.strings.as_string(real_predicted_mean[i], precision=3),
-                        " (", self.config.domains[real_predicted_domain[i]], ")"]).numpy().decode("utf-8")
+                        " (", self.config.domains[real_predicted_domain[i]],
+                        " ",
+                        tf.strings.as_string(real_predicted_domain_logit[i], precision=2),
+                        ")"]).numpy().decode("utf-8")
 
                 elif titles[j] == "Disc. Gen.":
                     subplot_title = tf.strings.join([
                         titles[j],
                         " ",
                         tf.strings.as_string(fake_predicted_mean[i], precision=3),
-                        " (", self.config.domains[fake_predicted_domain[i]], ")"]).numpy().decode("utf-8")
+                        " (", self.config.domains[fake_predicted_domain[i]],
+                        " ",
+                        tf.strings.as_string(fake_predicted_domain_logit[i], precision=2),
+                        ")"]).numpy().decode("utf-8")
 
                 elif titles[j] == "Cycled":
                     current_source_domain_index = tf.cast(source_domain[i], tf.int32)
@@ -550,7 +560,10 @@ class CollaGANModel(S2SModel):
                         titles[j],
                         " ",
                         tf.strings.as_string(back_predicted_mean[i], precision=3),
-                        " (", self.config.domains[back_predicted_domain[i]], ")"]).numpy().decode("utf-8")
+                        " (", self.config.domains[back_predicted_domain[i]],
+                        " ",
+                        tf.strings.as_string(back_predicted_domain_logit[i], precision=2),
+                        ")"]).numpy().decode("utf-8")
 
                 plt.title(subplot_title, fontdict={"fontsize": 20})
                 image = None
