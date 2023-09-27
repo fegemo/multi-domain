@@ -125,7 +125,8 @@ class S2SModel(ABC):
             self.summary_writer.flush()
 
     def do_fit(self, train_ds, test_ds, steps, evaluate_steps=1000, callbacks=[], starting_step=0):
-        num_test_images = min(self.config.test_size, 136)
+        # num_test_images = min(self.config.test_size, 136)
+        num_test_images = self.config.test_size
         examples_for_visualization = self.select_examples_for_visualization(train_ds, test_ds)
         example_indices_for_evaluation = []
         examples_for_evaluation = []
