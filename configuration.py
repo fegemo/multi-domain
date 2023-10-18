@@ -60,7 +60,7 @@ class OptionParser(metaclass=SingletonMeta):
 
     def initialize(self):
         self.parser.add_argument(
-            "model", help="one from { stargan-unpaired, stargan-paired, collagan, fegegan }"
+            "model", help="one from { stargan-unpaired, stargan-paired, collagan, yamatagan }"
                           "- the model to train")
         self.parser.add_argument("--generator", help="network from { resnet, unet } for stargan or "
                                                      "{ affluent } for collagan", default="")
@@ -139,7 +139,7 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--input-dropout", help="applies dropout to the input as in the CollaGAN paper",
                                  action="store_true", default=False)
         self.parser.add_argument("--cycled-source-replacer",
-                                 help="one from {forward, dropout} indicating which images should be replace by the"
+                                 help="one from {forward, dropout} indicating which images should be replaced by the"
                                       "forward generated one when computing the cycled images. Colla's paper does not"
                                       "specify this, but its code shows that it replaces all that have been"
                                       "dropped out", default="dropout")
