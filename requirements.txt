@@ -12,3 +12,6 @@ Pillow==9.5.0
 tensorboard==2.10.1
 keras==2.10.0
 graphlib-backport
+
+# for tensorflow_addons not to include a new (breaking) version of typeguard:
+typeguard==2.7

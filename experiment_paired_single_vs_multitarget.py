@@ -18,21 +18,21 @@ if __name__ == "__main__":
         {
             "model": "stargan-paired",
             "adhoc": [
-                "tiny", "rm2k", "rmxp", "rmvx", "misc",
                 "no-tran",
                 "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
                 "conditional-discriminator", "source-domain-aware-generator",
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "epochs": 30,
+            "epochs": 50,
             "model-name": "@model",
-            "experiment": "@model&sampler",
+            "experiment": "@more-adhoc&sampler",
             "d-steps": 1,
-            "lr": 0.0001,
-            "lambda-l1": 10.
+            "lr": 0.0003,
+            "lambda-l1": 100.
         }, {
-            "sampler": ["single-target", "multi-target"]
+            "sampler": ["single-target", "multi-target"],
+            "more-adhoc": ["tiny", "rm2k", "rmxp", "rmvx", ["tiny", "rm2k", "rmxp", "rmvx", "misc"]]
         })
 
     runner.execute(config)

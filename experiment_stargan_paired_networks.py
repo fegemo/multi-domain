@@ -27,12 +27,12 @@ if __name__ == "__main__":
             "log-folder": config.output if config.output is not None else "output",
             "epochs": 50,
             "d-steps": 1,
-            "lr": 0.0001,
+            "lr": 0.0003,
             "lambda-l1": 100.,
-            "lambda-palette": 100.,
+            "lambda-palette": 0.,
             "sampler": "multi-target",
             "model-name": "@model",
-            "experiment": "gen-input-3-@model&lambda-palette",
+            "experiment": "source-domain-aware-generator",
         }, {})
     runner.execute(config)
     runner = Experimenter(
@@ -50,12 +50,12 @@ if __name__ == "__main__":
             "log-folder": config.output if config.output is not None else "output",
             "epochs": 50,
             "d-steps": 1,
-            "lr": 0.0001,
+            "lr": 0.0003,
             "lambda-l1": 100.,
-            "lambda-palette": 100.,
+            "lambda-palette": 0,
             "sampler": "multi-target",
             "model-name": "@model",
-            "experiment": "disc-input-2-@model&lambda-palette",
+            "experiment": "conditional-discriminator",
         }, {})
     runner.execute(config)
     runner = Experimenter(
@@ -73,11 +73,11 @@ if __name__ == "__main__":
             "log-folder": config.output if config.output is not None else "output",
             "epochs": 50,
             "d-steps": 1,
-            "lr": 0.0001,
+            "lr": 0.0003,
             "lambda-l1": 100.,
-            "lambda-palette": 100.,
+            "lambda-palette": 0.,
             "sampler": "multi-target",
             "model-name": "@model",
-            "experiment": "disc-input-2-gen-input-3-@model&lambda-palette",
+            "experiment": "both",
         }, {})
     runner.execute(config)
