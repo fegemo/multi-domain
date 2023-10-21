@@ -91,15 +91,23 @@ class Experimenter:
         for param_name, param_value in interpolated_params.items():
             positional = False
             adhoc = False
+            more_adhoc = False
             if param_name == "model":
                 positional = True
             elif param_name == "adhoc":
                 adhoc = True
+            elif param_name == "more-adhoc":
+                more_adhoc = True
 
             if positional:
                 run_params_string += f"{param_value} "
             elif adhoc:
                 run_params_string += " ".join(map(lambda v: f"--{v} ", param_value))
+            elif more_adhoc:
+                if isinstance(param_value, list):
+                    run_params_string += " ".join(map(lambda v: f"--{v} ", param_value))
+                else:
+                    run_params_string += f"--{param_value} "
             else:
                 run_params_string += f"--{param_name} {param_value} "
 
