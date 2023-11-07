@@ -7,7 +7,7 @@ from functools import reduce
 from glob import glob
 from graphlib import TopologicalSorter
 from itertools import product
-from typing import Dict, Any, Union
+from typing import Dict, Any, Union, List
 
 from tqdm import tqdm
 
@@ -32,13 +32,18 @@ class Experimenter:
 
     def run(self):
         checkpoint_file = self.open_checkpoint_file()
-        completed, total = self.lookup_start_and_total_runs(checkpoint_file)
+        execution_status, total = self.lookup_start_and_total_runs(checkpoint_file)
+        completed = reduce(lambda count, status: count + 1 if status else count, execution_status, 0)
 
         # check if there's a checkpoint and resume from it
         # or start from the beginning
         if completed > 0:
             print(f"Resuming from previous checkpoint {self.hash_checkpoint_name()} that had completed {completed}"
-                  f" of {total} runs.")
+                  f" of {total} runs: {execution_status}.")
+        elif completed == total:
+            print("All runs WERE ALREADY completed.")
+            checkpoint_file.close()
+            return
         else:
             print(f"Starting the experiments from the beginning with hash {self.hash_checkpoint_name()}.")
 
@@ -46,23 +51,26 @@ class Experimenter:
 
         try:
             for run_index, combination in tqdm(enumerate(combinations), total=total):
-                # skip the first "completed" runs
-                if completed > run_index:
+                if execution_status[run_index]:
+                    print("Skipped the run with index", run_index, "because it was already completed.")
                     continue
-                elif completed == run_index and run_index != 0:
-                    print(f"Skipped the first {completed} runs.")
 
                 # executes the current run
-                self.execute_run(combination)
+                success = self.execute_run(combination)
+                execution_status[run_index] = success
 
                 # saves at the checkpoint file that this test was completed
-                self.save_checkpoint(checkpoint_file, run_index + 1, total)
+                self.save_checkpoint(checkpoint_file, execution_status, total)
 
-            print(f"All {total} runs are complete.")
+            all_success = bool(reduce(lambda a, b: a and b, execution_status, True))
+            all_failure = bool(reduce(lambda a, b: not a and not b, execution_status, True))
+            execution_status_description = "successfully" if all_success else \
+                ("all with errors" if all_failure else "with some errors")
+            print(f"All {total} runs are complete with: {execution_status_description}.")
             print(f"Head for {self.output_path} to see the logs... hash {self.hash_checkpoint_name()}")
         except ChildProcessError as error:
-            print(f"Some error occurred during the execution of runs... exiting!")
             print(f"ChildProcessError at index {run_index} with args {combination}:", error)
+            print(f"Some error occurred during the execution of runs... exiting!")
         finally:
             # closes the checkpoint file
             checkpoint_file.close()
@@ -80,8 +88,10 @@ class Experimenter:
             process.wait()
             if process.returncode != 0:
                 raise ChildProcessError()
+            return True
         except ChildProcessError as error:
             print(f"Error running command: {command}:", error)
+            return False
         finally:
             log_file.close()
 
@@ -173,8 +183,8 @@ class Experimenter:
             # the file DOES not exist yet, create and populate a new one
             io_utils.ensure_folder_structure(self.output_path)
             file = open(checkpoint_path, "w+", encoding="utf-8")
-            # the file should have the format like: 25 of 121
-            file.write(f"0 of {self.calculate_number_of_runs()}")
+            # the file should have the format like: ooox.. (3 success, 1 error, 2 not run)
+            file.write("".join(["."] * self.calculate_number_of_runs()))
             file.flush()
             file.seek(0)
         return file
@@ -192,14 +202,18 @@ class Experimenter:
         return open(log_path, "w", encoding="utf-8")
 
     def lookup_start_and_total_runs(self, checkpoint_file):
-        # the file should have the format like: 25 of 121
-        tokens = next(checkpoint_file).split()
-        completed, amount = int(tokens[0]), int(tokens[2])
+        # the file should have the format like: ooox.. (3 successes, 1 error, 2 not run)
+        execution_status = next(checkpoint_file)
+        execution_status = list(map(lambda s: True if s == "o" else False, execution_status))
         checkpoint_file.seek(0)
-        return completed, amount
+        return execution_status, len(execution_status)
 
-    def save_checkpoint(self, file, completed, total):
-        file.write(f"{completed} of {total}")
+    # def save_checkpoint(self, file, completed, total):
+    def save_checkpoint(self, file, execution_status: List[bool], total):
+        execution_status = list(map(lambda s: "o" if s else "x", execution_status))
+        execution_status += ["."] * (total - len(execution_status))
+        execution_status = "".join(execution_status)
+        file.write(execution_status)
         file.seek(0)
         file.flush()
 
