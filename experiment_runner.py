@@ -136,13 +136,19 @@ class Experimenter:
         # for each value (from least to most dependent), apply the replacement logic
         for param_name in ordered_dependencies:
             for dependency in dependencies[param_name]:
+                replaced_value = interpolated_params[dependency]
+                if isinstance(replaced_value, list):
+                    replaced_value = ",".join(replaced_value)
+
                 new_value = interpolated_params[param_name]
                 new_value = re.sub(f"@{dependency}",
-                                   str(interpolated_params[dependency]),
+                                   "-" + str(replaced_value),
                                    new_value)
                 new_value = re.sub(f"&{dependency}",
-                                   dependency.replace('-', '') + str(interpolated_params[dependency]) + ",",
+                                   "-" + dependency.replace('-', '') + str(replaced_value) + ",",
                                    new_value)
+                if new_value[0] == "-":
+                    new_value = new_value[1:]
                 interpolated_params[param_name] = new_value
 
         # reorders the params to their original order and adds back the adhoc params
@@ -174,8 +180,13 @@ class Experimenter:
         return file
 
     def open_log_file(self, specific_params):
+        def value_stringifier(value):
+            if isinstance(value, list):
+                return ",".join(value)
+            else:
+                return str(value)
         specific_params_string = "-".join(
-            [f"{param.replace('-', '')}{value}" for param, value in specific_params.items()]
+            [f"{param.replace('-', '')}{value_stringifier(value)}" for param, value in specific_params.items()]
         )
         log_path = os.sep.join([self.output_path, f"{self.hash_checkpoint_name()}-{specific_params_string}-log.txt"])
         return open(log_path, "w", encoding="utf-8")
