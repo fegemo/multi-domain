@@ -1,7 +1,7 @@
+import logging
 import sys
 from math import ceil
 
-import matplotlib.pyplot as plt
 import tensorflow as tf
 
 from colla_model import CollaGANModel
@@ -10,25 +10,32 @@ from configuration import OptionParser
 from star_model import UnpairedStarGANModel, PairedStarGANModel
 import setup
 
+logging.basicConfig(
+    format="%(asctime)s %(levelname)-8s %(message)s",
+    level=logging.DEBUG,
+    datefmt="%Y-%m-%d %H:%M:%S")
+logging.getLogger("matplotlib").setLevel(logging.WARNING)
+logging.getLogger("PIL").setLevel(logging.WARNING)
+
+
 config, parser = OptionParser().parse(sys.argv[1:], True)
-print("Running with options:", parser.get_description(", ", ":"))
+logging.info(f"Running with options: {parser.get_description(', ', ':')}")
 if config.verbose:
-    print("Running with options: ", config)
-    print("Tensorflow version: ", tf.__version__)
+    logging.debug(f"Tensorflow version: {tf.__version__}")
 
 if tf.test.gpu_device_name():
-    print("Default GPU: {}".format(tf.test.gpu_device_name()))
+    logging.info("Default GPU: {}".format(tf.test.gpu_device_name()))
 else:
-    print("Not using a GPU - it will take long!!")
+    logging.warning("Not using a GPU - it will take long!!")
 
 # check if datasets need unzipping
 if config.verbose:
-    print("Datasets used: ", config.datasets_used)
+    logging.info("Datasets used: ", config.datasets_used)
 setup.ensure_datasets(config.verbose)
 
 # setting the seed
 if config.verbose:
-    print("SEED set to: ", config.seed)
+    logging.debug("SEED set to: ", config.seed)
 tf.random.set_seed(config.seed)
 
 # loading the dataset according to the required model
@@ -96,7 +103,7 @@ steps = ceil(config.train_size / config.batch) * config.epochs
 # evaluate_steps = steps // 40
 evaluate_steps = 500
 
-print(
+logging.info(
     f"Starting training for {config.epochs} epochs in {steps} steps, updating visualization every "
     f"{evaluate_steps} steps...")
 
@@ -110,17 +117,17 @@ model.fit(train_ds, test_ds, steps, evaluate_steps, callbacks=callbacks)
 
 # restores the best generator (best l1 - priority, or best fid)
 step = model.restore_best_generator()
-print(f"Restored the BEST generator, which was in step {step}.")
+logging.info(f"Restored the BEST generator, which was in step {step}.")
 
 # generating resulting images
-print(f"Starting to generate the images from the test dataset with generator from step {step}...")
+logging.info(f"Starting to generate the images from the test dataset with generator from step {step}...")
 model.generate_images_from_dataset(test_ds, step)
 
 if config.save_model:
-    print(f"Saving the generator...")
+    logging.info(f"Saving the generator...")
     model.save_generator()
 
-print("Finished executing.")
+logging.info("Finished executing.")
 
 # python train.py stargan-unpaired --rm2k --log-folder output --epochs 240 --no-aug --model-name stargan-unpaired --experiment rm2k-240ep-noaug-lrdecay-lr0.0001-tfadd0.18.0-discwithdecay-bce-singletargetdomain --sampler single-target
 # python train.py stargan-paired --rm2k --log-folder output --epochs 4 --no-aug --model-name playground --experiment playground

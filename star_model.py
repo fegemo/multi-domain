@@ -1,6 +1,8 @@
+import logging
 import os
 from abc import ABC, abstractmethod
 
+import numpy as np
 import tensorflow as tf
 from matplotlib import pyplot as plt
 from tqdm import tqdm
@@ -288,8 +290,24 @@ class UnpairedStarGANModel(S2SModel):
 
         def generate_images_from_dataset(dataset_name):
             target_images, source_images, target_domains, source_domains = example_indices_for_evaluation[dataset_name]
-            fake_images = generator(self.gen_supplier(source_images, target_domains, source_domains), training=True)
-            return target_images, fake_images
+            number_of_examples = len(source_images)
+            fake_images = np.empty((number_of_examples, self.config.image_size, self.config.image_size,
+                                    self.config.output_channels), dtype=np.float32)
+
+            batch_size = self.config.batch
+            for batch_start in range(0, number_of_examples, batch_size):
+                batch_end = batch_start + batch_size
+                batch_end = min(batch_end, number_of_examples)
+
+                source_images_slices = source_images[batch_start:batch_end]
+                target_domains_slice = target_domains[batch_start:batch_end]
+                source_domains_slice = source_domains[batch_start:batch_end]
+
+                fake_images_slice = generator(self.gen_supplier(source_images_slices, target_domains_slice, source_domains_slice), training=True)
+                fake_images[batch_start:batch_end] = fake_images_slice
+
+            logging.debug(f"Generated all {number_of_examples} fake images from {dataset_name}, which occupy {fake_images.nbytes / 1024 / 1024} MB.")
+            return target_images, tf.constant(fake_images)
 
         return dict({
             "train": generate_images_from_dataset("train"),
@@ -425,7 +443,7 @@ class UnpairedStarGANModel(S2SModel):
             plt.savefig(image_path, transparent=True)
             plt.close(fig)
 
-        print(f"Generated {(i + 1) * number_of_domains} images in the test-images folder.")
+        logging.info(f"Generated {(i + 1) * number_of_domains} images in the test-images folder.")
 
 
 class ExampleSampler(ABC):

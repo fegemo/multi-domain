@@ -1,3 +1,4 @@
+import logging
 import os
 from abc import ABC, abstractmethod
 import tensorflow as tf
@@ -19,9 +20,9 @@ def show_eta(training_start_time, step_start_time, current_step, training_starti
     remaining_steps = total_steps - steps_so_far
     eta = elapsed_per_step * remaining_steps
 
-    print(f"Time since start: {io_utils.seconds_to_human_readable(elapsed)}")
-    print(f"Estimated time to finish: {io_utils.seconds_to_human_readable(eta.numpy())}")
-    print(f"Last {update_steps} steps took: {now - step_start_time:.2f}s\n")
+    logging.info(f"Time since start: {io_utils.seconds_to_human_readable(elapsed)}")
+    logging.info(f"Estimated time to finish: {io_utils.seconds_to_human_readable(eta.numpy())}")
+    logging.info(f"Last {update_steps} steps took: {now - step_start_time:.2f}s\n")
 
 
 class S2SModel(ABC):
@@ -46,8 +47,8 @@ class S2SModel(ABC):
         generator_params = tf.reduce_sum([tf.reduce_prod(v.get_shape()) for v in self.generator.trainable_weights])
         discriminator_params = tf.reduce_sum(
             [tf.reduce_prod(v.get_shape()) for v in self.discriminator.trainable_weights])
-        print(f"Generator: {self.generator.name} with {generator_params:,} parameters")
-        print(f"Discriminator: {self.discriminator.name} with {discriminator_params:,} parameters")
+        logging.debug(f"Generator: {self.generator.name} with {generator_params:,} parameters")
+        logging.debug(f"Discriminator: {self.discriminator.name} with {discriminator_params:,} parameters")
 
         # initializes training checkpoint information
         io_utils.ensure_folder_structure(self.checkpoint_dir)
@@ -125,10 +126,10 @@ class S2SModel(ABC):
             self.summary_writer.flush()
 
     def do_fit(self, train_ds, test_ds, steps, evaluate_steps=1000, callbacks=[], starting_step=0):
-        # num_test_images = min(self.config.test_size, 136)
-        num_test_images = self.config.test_size
+        num_test_images = min(self.config.test_size, 500)
+        # num_test_images = self.config.test_size
         examples_for_visualization = self.select_examples_for_visualization(train_ds, test_ds)
-        example_indices_for_evaluation = []
+        example_indices_for_evaluation = dict()
         examples_for_evaluation = []
         if S2SModel.should_evaluate(callbacks):
             example_indices_for_evaluation = self.initialize_random_examples_for_evaluation(train_ds, test_ds,
@@ -155,7 +156,7 @@ class S2SModel(ABC):
                         self.get_output_folder(),
                         "step_{:06d},update_{:03d}.png".format(step + 1, (step + 1) // evaluate_steps)
                     ])
-                    print(f"Previewing images generated at step {step + 1} (train + test)...")
+                    logging.info(f"Previewing images generated at step {step + 1} (train + test)...")
                     image_data = self.preview_generated_images_during_training(examples_for_visualization,
                                                                                save_image_name, step + 1)
                     image_data = io_utils.plot_to_image(image_data, self.config.output_channels)
@@ -163,29 +164,32 @@ class S2SModel(ABC):
 
                 # check if we need to generate images for evaluation (and do it only once before the callback ifs)
                 if S2SModel.should_evaluate(callbacks):
+                    logging.info(f"Generating {len(example_indices_for_evaluation['test'][0])*2} images for evaluation...")
                     examples_for_evaluation = self.generate_images_for_evaluation(example_indices_for_evaluation)
 
                 # callbacks
                 if "debug_discriminator" in callbacks:
-                    print("Showing discriminator output patches (3 train + 3 test)...")
+                    logging.info("Showing discriminator output patches (3 train + 3 test)...")
                     self.show_discriminated_images(train_ds.unbatch(), "train", step + 1, 3)
                     self.show_discriminated_images(test_ds.unbatch().shuffle(self.config.test_size), "test",
                                                    step + 1, 3)
                 if "evaluate_l1" in callbacks:
-                    print(f"Comparing L1 between generated images from train and test...", end="", flush=True)
+                    logging.StreamHandler().terminator = ""
+                    logging.info(f"Comparing L1 between generated images from train and test...")
+                    logging.StreamHandler().terminator = "\n"
                     l1_train, l1_test = self.report_l1(examples_for_evaluation, step=(step + 1) // evaluate_steps)
-                    print(f" L1: {l1_train:.5f} / {l1_test:.5f} (train/test)")
+                    logging.info(f" L1: {l1_train:.5f} / {l1_test:.5f} (train/test)")
                     self.update_training_metrics("l1", l1_test, step + 1, True)
 
                 if "evaluate_fid" in callbacks:
-                    print(
+                    logging.info(
                         f"Calculating Fréchet Inception Distance at {(step + 1) / 1000}k with {num_test_images} "
                         f"examples...")
                     fid_train, fid_test = self.report_fid(examples_for_evaluation, step=(step + 1) // evaluate_steps)
-                    print(f"FID: {fid_train:.3f} / {fid_test:.3f} (train/test)")
+                    logging.info(f"FID: {fid_train:.3f} / {fid_test:.3f} (train/test)")
                     self.update_training_metrics("fid", fid_test, step + 1, "evaluate_l1" not in callbacks)
 
-                print(f"Step: {(step + 1) / 1000}k")
+                logging.info(f"Step: {(step + 1) / 1000}k")
                 if step - starting_step < steps - 1:
                     print("_" * (evaluate_steps // 10))
 
@@ -197,7 +201,7 @@ class S2SModel(ABC):
             if (step + 1) % 10 == 0 and step - starting_step < steps - 1:
                 print(".", end="", flush=True)
 
-        print("\nAbout to exit the training loop...")
+        logging.info("\nAbout to exit the training loop...")
 
         # if no evaluation callback was used, we save a single checkpoint with the end of the training
         if not S2SModel.should_evaluate(callbacks):
