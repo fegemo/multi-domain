@@ -99,12 +99,13 @@ parser.save_configuration(model.get_output_folder())
 # plt.show()
 
 # configuration for training
-steps = ceil(config.train_size / config.batch) * config.epochs
+steps = config.steps
+epochs = steps / ceil(len(train_ds) / config.batch)
 # evaluate_steps = steps // 40
 evaluate_steps = 500
 
 logging.info(
-    f"Starting training for {config.epochs} epochs in {steps} steps, updating visualization every "
+    f"Starting training for {epochs:.2f} epochs in {steps} steps, updating visualization every "
     f"{evaluate_steps} steps...")
 
 # starting training

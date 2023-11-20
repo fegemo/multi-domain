@@ -103,6 +103,7 @@ class OptionParser(metaclass=SingletonMeta):
                                  help="number of discriminator updates for each generator in stargan",
                                  default=DISCRIMINATOR_STEPS)
         self.parser.add_argument("--epochs", type=int, help="number of epochs to train", default=EPOCHS)
+        self.parser.add_argument("--steps", type=int, help="number of generator update steps to train", default=None)
         self.parser.add_argument("--pretrain-epochs", type=int, help="number of epochs pretraining (used by collagan)",
                                  default=PRETRAIN_EPOCHS)
         self.parser.add_argument("--no-aug", action="store_true", help="Disables all augmentation", default=False)
@@ -231,8 +232,12 @@ class OptionParser(metaclass=SingletonMeta):
         setattr(self.values, "test_sizes", test_sizes)
         setattr(self.values, "test_size", test_size)
 
-        setattr(self.values, "steps", self.values.epochs * self.values.train_size / self.values.batch)
         setattr(self.values, "pretrain_steps", self.values.pretrain_epochs * self.values.train_size // self.values.batch)
+        if self.values.steps is None:
+            self.values.steps = self.values.epochs * self.values.train_size / self.values.batch
+        else:
+            self.values.epochs = ceil(self.values.steps * self.values.batch / self.values.train_size)
+
         if return_parser:
             return self.values, self
         else:
