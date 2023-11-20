@@ -1,30 +1,24 @@
 #!/usr/bin/env python3
-import argparse
 import sys
 
-from experiment_runner import Experimenter
+from experiment_runner import Experimenter, create_general_parser
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--delete", "-d", help="Instead of training, deletes the checkpoint and log files"
-                                               "for this experiment", action="store_true")
-    parser.add_argument("--output", "-o", help="Sets (overrides) the path to the output folder", default=None)
-    parser.add_argument("--python", "-p", help="Path to python with tensorflow", default="venv/Scripts/python")
-    config = parser.parse_args(sys.argv[1:])
+    config = create_general_parser(sys.argv[1:])
 
     runner = Experimenter(
-        "train",
+        "train" if not config.dummy else "dummy_script",
         config.python,
         {
             "model": "stargan-paired",
             "adhoc": [
-                "no-tran",
                 "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
                 "conditional-discriminator", "source-domain-aware-generator",
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "epochs": 50,
+            "steps": 20000,
+            "evaluate-steps": 1000,
             "model-name": "@model",
             "experiment": "@more-adhoc&sampler",
             "d-steps": 1,
@@ -32,7 +26,23 @@ if __name__ == "__main__":
             "lambda-l1": 100.
         }, {
             "sampler": ["single-target", "multi-target"],
-            "more-adhoc": ["tiny", "rm2k", "rmxp", "rmvx", ["tiny", "rm2k", "rmxp", "rmvx", "misc"]]
+        }, {
+            "tiny": {
+                "adhoc": ["no-aug"],
+            },
+            "rm2k": {
+                "adhoc": ["no-tran"]
+            },
+            "rmxp": {
+                "adhoc": []
+            },
+            "rmvx": {
+                "adhoc": ["no-tran"]
+            },
+            "all": {
+                "adhoc": ["no-tran"],
+                "steps": 80000
+            }
         })
 
     runner.execute(config)

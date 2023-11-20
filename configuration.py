@@ -104,6 +104,8 @@ class OptionParser(metaclass=SingletonMeta):
                                  default=DISCRIMINATOR_STEPS)
         self.parser.add_argument("--epochs", type=int, help="number of epochs to train", default=EPOCHS)
         self.parser.add_argument("--steps", type=int, help="number of generator update steps to train", default=None)
+        self.parser.add_argument("--evaluate-steps", type=int, help="number of generator update steps "
+                                                                    "to wait until an evaluation is done", default=1000)
         self.parser.add_argument("--pretrain-epochs", type=int, help="number of epochs pretraining (used by collagan)",
                                  default=PRETRAIN_EPOCHS)
         self.parser.add_argument("--no-aug", action="store_true", help="Disables all augmentation", default=False)

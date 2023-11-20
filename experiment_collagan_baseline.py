@@ -10,8 +10,9 @@ if __name__ == "__main__":
         "train" if not config.dummy else "dummy_script",
         config.python,
         {
-            "model": "stargan-paired",
+            "model": "collagan",
             "adhoc": [
+                "rm2k",
                 "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
                 "save-model"
             ],
@@ -19,22 +20,19 @@ if __name__ == "__main__":
             "steps": 20000,
             "evaluate-steps": 1000,
             "d-steps": 1,
-            "lr": 0.0003,
-            "lambda-l1": 100.,
-            "lambda-palette": 0.,
-            "sampler": "multi-target",
+            "lr": 0.00001,
+            "batch": 1,
+            "lambda-l1": 1,
+            "lambda-ssim": 10,
+            "lambda-domain": 10,
+            "lr-decay": "constant-than-linear",
             "model-name": "@model",
-            "experiment": "network@network",
+            "experiment": "@dataset"
         }, {
-            "adhoc": [
-                "",
-                "source-domain-aware-generator",
-                "conditional-discriminator",
-                ["source-domain-aware-generator", "conditional-discriminator"]
-            ]
+            "adhoc": ["", "input-dropout"]
         }, {
             "tiny": {
-                "adhoc": ["no-aug"]
+                "adhoc": ["no-aug"],
             },
             "rm2k": {
                 "adhoc": ["no-tran"]
@@ -50,4 +48,5 @@ if __name__ == "__main__":
                 "steps": 80000
             }
         })
+
     runner.execute(config)

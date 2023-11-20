@@ -1,3 +1,4 @@
+import argparse
 import hashlib
 import json
 import os
@@ -7,11 +8,16 @@ from functools import reduce
 from glob import glob
 from graphlib import TopologicalSorter
 from itertools import product
-from typing import Dict, Any, Union, List
+from typing import List
+from copy import deepcopy
 
 from tqdm import tqdm
 
 import io_utils
+
+
+def listify(something):
+    return something if isinstance(something, list) else [something]
 
 
 def dict_hash(dictionary):
@@ -23,24 +29,51 @@ def dict_hash(dictionary):
 
 
 class Experimenter:
-    def __init__(self, script_to_run, path_to_python, default_params, search_grid):
+    valid_datasets = ["rm2k", "rmxp", "rmvx", "misc"]
+    virtual_datasets = valid_datasets + ["all"]
+    artificial_param_lookup_table = {
+        "all": valid_datasets
+    }
+    valid_networks = ["source-domain-aware-generator", "conditional-discriminator"]
+
+    def __init__(self, script_to_run, path_to_python, default_params, search_grid, dataset_params=None):
+        if "adhoc" not in default_params:
+            default_params["adhoc"] = []
+
+        if "adhoc" not in search_grid:
+            search_grid["adhoc"] = []
+
+        if dataset_params is None or dataset_params == {}:
+            # if no dataset params are specified, then we look for dataset names used in the adhoc params
+            dataset_specified_in_default_params = [n for n in default_params["adhoc"] if n in self.virtual_datasets]
+            dataset_specified_in_specific_params = [n for n in search_grid["adhoc"] if n in self.virtual_datasets]
+            specified_datasets = [*dataset_specified_in_default_params, *dataset_specified_in_specific_params]
+            dataset_params = {n: {} for n in specified_datasets}
+
+        # we remove the dataset names from the adhoc params, as we suppose they were provided (or either transported)
+        # to the dataset_params
+        default_params["adhoc"] = [n for n in default_params["adhoc"] if n not in self.virtual_datasets]
+        search_grid["adhoc"] = [n for n in search_grid["adhoc"] if n not in self.virtual_datasets]
+
         self.path_to_python = path_to_python
         self.script_to_run = script_to_run
         self.output_path = default_params["log-folder"]
         self.default_params = default_params
         self.search_grid = search_grid
+        self.dataset_params = dataset_params
+        self.datasets = dataset_params.keys()
 
     def run(self):
         checkpoint_file = self.open_checkpoint_file()
         execution_status, total = self.lookup_start_and_total_runs(checkpoint_file)
-        completed = reduce(lambda count, status: count + 1 if status else count, execution_status, 0)
+        completed_runs = reduce(lambda count, status: count + 1 if status else count, execution_status, 0)
 
         # check if there's a checkpoint and resume from it
         # or start from the beginning
-        if completed > 0:
-            print(f"Resuming from previous checkpoint {self.hash_checkpoint_name()} that had completed {completed}"
+        if completed_runs > 0:
+            print(f"Resuming from previous checkpoint {self.hash_checkpoint_name()} that had completed {completed_runs}"
                   f" of {total} runs: {execution_status}.")
-        elif completed == total:
+        elif completed_runs == total:
             print("All runs WERE ALREADY completed.")
             checkpoint_file.close()
             return
@@ -75,9 +108,47 @@ class Experimenter:
             # closes the checkpoint file
             checkpoint_file.close()
 
+    def combine_default_and_specific_params(self, default_params, specific_params):
+        """
+        Combines the default params with the specific ones, doing a union of the values in case of lists.
+        :param specific_params:
+        :return:
+        """
+        combined_params = deepcopy(default_params)
+        for param_name, param_value in specific_params.items():
+            if param_name in specific_params:
+                if not isinstance(default_params[param_name], list):
+                    combined_params[param_name] = param_value
+                else:
+                    combined_params[param_name] += param_value
+        return combined_params
+
+    def combine_params_with_dataset_params(self, run_params):
+        current_dataset_name = [name for name in self.datasets if name in run_params["adhoc"]][0]
+        current_dataset_params = self.dataset_params[current_dataset_name]
+
+        return self.combine_default_and_specific_params(run_params, current_dataset_params)
+
+    def replace_artificial_params(self, run_params):
+        new_run_params = {**run_params}
+        for param_name, param_value in run_params.items():
+            if isinstance(param_value, list):
+                new_param_value = []
+                for i, value in enumerate(param_value):
+                    if value in self.artificial_param_lookup_table:
+                        new_param_value += listify(self.lookup_artificial_param(value))
+                    else:
+                        new_param_value.append(value)
+                new_run_params[param_name] = new_param_value
+            else:
+                new_run_params[param_name] = self.lookup_artificial_param(param_value)
+        return new_run_params
+
     def execute_run(self, specific_params):
-        run_params = {**self.default_params, **specific_params}
-        run_params_string = self.generate_run_params_string(run_params)
+        run_params = self.combine_default_and_specific_params(self.default_params, specific_params)
+        run_params = self.combine_params_with_dataset_params(run_params)
+        run_params = self.replace_artificial_params(run_params)
+        run_params_string = self.generate_run_params_string(run_params, specific_params)
 
         log_file = self.open_log_file(specific_params)
         log_file.seek(0)
@@ -95,10 +166,17 @@ class Experimenter:
         finally:
             log_file.close()
 
-    def generate_run_params_string(self, run_params):
-        interpolated_params = self.interpolate_param_values(run_params)
+    def lookup_artificial_param(self, name):
+        if name in self.artificial_param_lookup_table:
+            return self.artificial_param_lookup_table[name]
+        else:
+            return name
+
+    def generate_run_params_string(self, run_params, specific_params):
+        interpolated_params = self.interpolate_param_values(run_params, specific_params)
         run_params_string = ""
         for param_name, param_value in interpolated_params.items():
+
             positional = False
             adhoc = False
             more_adhoc = False
@@ -106,24 +184,17 @@ class Experimenter:
                 positional = True
             elif param_name == "adhoc":
                 adhoc = True
-            elif param_name == "more-adhoc":
-                more_adhoc = True
 
             if positional:
                 run_params_string += f"{param_value} "
             elif adhoc:
-                run_params_string += " ".join(map(lambda v: f"--{v} ", param_value))
-            elif more_adhoc:
-                if isinstance(param_value, list):
-                    run_params_string += " ".join(map(lambda v: f"--{v} ", param_value))
-                else:
-                    run_params_string += f"--{param_value} "
+                run_params_string += " ".join([f"--{v}" for v in param_value if v != ""]) + " "
             else:
                 run_params_string += f"--{param_name} {param_value} "
 
         return run_params_string
 
-    def interpolate_param_values(self, run_params):
+    def interpolate_param_values(self, run_params, specific_params):
         def get_dependencies(value):
             # check for @....END or @....@ inside value
             if isinstance(value, str):
@@ -145,8 +216,27 @@ class Experimenter:
 
         # for each value (from least to most dependent), apply the replacement logic
         for param_name in ordered_dependencies:
+            if param_name not in dependencies:
+                # it is okay -- param_name might be a virtual parameter such as database or adhoc
+                continue
             for dependency in dependencies[param_name]:
-                replaced_value = interpolated_params[dependency]
+                if dependency in interpolated_params:
+                    replaced_value = interpolated_params[dependency]
+                elif dependency == "dataset":
+                    dataset = [ds for ds in self.datasets if ds in specific_params["adhoc"]][0]
+                    replaced_value = dataset
+                elif dependency == "network":
+                    network_config = [n for n in self.valid_networks if n in specific_params["adhoc"]]
+                    if len(network_config) == 2:
+                        network_config = "both"
+                    elif len(network_config) == 0:
+                        network_config = "none"
+                    else:
+                        network_config = network_config[0]
+                    replaced_value = network_config
+                else:
+                    replaced_value = "???"
+
                 if isinstance(replaced_value, list):
                     replaced_value = ",".join(replaced_value)
 
@@ -192,11 +282,14 @@ class Experimenter:
     def open_log_file(self, specific_params):
         def value_stringifier(value):
             if isinstance(value, list):
-                return ",".join(value)
+                non_empty_values = [v for v in value if v != ""]
+                return ",".join(non_empty_values)
             else:
                 return str(value)
+
         specific_params_string = "-".join(
-            [f"{param.replace('-', '')}{value_stringifier(value)}" for param, value in specific_params.items()]
+            [f"{param.replace('adhoc', '').replace('-', '')}{value_stringifier(value)}" for param, value in
+             specific_params.items()]
         )
         log_path = os.sep.join([self.output_path, f"{self.hash_checkpoint_name()}-{specific_params_string}-log.txt"])
         return open(log_path, "w", encoding="utf-8")
@@ -226,11 +319,33 @@ class Experimenter:
 
     def calculate_number_of_runs(self):
         combinations = reduce(lambda total, param_list: total * len(param_list), self.search_grid.values(), 1)
+        combinations *= len(self.datasets)
         return combinations
 
+    def fuse_equal_params(self, param_names, param_values):
+        """
+        Looks for equal names of parameters in param_names, and fuses (add to a list) them and their values
+        :param param_names: list of names of parameters
+        :param param_values: list of values of parameters
+        :return: a tuple containing the fused param_names and the fused param_values
+        """
+        new_param_names = []
+        new_param_values = [list(v) for v in param_values]
+        for i, name in enumerate(param_names):
+            if name not in new_param_names:
+                new_param_names += [name]
+            else:
+                index = new_param_names.index(name)
+                for j, combination in enumerate(new_param_values):
+                    new_param_values[j][index] = listify(new_param_values[j][index]) + listify(new_param_values[j][i])
+                    new_param_values[j].pop(i)
+
+        return new_param_names, new_param_values
+
     def explode_combinations(self):
-        combined_values = list(product(*self.search_grid.values()))
-        param_names = list(self.search_grid.keys())
+        combined_values = list(product(list(self.datasets), *self.search_grid.values()))
+        param_names = ["adhoc"] + list(self.search_grid.keys())
+        param_names, combined_values = self.fuse_equal_params(param_names, combined_values)
         combinations = [{name: values[i] for i, name in enumerate(param_names)} for values in combined_values]
         return combinations
 
@@ -241,10 +356,21 @@ class Experimenter:
         else:
             self.run()
 
+
+def create_general_parser(args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--delete", "-d", help="Instead of training, deletes the checkpoint and log files"
+                                               "for this experiment", action="store_true")
+    parser.add_argument("--output", "-o", help="Sets (overrides) the path to the output folder", default=None)
+    parser.add_argument("--python", "-p", help="Path to python with tensorflow", default="venv/Scripts/python")
+    parser.add_argument("--dummy", "-D", help="Dummy run, does not execute anything", action="store_true")
+    config = parser.parse_args(args)
+    return config
+
 # example experiments with stargan: d-steps
 # runner = Experimenter("train", {
 #     "model": "stargan-paired",
-#     "adhoc": ["rm2k", "no-aug"],
+#     "adhoc": ["conditional-discriminator"],
 #     "log-folder": "temp-xper",
 #     "epochs": 1,
 #     "model-name": "playground",
@@ -252,4 +378,11 @@ class Experimenter:
 # }, {
 #     "d-steps": [5, 1],
 #     "lr": [0.0001, 0.00002]
+# }, {
+#     "tiny": {
+#          "adhoc": ["--no-aug"]
+#     },
+#     "all": {
+#          "adhoc": ["no-tran"]
+#     }
 # })
