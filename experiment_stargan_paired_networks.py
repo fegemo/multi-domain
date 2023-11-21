@@ -24,7 +24,7 @@ if __name__ == "__main__":
             "lambda-palette": 0.,
             "sampler": "multi-target",
             "model-name": "@model",
-            "experiment": "network@network",
+            "experiment": "@dataset,&network",
         }, {
             "adhoc": [
                 "",

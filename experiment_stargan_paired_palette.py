@@ -24,7 +24,7 @@ if __name__ == "__main__":
             "lambda-l1": 100.,
             "sampler": "multi-target",
             "model-name": "@model",
-            "experiment": "@model&lambda-l1&lambda-palette",
+            "experiment": "@dataset,&lambda-palette",
         }, {
             "lambda-palette": [10., 50., 100., 200.]
         }, {

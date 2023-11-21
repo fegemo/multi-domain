@@ -22,7 +22,7 @@ if __name__ == "__main__":
             "lr": 0.0001,
             "lambda-l1": 0.,
             "model-name": "@model",
-            "experiment": "@more-adhoc",
+            "experiment": "@dataset",
             "sampler": "single-target"
         }, {}, {
             "tiny": {

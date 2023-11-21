@@ -23,7 +23,7 @@ if __name__ == "__main__":
             "lr": 0.0003,
             "sampler": "multi-target",
             "model-name": "@model",
-            "experiment": "dataset@more-adhoc&lambda-l1",
+            "experiment": "@dataset,&lambda-l1",
         }, {
             "lambda-l1": [1, 25, 50, 100, 150., 200., 250., 300., 400.],
         }, {

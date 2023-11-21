@@ -12,20 +12,16 @@ if __name__ == "__main__":
         {
             "model": "stargan-paired",
             "adhoc": [
-                "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
-                "conditional-discriminator", "source-domain-aware-generator",
-                "save-model"
+                "callback-evaluate-fid", "callback-evaluate-l1"
             ],
             "log-folder": config.output if config.output is not None else "output",
             "steps": 20000,
             "evaluate-steps": 1000,
             "model-name": "@model",
-            "experiment": "@more-adhoc&sampler",
-            "d-steps": 1,
-            "lr": 0.0003,
-            "lambda-l1": 100.
+            "experiment": "@dataset,&d-steps,&lr",
         }, {
-            "sampler": ["single-target", "multi-target"],
+            "d-steps": [1],
+            "lr": [0.0005, 0.0003, 0.0002, 0.00005]
         }, {
             "tiny": {
                 "adhoc": ["no-aug"],
@@ -44,5 +40,4 @@ if __name__ == "__main__":
                 "steps": 80000
             }
         })
-
     runner.execute(config)

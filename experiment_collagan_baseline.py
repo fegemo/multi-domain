@@ -27,7 +27,7 @@ if __name__ == "__main__":
             "lambda-domain": 10,
             "lr-decay": "constant-than-linear",
             "model-name": "@model",
-            "experiment": "@dataset"
+            "experiment": "@dataset,&adhoc"
         }, {
             "adhoc": ["", "input-dropout"]
         }, {

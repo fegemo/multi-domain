@@ -61,7 +61,7 @@ class Experimenter:
         self.default_params = default_params
         self.search_grid = search_grid
         self.dataset_params = dataset_params
-        self.datasets = dataset_params.keys()
+        self.datasets = list(dataset_params.keys())
 
     def run(self):
         checkpoint_file = self.open_checkpoint_file()
@@ -117,7 +117,7 @@ class Experimenter:
         combined_params = deepcopy(default_params)
         for param_name, param_value in specific_params.items():
             if param_name in specific_params:
-                if not isinstance(default_params[param_name], list):
+                if param_name not in default_params or not isinstance(default_params[param_name], list):
                     combined_params[param_name] = param_value
                 else:
                     combined_params[param_name] += param_value
@@ -196,9 +196,15 @@ class Experimenter:
 
     def interpolate_param_values(self, run_params, specific_params):
         def get_dependencies(value):
+            # dependencies are specified as @param_name (value only) or &param_name (name + '-' + value)
             # check for @....END or @....@ inside value
             if isinstance(value, str):
                 tokens = re.split(r"[@&]", value)
+                # remove the optional , at the end of each token
+                for i, token in enumerate(tokens):
+                    while len(tokens[i]) > 0 and tokens[i][-1] == ",":
+                        tokens[i] = tokens[i][:-1]
+                # if the first token is not a dependency, simply ignore it
                 if value[0] != "@" and value[0] != "&":
                     tokens.pop(0)
                 return list(filter(lambda t: len(t) > 0, tokens))
@@ -242,10 +248,10 @@ class Experimenter:
 
                 new_value = interpolated_params[param_name]
                 new_value = re.sub(f"@{dependency}",
-                                   "-" + str(replaced_value),
+                                   str(replaced_value),
                                    new_value)
                 new_value = re.sub(f"&{dependency}",
-                                   "-" + dependency.replace('-', '') + str(replaced_value) + ",",
+                                   dependency + "-" + str(replaced_value),
                                    new_value)
                 if new_value[0] == "-":
                     new_value = new_value[1:]
@@ -318,7 +324,7 @@ class Experimenter:
         print(f"Deleted {len(files)} files generated on a previous run of this experiment.")
 
     def calculate_number_of_runs(self):
-        combinations = reduce(lambda total, param_list: total * len(param_list), self.search_grid.values(), 1)
+        combinations = reduce(lambda total, param_list: total * max(1, len(param_list)), self.search_grid.values(), 1)
         combinations *= len(self.datasets)
         return combinations
 
@@ -343,8 +349,10 @@ class Experimenter:
         return new_param_names, new_param_values
 
     def explode_combinations(self):
-        combined_values = list(product(list(self.datasets), *self.search_grid.values()))
-        param_names = ["adhoc"] + list(self.search_grid.keys())
+        non_empty_search_params = {name: values for name, values in self.search_grid.items() if len(values) > 0}
+        combined_values = list(product(self.datasets, *non_empty_search_params.values()))
+        combined_values = [tuple([[value[0]]] + list(value[1:])) for value in combined_values]
+        param_names = ["adhoc"] + list(non_empty_search_params.keys())
         param_names, combined_values = self.fuse_equal_params(param_names, combined_values)
         combinations = [{name: values[i] for i, name in enumerate(param_names)} for values in combined_values]
         return combinations
