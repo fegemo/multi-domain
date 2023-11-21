@@ -179,7 +179,6 @@ class Experimenter:
 
             positional = False
             adhoc = False
-            more_adhoc = False
             if param_name == "model":
                 positional = True
             elif param_name == "adhoc":
@@ -240,6 +239,9 @@ class Experimenter:
                     else:
                         network_config = network_config[0]
                     replaced_value = network_config
+                elif dependency == "adhoc":
+                    adhoc_without_dataset = [n for n in specific_params["adhoc"] if n not in self.datasets]
+                    replaced_value = ",".join(adhoc_without_dataset)
                 else:
                     replaced_value = "???"
 
@@ -255,6 +257,8 @@ class Experimenter:
                                    new_value)
                 if new_value[0] == "-":
                     new_value = new_value[1:]
+                if new_value[-1] == ",":
+                    new_value = new_value[:-1]
                 interpolated_params[param_name] = new_value
 
         # reorders the params to their original order and adds back the adhoc params
