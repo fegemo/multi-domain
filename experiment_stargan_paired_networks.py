@@ -16,11 +16,11 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 20000,
+            "steps": 40000,
             "evaluate-steps": 1000,
             "d-steps": 1,
             "lr": 0.0003,
-            "lambda-l1": 100.,
+            "lambda-l1": 400.,
             "lambda-palette": 0.,
             "sampler": "multi-target",
             "model-name": "@model",

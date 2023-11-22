@@ -15,12 +15,12 @@ if __name__ == "__main__":
                 "callback-evaluate-fid", "callback-evaluate-l1"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 20000,
+            "steps": 40000,
             "evaluate-steps": 1000,
             "model-name": "@model",
             "experiment": "@dataset,&d-steps,&lr",
         }, {
-            "d-steps": [1],
+            "d-steps": [1, 5],
             "lr": [0.0005, 0.0003, 0.0002, 0.00005]
         }, {
             "tiny": {
