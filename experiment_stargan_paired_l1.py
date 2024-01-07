@@ -25,8 +25,8 @@ if __name__ == "__main__":
             "model-name": "@model",
             "experiment": "@dataset,&lambda-l1",
         }, {
-            # "lambda-l1": [1., 25., 50., 100., 150., 200., 250., 300., 400.],
-            "lambda-l1": [550., 700., 850., 1000.],
+            "lambda-l1": [100., 250., 400., 475.],
+            # "lambda-l1": [550., 700., 850., 1000.],
         }, {
             "tiny": {
                 "adhoc": ["no-aug"]

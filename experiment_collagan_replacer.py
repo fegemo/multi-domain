@@ -12,6 +12,7 @@ if __name__ == "__main__":
         {
             "model": "collagan",
             "adhoc": [
+                "input-dropout",
                 "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
                 "save-model"
             ],
@@ -19,33 +20,33 @@ if __name__ == "__main__":
             "steps": 40000,
             "evaluate-steps": 1000,
             "d-steps": 1,
-            "lr": 0.00001,
-            "batch": 1,
-            "lambda-l1": 1,
+            "lr": 0.0001,
+            "batch": 4,
+            "lambda-l1": 100,
             "lambda-ssim": 10,
             "lambda-domain": 10,
             "lr-decay": "constant-than-linear",
             "model-name": "@model",
-            "experiment": "@dataset,@adhoc"
+            "experiment": "@dataset,&cycled-source-replacer"
         }, {
-            "adhoc": ["", "input-dropout"]
+            "cycled-source-replacer": ["dropout", "forward"]
         }, {
-            "tiny": {
-                "adhoc": ["no-aug"],
-            },
+            # "tiny": {
+            #     "adhoc": ["no-aug"],
+            # },
             "rm2k": {
                 "adhoc": ["no-tran"]
             },
             "rmxp": {
                 "adhoc": []
             },
-            "rmvx": {
-                "adhoc": ["no-tran"]
-            },
-            "all": {
-                "adhoc": ["no-tran"],
-                "steps": 80000
-            }
+            # "rmvx": {
+            #     "adhoc": ["no-tran"]
+            # },
+            # "all": {
+            #     "adhoc": ["no-tran"],
+            #     "steps": 80000
+            # }
         })
 
     runner.execute(config)
