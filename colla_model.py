@@ -37,7 +37,8 @@ class CollaGANModel(S2SModel):
     def create_generator(self):
         config = self.config
         if config.generator in ["colla", ""]:
-            return collagan_affluent_generator(config.number_of_domains, config.image_size, config.output_channels)
+            return collagan_affluent_generator(config.number_of_domains, config.image_size, config.output_channels,
+                                               config.capacity)
         else:
             raise ValueError(f"The provided {config.generator} type for generator has not been implemented.")
 

@@ -16,15 +16,15 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 40000,
+            "steps": 10000,
             "evaluate-steps": 1000,
             "d-steps": 1,
-            "lr": 0.0003,
-            "lambda-l1": 400.,
+            "lr": 0.0002,
+            "lambda-l1": 20.,
             "lambda-palette": 0.,
             "sampler": "multi-target",
-            "model-name": "@model",
-            "experiment": "@dataset,&network",
+            "model-name": "study-networks",
+            "experiment": "@dataset,&network,&lambda-l1",
         }, {
             "adhoc": [
                 "",
@@ -33,21 +33,21 @@ if __name__ == "__main__":
                 ["source-domain-aware-generator", "conditional-discriminator"]
             ]
         }, {
-            "tiny": {
+            # "tiny": {
+            #     "adhoc": ["no-aug"]
+            # },
+            "rm2k": {
                 "adhoc": ["no-aug"]
             },
-            "rm2k": {
-                "adhoc": ["no-tran"]
-            },
             "rmxp": {
-                "adhoc": []
+                "adhoc": ["no-aug"]
             },
-            "rmvx": {
-                "adhoc": ["no-tran"]
-            },
-            "all": {
-                "adhoc": ["no-tran"],
-                "steps": 80000
-            }
+            # "rmvx": {
+            #     "adhoc": ["no-tran"]
+            # },
+            # "all": {
+            #     "adhoc": ["no-tran"],
+            #     "steps": 80000
+            # }
         })
     runner.execute(config)

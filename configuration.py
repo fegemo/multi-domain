@@ -115,7 +115,7 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--sampler", help="one from {multi-target, single-target} indicating whether "
                                                    "batches are trained with the same target (single) or with "
                                                    "each sample having its own (multi)", default=TRAINING_SAMPLER)
-
+        self.parser.add_argument("--capacity", type=int, help="capacity multiplier of collagan's generator", default=1)
         self.parser.add_argument("--callback-debug-discriminator",
                                  help="every few update steps, show the discriminator output with some images from "
                                       "the train and test sets",
@@ -236,7 +236,7 @@ class OptionParser(metaclass=SingletonMeta):
 
         setattr(self.values, "pretrain_steps", self.values.pretrain_epochs * self.values.train_size // self.values.batch)
         if self.values.steps is None:
-            self.values.steps = self.values.epochs * self.values.train_size / self.values.batch
+            self.values.steps = ceil(self.values.epochs * self.values.train_size / self.values.batch)
         else:
             self.values.epochs = ceil(self.values.steps * self.values.batch / self.values.train_size)
 

@@ -106,7 +106,7 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
     return tf.keras.Model(inputs=inputs, outputs=activation, name="StarGANGenerator")
 
 
-def collagan_affluent_generator(number_of_domains, image_size, output_channels):
+def collagan_affluent_generator(number_of_domains, image_size, output_channels, capacity=1):
     # UnetINDiv4 extracted from:
     # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L941
     def conv_block(block_input, filters, regularizer="l2"):
@@ -146,7 +146,7 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels):
     target_domain = keras_utils.TileLayer(image_size)(target_domain)
 
     # ENCODER starts here...
-    base_filters = 64
+    base_filters = tf.cast(64*capacity, tf.int32)
     filters_per_domain = base_filters // number_of_domains
 
     source_image_split = tf.unstack(source_images_input, number_of_domains, axis=1)

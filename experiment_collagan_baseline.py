@@ -19,7 +19,7 @@ if __name__ == "__main__":
             "steps": 40000,
             "evaluate-steps": 1000,
             "d-steps": 1,
-            "lr": 0.00001,
+            "lr": 0.0001,
             "batch": 1,
             "lambda-l1": 1,
             "lambda-ssim": 10,

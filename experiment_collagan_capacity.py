@@ -12,7 +12,6 @@ if __name__ == "__main__":
         {
             "model": "collagan",
             "adhoc": [
-                "input-dropout",
                 "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
                 "save-model"
             ],
@@ -20,15 +19,15 @@ if __name__ == "__main__":
             "steps": 40000,
             "evaluate-steps": 1000,
             "lr": 0.0001,
-            "batch": 4,
-            "lambda-l1": 100,
-            "lambda-ssim": 10,
-            "lambda-domain": 10,
-            "lr-decay": "constant-than-linear",
+            "lr-decay": "constant-then-linear",
+            "cycled-source-replacer": "forward",
+            "lambda-l1": 100.,
+            "lambda-ssim": 100.,
+            "lambda-domain": 10.,
             "model-name": "@model",
-            "experiment": "@dataset,&cycled-source-replacer"
+            "experiment": "@dataset,&capacity",
         }, {
-            "cycled-source-replacer": ["dropout", "forward"]
+            "capacity": [1, 2, 3, 4, 5],
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],
