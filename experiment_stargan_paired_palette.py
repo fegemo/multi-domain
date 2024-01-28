@@ -26,7 +26,8 @@ if __name__ == "__main__":
             "model-name": "@model",
             "experiment": "@dataset,&lambda-palette",
         }, {
-            "lambda-palette": [10., 50., 100., 200.]
+            # "lambda-palette": [10., 50., 100., 200.]
+            "lambda-palette": [1000., 5000., 10000., 50000.]
         }, {
             "tiny": {
                 "adhoc": ["no-aug"]

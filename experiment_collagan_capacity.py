@@ -12,6 +12,7 @@ if __name__ == "__main__":
         {
             "model": "collagan",
             "adhoc": [
+                "input-dropout",
                 "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
                 "save-model"
             ],
