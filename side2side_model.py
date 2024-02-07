@@ -201,7 +201,7 @@ class S2SModel(ABC):
             if (step + 1) % 10 == 0 and step - starting_step < steps - 1:
                 print(".", end="", flush=True)
 
-        logging.info("\nAbout to exit the training loop...")
+        logging.info("About to exit the training loop...")
 
         # if no evaluation callback was used, we save a single checkpoint with the end of the training
         if not S2SModel.should_evaluate(callbacks):

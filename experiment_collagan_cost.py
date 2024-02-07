@@ -19,6 +19,7 @@ if __name__ == "__main__":
             "log-folder": config.output if config.output is not None else "output",
             "steps": 40000,
             "evaluate-steps": 1000,
+            "capacity": 3,
             "d-steps": 1,
             "lr": 0.0001,
             "batch": 4,

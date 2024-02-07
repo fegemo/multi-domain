@@ -98,7 +98,7 @@ class UnpairedStarGANModel(S2SModel):
             source_index = ensure_inside_range(c + 0)
             target_index = ensure_inside_range(c + 1)
             if c == number_of_examples - 1:
-                source_index = 2
+                source_index = ensure_inside_range(2)
                 target_index = source_index
 
             train_domain_images = next(train_ds_iter)
@@ -270,10 +270,8 @@ class UnpairedStarGANModel(S2SModel):
         def initialize_random_examples_from_dataset(dataset):
             domain_images = next(iter(dataset.unbatch().take(num_images)))
 
-            random_source_indices = tf.random.uniform(shape=[num_images], minval=0, maxval=number_of_domains,
-                                                      dtype="int32")
-            random_target_indices = tf.random.uniform(shape=[num_images], minval=0, maxval=number_of_domains,
-                                                      dtype="int32")
+            random_source_indices = tf.random.uniform([num_images], minval=0, maxval=number_of_domains, dtype="int32")
+            random_target_indices = tf.random.uniform([num_images], minval=0, maxval=number_of_domains, dtype="int32")
 
             source_images = tf.gather(domain_images, random_source_indices)
             target_images = tf.gather(domain_images, random_target_indices)
