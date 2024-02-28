@@ -66,8 +66,9 @@ class OptionParser(metaclass=SingletonMeta):
                                                      "{ affluent } for collagan", default="")
         self.parser.add_argument("--discriminator", help="network from { resnet, unet } for stargan or "
                                                          "{ original } for collagan", default="")
-        self.parser.add_argument("--conditional-discriminator", help="Makes the discriminator receive the source image"
-                                                                     " just like in Pix2Pix (only for stargan-paired).",
+        self.parser.add_argument("--conditional-discriminator", help="Makes the discriminator receive"
+                                                                     " the source image just like in Pix2Pix (only"
+                                                                     " for stargan-paired and collagan).",
                                  action="store_true", default=False)
         self.parser.add_argument("--source-domain-aware-generator", help="Makes the generator receive the source domain"
                                                                          " besides the target and source image"

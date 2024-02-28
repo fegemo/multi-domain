@@ -20,18 +20,17 @@ if __name__ == "__main__":
             "steps": 40000,
             "evaluate-steps": 1000,
             "capacity": 2,
-            "d-steps": 1,
             "lr": 0.0001,
             "batch": 4,
-            # "lambda-l1-backward": 10,  # if omitted, automatically calculated as lambda_l1/10.
+            "lambda-l1": 100,
+            "lambda-ssim": 10,
+            "lambda-domain": 10,
             "lr-decay": "constant-than-linear",
             "cycled-source-replacer": "forward",
             "model-name": "@model",
-            "experiment": "@dataset,&lambda-l1,&lambda-ssim,&lambda-domain"
+            "experiment": "@dataset,&network"
         }, {
-            "lambda-l1": [20, 100, 400],
-            "lambda-ssim": [0, 10, 100],
-            "lambda-domain": [0, 10, 100]
+            "adhoc": ["", "conditional-discriminator"]
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],
