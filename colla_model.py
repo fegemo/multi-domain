@@ -21,7 +21,9 @@ class CollaGANModel(S2SModel):
         self.lambda_domain = config.lambda_domain
         self.lambda_ssim = config.lambda_ssim
 
-        if config.input_dropout:
+        if config.aggressive_input_dropout:
+            self.sampler = AggressiveInputDropoutSampler(config)
+        elif config.input_dropout:
             self.sampler = InputDropoutSampler(config)
         else:
             self.sampler = SimpleSampler(config)
@@ -644,6 +646,10 @@ class InputDropoutSampler(ExampleSampler):
         dropout_null_list = dataset_utils.create_input_dropout_index_list([1, 2, 3], self.config.number_of_domains)
         self.null_list = tf.ragged.constant(dropout_null_list, ragged_rank=2, dtype="bool")
 
+    def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target):
+        return tf.random.uniform(shape=[batch_size],
+                                maxval=tf.shape(dropout_null_list_for_target[0])[0],
+                                dtype="int32")
     def sample(self, batch):
         batch_shape = tf.shape(batch)
         number_of_domains, batch_size = batch_shape[0], batch_shape[1]
@@ -664,9 +670,7 @@ class InputDropoutSampler(ExampleSampler):
             tf.tile(self.null_list[tf.newaxis, ...], [batch_size, 1, 1, 1, 1]),
             target_domain_index, batch_dims=1)
         # dropout_null_list_for_target (shape=[b, to_drop, ?, d])
-        random_number_of_inputs_to_drop = tf.random.uniform(shape=[batch_size],
-                                                            maxval=tf.shape(dropout_null_list_for_target[0])[0],
-                                                            dtype="int32")
+        random_number_of_inputs_to_drop = self.select_number_of_inputs_to_drop(batch_size, dropout_null_list_for_target)
         dropout_null_list_for_target_and_number_of_inputs = tf.gather(dropout_null_list_for_target,
                                                                       random_number_of_inputs_to_drop,
                                                                       batch_dims=1)
@@ -681,6 +685,15 @@ class InputDropoutSampler(ExampleSampler):
         input_dropout_mask = tf.where(input_dropout_mask, 0., 1.)
 
         return batch, target_domain_index, input_dropout_mask
+
+
+class AggressiveInputDropoutSampler(InputDropoutSampler):
+    def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target):
+        # 10% of the time, drop 1 inputs
+        # 30% of the time, drop 2 inputs
+        # 60% of the time, drop 3 inputs
+        u = tf.random.uniform(shape=[batch_size])
+        return tf.where(u < 0.1, 1, tf.where(u < 0.4, 2, 3)) - 1
 
 
 class SimpleSampler(ExampleSampler):

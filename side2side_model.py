@@ -178,7 +178,7 @@ class S2SModel(ABC):
                     logging.info(f"Comparing L1 between generated images from train and test...")
                     logging.StreamHandler().terminator = "\n"
                     l1_train, l1_test = self.report_l1(examples_for_evaluation, step=(step + 1) // evaluate_steps)
-                    logging.info(f" L1: {l1_train:.5f} / {l1_test:.5f} (train/test)")
+                    logging.info(f"L1: {l1_train:.5f} / {l1_test:.5f} (train/test)")
                     self.update_training_metrics("l1", l1_test, step + 1, True)
 
                 if "evaluate_fid" in callbacks:

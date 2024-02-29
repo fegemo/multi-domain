@@ -35,6 +35,7 @@ class Experimenter:
         "all": valid_datasets
     }
     valid_networks = ["source-domain-aware-generator", "conditional-discriminator"]
+    valid_dropouts = ["input-dropout", "aggressive-input-dropout"]
 
     def __init__(self, script_to_run, path_to_python, default_params, search_grid, dataset_params=None):
         if "adhoc" not in default_params:
@@ -239,6 +240,14 @@ class Experimenter:
                     else:
                         network_config = network_config[0]
                     replaced_value = network_config
+                elif dependency == "dropout":
+                    if "input-dropout" in specific_params["adhoc"]:
+                        dropout_config = "input-dropout"
+                    elif "aggressive-input-dropout" in specific_params["adhoc"]:
+                        dropout_config = "aggressive-input-dropout"
+                    else:
+                        dropout_config = "no-dropout"
+                    replaced_value = dropout_config
                 elif dependency == "adhoc":
                     adhoc_without_dataset = [n for n in specific_params["adhoc"] if n not in self.datasets]
                     replaced_value = ",".join(adhoc_without_dataset)
