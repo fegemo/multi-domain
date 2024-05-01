@@ -65,7 +65,7 @@ def denormalize(image):
 # loads an image from the file system and transforms it for the network:
 # (a) casts to float, (b) ensures transparent pixels are black-transparent, and (c)
 # puts the values in the range of [-1, 1]
-def load_image(path, image_size, input_channels, should_normalize=True):
+def load_image(path, image_size, input_channels, output_channels, should_normalize=True):
     image = None
     try:
         image = tf.io.read_file(path)
@@ -74,6 +74,8 @@ def load_image(path, image_size, input_channels, should_normalize=True):
         image = tf.cast(image, "float32")
         if input_channels == 4:
             image = blacken_transparent_pixels(image)
+        if output_channels == 3:
+            image = replace_alpha_with_white(image)
         if should_normalize:
             image = normalize(image)
     except UnicodeDecodeError:
@@ -97,15 +99,18 @@ def augment_translation(images):
     return tf.tuple(images)
 
 
-def augment(should_rotate_hue, should_translate, *images):
+def augment(should_rotate_hue, should_translate, channels, *images):
     stacked_images = tf.stack(images, axis=0)
 
     # hue rotation
     if should_rotate_hue:
         hue_seed = tf.random.uniform(shape=[2], minval=0, maxval=65536, dtype="int32")
-        stacked_images_rgb, stacked_images_alpha = stacked_images[..., 0:3], stacked_images[..., 3]
-        stacked_images_rgb = tf.image.stateless_random_hue(stacked_images_rgb, 0.5, hue_seed)
-        stacked_images = tf.concat([stacked_images_rgb, stacked_images_alpha[..., tf.newaxis]], axis=-1)
+        if channels == 4:
+            stacked_images_rgb, stacked_images_alpha = stacked_images[..., 0:3], stacked_images[..., 3]
+            stacked_images_rgb = tf.image.stateless_random_hue(stacked_images_rgb, 0.5, hue_seed)
+            stacked_images = tf.concat([stacked_images_rgb, stacked_images_alpha[..., tf.newaxis]], axis=-1)
+        elif channels == 3:
+            stacked_images = tf.image.stateless_random_hue(stacked_images, 0.5, hue_seed)
 
     # translation
     if should_translate:
@@ -124,14 +129,14 @@ def normalize_all(*images):
     return tuple(map(lambda image: normalize(image), images))
 
 
-def create_augmentation_with_prob(prob=0.8, should_augment_hue=True, should_augment_translation=True):
+def create_augmentation_with_prob(prob=0.8, should_augment_hue=True, should_augment_translation=True, channels=4):
     prob = tf.constant(prob)
 
     def augmentation_wrapper(*images):
         choice = tf.random.uniform(shape=[])
         inside_augmentation_probability = choice < prob
         if inside_augmentation_probability:
-            return augment(should_augment_hue, should_augment_translation, *images)
+            return augment(should_augment_hue, should_augment_translation, channels, *images)
         else:
             return tf.tuple(images)
 
@@ -150,11 +155,12 @@ def create_multi_domain_image_loader(config, train_or_test_folder):
     dataset_sizes = config.train_sizes if train_or_test_folder == "train" else config.test_sizes  # config.dataset_sizes
     image_size = config.image_size
     input_channels = config.input_channels
+    output_channels = config.output_channels
 
     def load_single_image(dataset, side_index, image_number):
         path = tf.strings.join(
             [dataset, train_or_test_folder, tf.gather(domain_folders, side_index), image_number + ".png"], os.sep)
-        image = load_image(path, image_size, input_channels, False)
+        image = load_image(path, image_size, input_channels, output_channels, False)
         return image
 
     @tf.function
@@ -184,6 +190,7 @@ def load_multi_domain_ds(config):
     train_size = config.train_size
     test_size = config.test_size
     batch_size = config.batch
+    channels = config.inner_channels
 
     train_ds = tf.data.Dataset.range(train_size).shuffle(train_size)
     test_ds = tf.data.Dataset.range(test_size)
@@ -195,7 +202,7 @@ def load_multi_domain_ds(config):
     should_augment = should_augment_hue or should_augment_translation
     if should_augment:
         train_ds = train_ds \
-            .map(create_augmentation_with_prob(0.8, should_augment_hue, should_augment_translation),
+            .map(create_augmentation_with_prob(0.8, should_augment_hue, should_augment_translation, channels),
                  num_parallel_calls=tf.data.AUTOTUNE)
 
     train_ds = train_ds \

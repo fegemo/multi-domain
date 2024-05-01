@@ -244,6 +244,8 @@ class OptionParser(metaclass=SingletonMeta):
         else:
             self.values.epochs = ceil(self.values.steps * self.values.batch / self.values.train_size)
 
+        setattr(self.values, "inner_channels", min(self.values.input_channels, self.values.output_channels))
+
         if return_parser:
             return self.values, self
         else:

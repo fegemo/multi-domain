@@ -20,7 +20,7 @@ class TestDatasetUtils(tf.test.TestCase):
         ])
         # mock_tf_read_file.return_value = None
         mock_tf_decode_png.return_value = sample_decoded_png
-        loaded = load_image("any-path-as-it-was-mocked.png", 2, 3, should_normalize=True)
+        loaded = load_image("any-path-as-it-was-mocked.png", 2, 3, 3, should_normalize=True)
 
         mock_tf_read_file.assert_called()
         mock_tf_decode_png.assert_called()

@@ -25,21 +25,20 @@ if __name__ == "__main__":
             "experiment": "@dataset",
             "sampler": "single-target"
         }, {}, {
-            "tiny": {
-                "adhoc": ["no-aug"]
-            },
-            "rm2k": {
-                "adhoc": ["no-tran"]
-            },
-            "rmxp": {
-                "adhoc": []
-            },
-            "rmvx": {
-                "adhoc": ["no-tran"]
-            },
+            # "tiny": {
+            #     "adhoc": ["no-aug"]
+            # },
+            # "rm2k": {
+            #     "adhoc": ["no-tran"]
+            # },
+            # "rmxp": {
+            #     "adhoc": []
+            # },
+            # "rmvx": {
+            #     "adhoc": ["no-tran"]
+            # },
             "all": {
-                "adhoc": ["no-tran"],
-                "steps": 80000
+                "adhoc": ["no-tran"]
             }
         })
 

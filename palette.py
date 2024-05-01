@@ -3,7 +3,9 @@ from tensorflow import RaggedTensorSpec
 
 import dataset_utils
 
-INVALID_COLOR = tf.constant([32768, 32768, 32768, 32768])
+
+def get_invalid_color(channels):
+    return tf.constant([32768] * channels)
 
 
 def extract_palette(image):
@@ -31,7 +33,7 @@ def extract_palette(image):
     return colors
 
 
-def batch_extract_palette(images):
+def batch_extract_palette(images, channels):
     """
     Extracts the palette of each image in the batch, returning a ragged tensor of shape [b, (colors), c]
     :param images:
@@ -44,7 +46,7 @@ def batch_extract_palette(images):
                                 fn_output_signature=RaggedTensorSpec(
                                     ragged_rank=0,
                                     dtype=tf.int32))
-    palettes = tf.RaggedTensor.to_tensor(palettes_ragged, default_value=INVALID_COLOR)
+    palettes = tf.RaggedTensor.to_tensor(palettes_ragged, default_value=get_invalid_color(channels))
     palettes = tf.cast(palettes, tf.float32)
     palettes = dataset_utils.normalize(palettes)
 
@@ -126,7 +128,7 @@ def main():
     # palette2 = tf.cast(palette2, "float32")
     # palette2 = palette2 / 255.
     image = tf.stack([image1, image2])
-    palette_ragged = batch_extract_palette(image)
+    palette_ragged = batch_extract_palette(image, 4)
     palette = tf.RaggedTensor.to_tensor(palette_ragged, default_value=tf.constant([32768, 32768, 32768, 32768]))
     palette = tf.cast(palette, "float32")
     palette /= 255.
