@@ -29,7 +29,7 @@ def dict_hash(dictionary):
 
 
 class Experimenter:
-    valid_datasets = ["rm2k", "rmxp", "rmvx", "misc"]
+    valid_datasets = ["tiny", "rm2k", "rmxp", "rmvx", "misc"]
     virtual_datasets = valid_datasets + ["all"]
     artificial_param_lookup_table = {
         "all": valid_datasets
@@ -83,6 +83,8 @@ class Experimenter:
 
         combinations = self.explode_combinations()
 
+        run_index = -1
+        combination = "''"
         try:
             for run_index, combination in tqdm(enumerate(combinations), total=total):
                 if execution_status[run_index]:
@@ -153,6 +155,7 @@ class Experimenter:
 
         log_file = self.open_log_file(specific_params)
         log_file.seek(0)
+        command = "''"
         try:
             command = f"{self.path_to_python} {self.script_to_run}.py {run_params_string}"
             log_file.write(command + "\n" * 2)

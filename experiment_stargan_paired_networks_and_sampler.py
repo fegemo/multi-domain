@@ -22,7 +22,7 @@ if __name__ == "__main__":
             "d-steps": 1,
             "lr": 0.0002,
             "lambda-l1": 100.,
-            "model-name": "study-networks",
+            "model-name": "@model",
             "experiment": "all,&network,&sampler",
         }, {
             "adhoc": [

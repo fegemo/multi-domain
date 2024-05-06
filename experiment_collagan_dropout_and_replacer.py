@@ -22,9 +22,9 @@ if __name__ == "__main__":
             "capacity": 2,
             "lr": 0.0001,
             "batch": 4,
-            "lambda-l1": 100,
-            "lambda-ssim": 10,
-            "lambda-domain": 10,
+            "lambda-l1": 20,
+            "lambda-ssim": 100,
+            "lambda-domain": 0.5,
             "lr-decay": "constant-than-linear",
             "model-name": "@model",
             "experiment": "all,&dropout,&cycled-source-replacer"

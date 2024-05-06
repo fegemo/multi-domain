@@ -1,9 +1,6 @@
 import os
 
 import tensorflow as tf
-from functools import partial
-
-import io_utils
 
 
 # Some images have transparent pixels with colors other than black
