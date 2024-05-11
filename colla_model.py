@@ -23,6 +23,8 @@ class CollaGANModel(S2SModel):
 
         if config.aggressive_input_dropout:
             self.sampler = AggressiveInputDropoutSampler(config)
+        elif config.balanced_input_dropout:
+            self.sampler = BalancedInputDropoutSampler(config)
         elif config.input_dropout:
             self.sampler = InputDropoutSampler(config)
         else:
@@ -414,6 +416,17 @@ class CollaGANModel(S2SModel):
             fake_image = generator(self.gen_supplier(domain_images, target_domain), training=True)
             return target_image, fake_image
 
+            # fake_image = np.empty(tf.shape(target_image))
+            # batch_size = 128
+            # for batch_start in range(0, len(fake_image), batch_size):
+            #     batch_end = batch_start + batch_size
+            #     batch_end = min(batch_end, len(fake_image))
+            #     domain_images_batch = domain_images[batch_start:batch_end]
+            #     target_domain_batch = target_domain[batch_start:batch_end]
+            #     fake_image[batch_start:batch_end] = generator(
+            #         self.gen_supplier(domain_images_batch, target_domain_batch), training=True)
+            # return target_image, tf.constant(fake_image, tf.float32)
+
         return dict({
             "train": generate_images_from_dataset("train"),
             "test": generate_images_from_dataset("test")
@@ -694,6 +707,15 @@ class AggressiveInputDropoutSampler(InputDropoutSampler):
         # 60% of the time, drop 3 inputs
         u = tf.random.uniform(shape=[batch_size])
         return tf.where(u < 0.1, 1, tf.where(u < 0.4, 2, 3)) - 1
+
+
+class BalancedInputDropoutSampler(InputDropoutSampler):
+    def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target):
+        # 34% of the time, drop 1 inputs
+        # 33% of the time, drop 2 inputs
+        # 33% of the time, drop 3 inputs
+        u = tf.random.uniform(shape=[batch_size])
+        return tf.where(u < 0.34, 1, tf.where(u < 0.67, 2, 3)) - 1
 
 
 class SimpleSampler(ExampleSampler):

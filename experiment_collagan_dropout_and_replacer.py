@@ -30,7 +30,7 @@ if __name__ == "__main__":
             "model-name": "@model",
             "experiment": "all,&dropout,&cycled-source-replacer"
         }, {
-            "adhoc": ["aggressive-input-dropout", "input-dropout", ""],
+            "adhoc": ["balanced-input-dropout"],    # ["aggressive-input-dropout", "input-dropout", ""],
             "cycled-source-replacer": ["dropout", "forward"]
         })
 
@@ -45,7 +45,7 @@ if __name__ == "__main__":
             "adhoc": [
                 "callback-evaluate-fid", "callback-evaluate-l1",
                 "save-model",
-                "all", "no-tran", "input-dropout"
+                "all", "no-tran"
             ],
             "log-folder": config.output if config.output is not None else "output",
             "steps": 40000,

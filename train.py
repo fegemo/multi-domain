@@ -121,7 +121,7 @@ logging.info(f"Restored the BEST generator, which was in step {step}.")
 
 # generating resulting images
 logging.info(f"Starting to generate the images from the test dataset with generator from step {step}...")
-model.generate_images_from_dataset(test_ds, step)
+model.generate_images_from_dataset(test_ds, step, num_images=100)
 
 if config.save_model:
     logging.info(f"Saving the generator...")

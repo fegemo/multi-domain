@@ -145,6 +145,9 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--aggressive-input-dropout", help="applies an aggressive dropout to the"
                                                                     "input, biasing towards dropping many images",
                                  action="store_true", default=False)
+        self.parser.add_argument("--balanced-input-dropout", help="applies 33% input dropout to each "
+                                                                  "number of possible missing images",
+                                 action="store_true", default=False)
         self.parser.add_argument("--cycled-source-replacer",
                                  help="one from {forward, dropout} indicating which images should be replaced by the"
                                       "forward generated one when computing the cycled images. Colla's paper does not"
