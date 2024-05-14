@@ -12,8 +12,7 @@ if __name__ == "__main__":
         {
             "model": "collagan",
             "adhoc": [
-                "input-dropout",
-                "callback-evaluate-fid", "callback-evaluate-l1",# "callback-debug-discriminator",
+                "callback-evaluate-fid", "callback-evaluate-l1",
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
@@ -26,6 +25,7 @@ if __name__ == "__main__":
             "lambda-ssim": 10,
             "lambda-domain": 10,
             "lr-decay": "constant-than-linear",
+            "input-dropout": "original",
             "model-name": "@model",
             "experiment": "@dataset,&cycled-source-replacer"
         }, {
@@ -45,7 +45,6 @@ if __name__ == "__main__":
             # },
             # "all": {
             #     "adhoc": ["no-tran"],
-            #     "steps": 80000
             # }
         })
 

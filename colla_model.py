@@ -21,14 +21,20 @@ class CollaGANModel(S2SModel):
         self.lambda_domain = config.lambda_domain
         self.lambda_ssim = config.lambda_ssim
 
-        if config.aggressive_input_dropout:
-            self.sampler = AggressiveInputDropoutSampler(config)
-        elif config.balanced_input_dropout:
-            self.sampler = BalancedInputDropoutSampler(config)
-        elif config.input_dropout:
-            self.sampler = InputDropoutSampler(config)
-        else:
+        if config.input_dropout == "none":
             self.sampler = SimpleSampler(config)
+        elif config.input_dropout == "original":
+            self.sampler = InputDropoutSampler(config)
+        elif config.input_dropout == "aggressive":
+            self.sampler = AggressiveInputDropoutSampler(config)
+        elif config.input_dropout == "balanced":
+            self.sampler = BalancedInputDropoutSampler(config)
+        elif config.input_dropout == "conservative":
+            self.sampler = ConservativeInputDropoutSampler(config)
+        elif config.input_dropout == "curriculum":
+            self.sampler = CurriculumLearningSampler(config)
+        else:
+            raise ValueError(f"The provided {config.input_dropout} type for input dropout has not been implemented.")
 
         if config.cycled_source_replacer in ["", "dropout"]:
             self.cycled_source_replacer = DroppedOutCycledSourceReplacer(config)
@@ -221,7 +227,7 @@ class CollaGANModel(S2SModel):
             batch_shape[2], batch_shape[4]
 
         # 1. select a random target domain with a subset of the images as input
-        domain_images, target_domain, input_dropout_mask = self.sampler.sample(batch)
+        domain_images, target_domain, input_dropout_mask = self.sampler.sample(batch, t)
         # domain_images (shape=[b, d, s, s, c])
         # target_domain (shape=[b,])
         # input_dropout_mask (shape=[b, d]), with 0s for images that should be dropped out
@@ -250,26 +256,27 @@ class CollaGANModel(S2SModel):
             # 3. discriminate the real (target) and fake images, then the cycled ones and the source (to train the disc)
             real_predicted_patches, real_predicted_domain = self.discriminator(
                 self.dis_supplier(real_image, tf.reshape(dropped_input_image,
-                                                          [batch_size, image_size, image_size,
-                                                           channels * number_of_domains])), training=True)
+                                                         [batch_size, image_size, image_size,
+                                                          channels * number_of_domains])), training=True)
             fake_predicted_patches, fake_predicted_domain = self.discriminator(
                 self.dis_supplier(fake_image, tf.reshape(dropped_input_image,
-                                                          [batch_size, image_size, image_size,
-                                                           channels * number_of_domains])), training=True)
+                                                         [batch_size, image_size, image_size,
+                                                          channels * number_of_domains])), training=True)
             # xxxx_predicted_patches (shape=[b, 1, 1, 1])
             # xxxx_predicted_domain  (shape=[b, d] -> logits)
 
             cycled_predicted_patches, cycled_predicted_domain = self.discriminator(
                 self.dis_supplier(cycled_images, tf.reshape(cycled_generator_input[0],
-                                                             [-1, image_size, image_size,
-                                                              channels * number_of_domains])), training=True)
+                                                            [-1, image_size, image_size,
+                                                             channels * number_of_domains])), training=True)
             # cycled_predicted_patches (shape=[b*d, 1, 1, 1])
             # cycled_predicted_domain  (shape=[b*d, d] -> logits)
 
             source_predicted_patches, source_predicted_domain = self.discriminator(
                 self.dis_supplier(tf.reshape(domain_images, [-1, image_size, image_size, channels]),
-                                   tf.reshape(self.get_source_images_for_conditional_discriminator(domain_images),
-                                  [batch_size * number_of_domains, image_size, image_size, channels * number_of_domains])),
+                                  tf.reshape(self.get_source_images_for_conditional_discriminator(domain_images),
+                                             [batch_size * number_of_domains, image_size, image_size,
+                                              channels * number_of_domains])),
                 training=True)
             # source_predicted_patches (shape=[b*d, 1, 1, 1])
             # source_predicted_domain  (shape=[b*d, d] -> logits)
@@ -495,7 +502,7 @@ class CollaGANModel(S2SModel):
         batch_shape = tf.shape(batch)
         number_of_domains, batch_size, image_size = batch_shape[0], batch_shape[1], batch_shape[2]
 
-        domain_images, target_domain, _ = self.sampler.sample(batch)
+        domain_images, target_domain, _ = self.sampler.sample(batch, 0.5)
         # domain_images (shape=[b, d, s, s, c])
         # target_domain (shape=[b,])
 
@@ -642,7 +649,7 @@ class ExampleSampler(ABC):
         self.config = config
 
     @abstractmethod
-    def sample(self, batch):
+    def sample(self, batch, t):
         pass
 
     def random_target_index(self, batch_size):
@@ -659,11 +666,12 @@ class InputDropoutSampler(ExampleSampler):
         dropout_null_list = dataset_utils.create_input_dropout_index_list([1, 2, 3], self.config.number_of_domains)
         self.null_list = tf.ragged.constant(dropout_null_list, ragged_rank=2, dtype="bool")
 
-    def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target):
+    def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target, t):
         return tf.random.uniform(shape=[batch_size],
-                                maxval=tf.shape(dropout_null_list_for_target[0])[0],
-                                dtype="int32")
-    def sample(self, batch):
+                                 maxval=tf.shape(dropout_null_list_for_target[0])[0],
+                                 dtype="int32")
+
+    def sample(self, batch, t):
         batch_shape = tf.shape(batch)
         number_of_domains, batch_size = batch_shape[0], batch_shape[1]
 
@@ -683,7 +691,8 @@ class InputDropoutSampler(ExampleSampler):
             tf.tile(self.null_list[tf.newaxis, ...], [batch_size, 1, 1, 1, 1]),
             target_domain_index, batch_dims=1)
         # dropout_null_list_for_target (shape=[b, to_drop, ?, d])
-        random_number_of_inputs_to_drop = self.select_number_of_inputs_to_drop(batch_size, dropout_null_list_for_target)
+        random_number_of_inputs_to_drop = self.select_number_of_inputs_to_drop(batch_size, dropout_null_list_for_target,
+                                                                               t)
         dropout_null_list_for_target_and_number_of_inputs = tf.gather(dropout_null_list_for_target,
                                                                       random_number_of_inputs_to_drop,
                                                                       batch_dims=1)
@@ -701,7 +710,7 @@ class InputDropoutSampler(ExampleSampler):
 
 
 class AggressiveInputDropoutSampler(InputDropoutSampler):
-    def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target):
+    def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target, t):
         # 10% of the time, drop 1 inputs
         # 30% of the time, drop 2 inputs
         # 60% of the time, drop 3 inputs
@@ -710,16 +719,40 @@ class AggressiveInputDropoutSampler(InputDropoutSampler):
 
 
 class BalancedInputDropoutSampler(InputDropoutSampler):
-    def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target):
-        # 34% of the time, drop 1 inputs
-        # 33% of the time, drop 2 inputs
-        # 33% of the time, drop 3 inputs
+    def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target, t):
+        # 43% of the time, drop 3 inputs
+        # 43% of the time, drop 2 inputs
+        # 14% of the time, drop 1 inputs
         u = tf.random.uniform(shape=[batch_size])
-        return tf.where(u < 0.34, 1, tf.where(u < 0.67, 2, 3)) - 1
+        return tf.where(u < 0.43, 3, tf.where(u < 0.86, 2, 1)) - 1
+
+
+class ConservativeInputDropoutSampler(InputDropoutSampler):
+    def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target, t):
+        # 10% of the time, drop 3 inputs
+        # 30% of the time, drop 2 inputs
+        # 60% of the time, drop 1 inputs
+        u = tf.random.uniform(shape=[batch_size])
+        return tf.where(u < 0.1, 3, tf.where(u < 0.4, 2, 1)) - 1
+
+
+class CurriculumLearningSampler(InputDropoutSampler):
+    def __init__(self, config):
+        super().__init__(config)
+        self.balanced_sampler = BalancedInputDropoutSampler(config)
+
+    def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target, t):
+        # start with easy (missing 1) samples, then move to harder ones
+        # until 25% of the training, drop 1 inputs
+        # until 50% of the training, drop 2 inputs
+        # until 75% of the training, drop 3 inputs
+        # remainder of the training, drop randomly
+        n = self.balanced_sampler.select_number_of_inputs_to_drop(batch_size, dropout_null_list_for_target, t) + 1
+        return tf.where(t < 0.25, 1, tf.where(t < 0.5, 2, tf.where(t < 0.75, 3, n))) - 1
 
 
 class SimpleSampler(ExampleSampler):
-    def sample(self, batch):
+    def sample(self, batch, t):
         batch_shape = tf.shape(batch)
         number_of_domains, batch_size = batch_shape[0], batch_shape[1]
 

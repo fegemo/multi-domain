@@ -12,8 +12,7 @@ if __name__ == "__main__":
         {
             "model": "collagan",
             "adhoc": [
-                "input-dropout",
-                "callback-evaluate-fid", "callback-evaluate-l1", #"callback-debug-discriminator",
+                "callback-evaluate-fid", "callback-evaluate-l1",
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
@@ -25,13 +24,14 @@ if __name__ == "__main__":
             "batch": 4,
             # "lambda-l1-backward": 10,  # if omitted, automatically calculated as lambda_l1/10.
             "lr-decay": "constant-than-linear",
+            "input-dropout": "original",
             "cycled-source-replacer": "forward",
             "model-name": "@model",
             "experiment": "@dataset,&lambda-l1,&lambda-ssim,&lambda-domain"
         }, {
-            "lambda-l1": [20, 100, 400],
-            "lambda-ssim": [0, 10, 100],
-            "lambda-domain": [0, 10, 100]
+            "lambda-l1": [20, 100],
+            "lambda-ssim": [0, 1, 10, 100],
+            "lambda-domain": [0, 1, 10, 100]
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],
@@ -47,7 +47,6 @@ if __name__ == "__main__":
             # },
             # "all": {
             #     "adhoc": ["no-tran"],
-            #     "steps": 80000
             # }
         })
 

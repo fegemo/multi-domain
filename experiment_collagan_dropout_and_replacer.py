@@ -28,40 +28,42 @@ if __name__ == "__main__":
             "lambda-domain": 10,
             "lr-decay": "constant-than-linear",
             "model-name": "@model",
-            "experiment": "all,&dropout,&cycled-source-replacer"
+            "experiment": "all,&input-dropout,&cycled-source-replacer"
         }, {
-            "adhoc": ["balanced-input-dropout"],    # ["aggressive-input-dropout", "input-dropout", ""],
+            "input-dropout": ["balanced", "conservative", "curriculum"],
+            # "input-dropout": ["none", "original", "aggressive", "balanced", "conservative", "curriculum"],
             "cycled-source-replacer": ["dropout", "forward"]
         })
 
     logging.info("Starting execution of the dropout and replacer experiment.")
     runner.execute(config)
 
-    runner = Experimenter(
-        "train" if not config.dummy else "dummy_script",
-        config.python,
-        {
-            "model": "collagan",
-            "adhoc": [
-                "callback-evaluate-fid", "callback-evaluate-l1",
-                "save-model",
-                "all", "no-tran"
-            ],
-            "log-folder": config.output if config.output is not None else "output",
-            "steps": 40000,
-            "evaluate-steps": 1000,
-            "capacity": 1,
-            "lr": 0.0001,
-            "batch": 4,
-            "lambda-l1": 100,
-            "lambda-ssim": 10,
-            "lambda-domain": 10,
-            "lr-decay": "constant-than-linear",
-            "model-name": "@model",
-            "cycled-source-replacer": "dropout",
-            "experiment": "all,capacity-1"
-        }, {
-        })
-
-    logging.info("Starting the execution of the capacity 1 experiment")
-    runner.execute(config)
+    # runner = Experimenter(
+    #     "train" if not config.dummy else "dummy_script",
+    #     config.python,
+    #     {
+    #         "model": "collagan",
+    #         "adhoc": [
+    #             "callback-evaluate-fid", "callback-evaluate-l1",
+    #             "save-model",
+    #             "all", "no-tran"
+    #         ],
+    #         "log-folder": config.output if config.output is not None else "output",
+    #         "steps": 40000,
+    #         "evaluate-steps": 1000,
+    #         "capacity": 1,
+    #         "lr": 0.0001,
+    #         "batch": 4,
+    #         "lambda-l1": 100,
+    #         "lambda-ssim": 10,
+    #         "lambda-domain": 10,
+    #         "lr-decay": "constant-than-linear",
+    #         "input-dropout": "none",
+    #         "model-name": "@model",
+    #         "cycled-source-replacer": "dropout",
+    #         "experiment": "all,capacity-1"
+    #     }, {
+    #     })
+    #
+    # logging.info("Starting the execution of the capacity 1 experiment")
+    # runner.execute(config)

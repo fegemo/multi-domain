@@ -12,7 +12,7 @@ if __name__ == "__main__":
         {
             "model": "collagan",
             "adhoc": [
-                "callback-evaluate-fid", "callback-evaluate-l1", #"callback-debug-discriminator",
+                "callback-evaluate-fid", "callback-evaluate-l1",
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
@@ -27,9 +27,9 @@ if __name__ == "__main__":
             "lr-decay": "constant-than-linear",
             "cycled-source-replacer": "forward",
             "model-name": "@model",
-            "experiment": "@dataset,&dropout"
+            "experiment": "@dataset,&input-dropout"
         }, {
-            "adhoc": ["aggressive-input-dropout", "input-dropout", ""]
+            "input-dropout": ["none", "original", "aggressive", "balanced", "conservative", "curriculum"]
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],
@@ -45,7 +45,6 @@ if __name__ == "__main__":
             # },
             # "all": {
             #     "adhoc": ["no-tran"],
-            #     "steps": 80000
             # }
         })
 

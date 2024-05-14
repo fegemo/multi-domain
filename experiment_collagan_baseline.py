@@ -28,7 +28,7 @@ if __name__ == "__main__":
             "model-name": "@model",
             "experiment": "@dataset,@adhoc"
         }, {
-            "adhoc": ["", "input-dropout"]
+            "input-dropout": ["none", "original"]
         }, {
             "tiny": {
                 "adhoc": ["no-aug"],
@@ -44,7 +44,6 @@ if __name__ == "__main__":
             },
             "all": {
                 "adhoc": ["no-tran"],
-                "steps": 80000
             }
         })
 
