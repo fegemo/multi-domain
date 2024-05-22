@@ -20,7 +20,7 @@ if __name__ == "__main__":
             "log-folder": config.output if config.output is not None else "output",
             "steps": 80000,
             "evaluate-steps": 1000,
-            "capacity": 2,
+            "capacity": 4,
             "lr": 0.0001,
             "batch": 4,
             "lambda-l1": 100,
@@ -30,9 +30,8 @@ if __name__ == "__main__":
             "model-name": "@model",
             "experiment": "all,&input-dropout,&cycled-source-replacer"
         }, {
-            # "input-dropout": ["balanced", "conservative", "curriculum"],
             "input-dropout": ["none", "original", "aggressive", "balanced", "conservative", "curriculum"],
-            "cycled-source-replacer": ["dropout", "forward"]
+            "cycled-source-replacer": ["dropout"]
         })
 
     logging.info("Starting execution of the dropout and replacer experiment.")
@@ -49,7 +48,7 @@ if __name__ == "__main__":
                 "all", "no-tran"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 40000,
+            "steps": 80000,
             "evaluate-steps": 1000,
             "capacity": 1,
             "lr": 0.0001,

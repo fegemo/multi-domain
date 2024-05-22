@@ -743,12 +743,12 @@ class CurriculumLearningSampler(InputDropoutSampler):
 
     def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target, t):
         # start with easy (missing 1) samples, then move to harder ones
-        # until 25% of the training, drop 1 inputs
-        # until 50% of the training, drop 2 inputs
-        # until 75% of the training, drop 3 inputs
-        # remainder of the training, drop randomly
+        # until 17% of the training, drop 1 inputs
+        # until 33% of the training, drop 2 inputs
+        # until 50% of the training, drop 3 inputs
+        # remainder 50% of the training, drop randomly
         n = self.balanced_sampler.select_number_of_inputs_to_drop(batch_size, dropout_null_list_for_target, t) + 1
-        return tf.where(t < 0.25, 1, tf.where(t < 0.5, 2, tf.where(t < 0.75, 3, n))) - 1
+        return tf.where(t < 0.166667, 1, tf.where(t < 0.33333, 2, tf.where(t < 0.5, 3, n))) - 1
 
 
 class SimpleSampler(ExampleSampler):
