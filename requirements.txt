@@ -5,13 +5,15 @@ scipy==1.9.1
 scikit-image==0.20.0
 ipython==8.12.0
 tqdm==4.65.0
-tensorflowjs==3.21.0
+#tensorflowjs==3.21.0
 
 numpy==1.24.2
 Pillow==9.5.0
 tensorboard==2.10.1
-keras==2.10.0
 graphlib-backport
+
+beaupy
+typing_extensions
 
 # for tensorflow_addons not to include a new (breaking) version of typeguard:
 typeguard==2.7

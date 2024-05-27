@@ -18,7 +18,7 @@ if __name__ == "__main__":
                 "all", "no-tran"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 160000,
+            "steps": 240000,
             "evaluate-steps": 1000,
             "capacity": 4,
             "lr": 0.0001,
@@ -31,7 +31,7 @@ if __name__ == "__main__":
             "experiment": "all,&input-dropout,&cycled-source-replacer"
         }, {
             # "input-dropout": ["none", "original", "aggressive", "balanced", "conservative", "curriculum"],
-            "input-dropout": ["conservative"],
+            "input-dropout": ["conservative", "original", "none", "curriculum"],
             "cycled-source-replacer": ["forward"]
         })
 

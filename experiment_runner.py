@@ -12,6 +12,7 @@ from typing import List
 from copy import deepcopy
 
 from tqdm import tqdm
+from beaupy import select_multiple
 
 import io_utils
 
@@ -63,9 +64,11 @@ class Experimenter:
         self.dataset_params = dataset_params
         self.datasets = list(dataset_params.keys())
 
-    def run(self):
-        checkpoint_file = self.open_checkpoint_file()
-        execution_status, total = self.lookup_start_and_total_runs(checkpoint_file)
+    def run(self, selected_combinations=None):
+        all_combinations = self.explode_combinations()
+        selected_combinations = selected_combinations or all_combinations
+
+        execution_status, total = self.lookup_start_and_total_runs()
         completed_runs = reduce(lambda count, status: count + 1 if status else count, execution_status, 0)
 
         # check if there's a checkpoint and resume from it
@@ -75,19 +78,20 @@ class Experimenter:
                   f" of {total} runs: {execution_status}.")
         elif completed_runs == total:
             print("All runs WERE ALREADY completed.")
-            checkpoint_file.close()
             return
         else:
             print(f"Starting the experiments from the beginning with hash {self.hash_checkpoint_name()}.")
 
-        combinations = self.explode_combinations()
-
         run_index = -1
         combination = "''"
         try:
-            for run_index, combination in tqdm(enumerate(combinations), total=total):
+            for run_index, combination in tqdm(enumerate(all_combinations), total=total):
+                execution_status, _ = self.lookup_start_and_total_runs()
                 if execution_status[run_index]:
                     print("Skipped the run with index", run_index, "because it was already completed.")
+                    continue
+                if combination not in selected_combinations:
+                    print("Skipped the run with index", run_index, "because it was not selected.")
                     continue
 
                 # executes the current run
@@ -95,7 +99,7 @@ class Experimenter:
                 execution_status[run_index] = success
 
                 # saves at the checkpoint file that this test was completed
-                self.save_checkpoint(checkpoint_file, execution_status, total)
+                self.save_checkpoint(execution_status, total)
 
             all_success = bool(reduce(lambda a, b: a and b, execution_status, True))
             all_failure = bool(reduce(lambda a, b: not a and not b, execution_status, True))
@@ -106,9 +110,6 @@ class Experimenter:
         except ChildProcessError as error:
             print(f"ChildProcessError at index {run_index} with args {combination}:", error)
             print(f"Some error occurred during the execution of runs... exiting!")
-        finally:
-            # closes the checkpoint file
-            checkpoint_file.close()
 
     def combine_default_and_specific_params(self, default_params, specific_params):
         """
@@ -307,21 +308,25 @@ class Experimenter:
         log_path = os.sep.join([self.output_path, f"{self.hash_checkpoint_name()}-{specific_params_string}-log.txt"])
         return open(log_path, "w", encoding="utf-8")
 
-    def lookup_start_and_total_runs(self, checkpoint_file):
+    def lookup_start_and_total_runs(self):
         # the file should have the format like: ooox.. (3 successes, 1 error, 2 not run)
+        checkpoint_file = self.open_checkpoint_file()
         execution_status = next(checkpoint_file)
         execution_status = list(map(lambda s: True if s == "o" else False, execution_status))
         checkpoint_file.seek(0)
+        checkpoint_file.close()
         return execution_status, len(execution_status)
 
     # def save_checkpoint(self, file, completed, total):
-    def save_checkpoint(self, file, execution_status: List[bool], total):
+    def save_checkpoint(self, execution_status: List[bool], total):
+        file = self.open_checkpoint_file()
         execution_status = list(map(lambda s: "o" if s else "x", execution_status))
         execution_status += ["."] * (total - len(execution_status))
         execution_status = "".join(execution_status)
         file.write(execution_status)
         file.seek(0)
         file.flush()
+        file.close()
 
     def delete_checkpoint(self):
         files = glob(os.sep.join([self.output_path, f"{self.hash_checkpoint_name()}*.txt"]))
@@ -364,10 +369,22 @@ class Experimenter:
         combinations = [{name: values[i] for i, name in enumerate(param_names)} for values in combined_values]
         return combinations
 
+    def show_interactive_menu(self):
+        stringify_shallow_list = lambda ls: " ".join([str(x) for x in ls]) if isinstance(ls, list) else str(ls)
+        stringify_shallow_dict = lambda d: " ".join([f"{k}-{stringify_shallow_list(v)}" for k, v in d.items()])
+        all_combinations = self.explode_combinations()
+        print("Choose which configurations to run:")
+        selected_combinations = select_multiple(all_combinations, preprocessor=lambda x: stringify_shallow_dict(x))
+        return selected_combinations
+
     def execute(self, config):
         if config.delete:
             self.delete_checkpoint()
             exit(0)
+        elif config.interactive:
+            print("Staring interactive mode...")
+            selected = self.show_interactive_menu()
+            self.run(selected_combinations=selected)
         else:
             self.run()
 
@@ -379,6 +396,8 @@ def create_general_parser(args):
     parser.add_argument("--output", "-o", help="Sets (overrides) the path to the output folder", default=None)
     parser.add_argument("--python", "-p", help="Path to python with tensorflow", default="venv/Scripts/python")
     parser.add_argument("--dummy", "-D", help="Dummy run, does not execute anything", action="store_true")
+    parser.add_argument("--interactive", "-i", help="Interactive mode, asks for which combinations of "
+                                                    "the search grid should be run", default=False, action="store_true")
     config = parser.parse_args(args)
     return config
 
