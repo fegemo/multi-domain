@@ -381,7 +381,13 @@ class Experimenter:
         if config.delete:
             self.delete_checkpoint()
             exit(0)
-        elif config.interactive:
+
+        if config.nofid:
+            fid_command = "callback-evaluate-fid"
+            if fid_command in self.default_params["adhoc"]:
+                self.default_params["adhoc"].remove(fid_command)
+
+        if config.interactive:
             print("Staring interactive mode...")
             selected = self.show_interactive_menu()
             self.run(selected_combinations=selected)
@@ -398,6 +404,7 @@ def create_general_parser(args):
     parser.add_argument("--dummy", "-D", help="Dummy run, does not execute anything", action="store_true")
     parser.add_argument("--interactive", "-i", help="Interactive mode, asks for which combinations of "
                                                     "the search grid should be run", default=False, action="store_true")
+    parser.add_argument("--nofid", "-f", help="Do NOT calculate FID", action="store_true", default=False)
     config = parser.parse_args(args)
     return config
 
