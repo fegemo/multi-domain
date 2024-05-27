@@ -13,7 +13,7 @@ tensorboard==2.10.1
 graphlib-backport
 
 beaupy
-typing_extensions
+typing_extensions>=4.7.0
 
 # for tensorflow_addons not to include a new (breaking) version of typeguard:
 typeguard==2.7
