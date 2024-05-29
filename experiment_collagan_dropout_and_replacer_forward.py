@@ -15,10 +15,10 @@ if __name__ == "__main__":
             "adhoc": [
                 "callback-evaluate-fid", "callback-evaluate-l1",
                 "save-model",
-                "all", "no-tran"
+                "rmxp"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 240000,
+            "steps": 40000,
             "evaluate-steps": 1000,
             "capacity": 4,
             "lr": 0.0001,
@@ -28,7 +28,7 @@ if __name__ == "__main__":
             "lambda-domain": 10,
             "lr-decay": "constant-than-linear",
             "model-name": "@model",
-            "experiment": "all,&input-dropout,&cycled-source-replacer"
+            "experiment": "rmxp,&input-dropout,&cycled-source-replacer"
         }, {
             # "input-dropout": ["none", "original", "aggressive", "balanced", "conservative", "curriculum"],
             "input-dropout": ["conservative", "original", "none", "curriculum"],
