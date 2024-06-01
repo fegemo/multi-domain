@@ -116,7 +116,8 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--sampler", help="one from {multi-target, single-target} indicating whether "
                                                    "batches are trained with the same target (single) or with "
                                                    "each sample having its own (multi)", default=TRAINING_SAMPLER)
-        self.parser.add_argument("--capacity", type=int, help="capacity multiplier of collagan's generator", default=1)
+        self.parser.add_argument("--capacity", type=int, help="capacity multiplier of CollaGAN's and "
+                                                              "StarGAN's generator", default=1)
         self.parser.add_argument("--callback-debug-discriminator",
                                  help="every few update steps, show the discriminator output with some images from "
                                       "the train and test sets",

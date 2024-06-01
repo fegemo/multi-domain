@@ -53,7 +53,7 @@ def stargan_resnet_discriminator(number_of_domains, image_size, output_channels,
     return tf.keras.Model(inputs=inputs, outputs=[patches, classification], name="StarGANDiscriminator")
 
 
-def stargan_resnet_generator(image_size, output_channels, number_of_domains, receive_source_domain):
+def stargan_resnet_generator(image_size, output_channels, number_of_domains, receive_source_domain, capacity=1):
     init = tf.random_normal_initializer(0., 0.02)
 
     source_image_input = layers.Input(shape=[image_size, image_size, output_channels], name="source_image")
@@ -75,12 +75,12 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
         source_domain = keras_utils.TileLayer(image_size)(source_domain)
         x = layers.Concatenate(axis=-1)([source_image_input, target_domain, source_domain])
 
-    filters = 64
+    filters = 64 * capacity
     x = layers.Conv2D(filters, kernel_size=7, strides=1, padding="same", kernel_initializer=init, use_bias=False)(x)
     x = tfalayers.InstanceNormalization(epsilon=0.00001)(x)
     x = layers.ReLU()(x)
 
-    # downsampling blocks: 128, then 256
+    # downsampling blocks: 128*cap, then 256*cap
     for i in range(2):
         filters *= 2
         x = layers.Conv2D(filters, kernel_size=4, strides=2, padding="same", kernel_initializer=init, use_bias=False)(x)
@@ -91,7 +91,7 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
     for i in range(6):
         x = resblock(x, filters, 3, init)
 
-    # upsampling blocks: 128, then 64
+    # upsampling blocks: 128*cap, then 64*cap
     for i in range(2):
         filters /= 2
         x = layers.Conv2DTranspose(filters, kernel_size=4, strides=2, padding="same", kernel_initializer=init,

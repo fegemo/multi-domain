@@ -40,7 +40,7 @@ class UnpairedStarGANModel(S2SModel):
         config = self.config
         if config.generator == "resnet" or config.generator == "":
             return stargan_resnet_generator(config.image_size, config.output_channels, config.number_of_domains,
-                                            config.source_domain_aware_generator)
+                                            config.source_domain_aware_generator, config.capacity)
         # elif config.generator_type == "unet":
         #     return StarGANUnetGenerator()
         else:
