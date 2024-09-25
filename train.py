@@ -7,6 +7,7 @@ import tensorflow as tf
 from colla_model import CollaGANModel
 from dataset_utils import load_multi_domain_ds
 from configuration import OptionParser
+from munit_model import MunitModel
 from star_model import UnpairedStarGANModel, PairedStarGANModel
 import setup
 
@@ -65,6 +66,8 @@ elif config.model == "stargan-paired":
     class_name = PairedStarGANModel
 elif config.model == "collagan":
     class_name = CollaGANModel
+elif config.model == "munit":
+    class_name = MunitModel
 else:
     raise Exception(f"The asked model of {config.model} was not found.")
 

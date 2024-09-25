@@ -22,6 +22,8 @@ LAMBDA_L1 = 10.
 LAMBDA_SSIM = 10.
 LAMBDA_PALETTE = 0.
 LAMBDA_TV = 0.
+LAMBDA_LATENT_RECONSTRUCTION = 1.
+LAMBDA_CYCLIC_RECONSTRUCTION = 0  # 0.3
 DISCRIMINATOR_STEPS = 5
 EPOCHS = 160
 PRETRAIN_EPOCHS = 0  # 30 in colla's code
@@ -89,8 +91,9 @@ class OptionParser(metaclass=SingletonMeta):
                                  help="value for λdomain used in stargan and collagan", default=LAMBDA_DOMAIN)
         self.parser.add_argument("--lambda-reconstruction", type=float,
                                  help="value for λreconstruction used in stargan", default=LAMBDA_RECONSTRUCTION)
-        self.parser.add_argument("--lambda-l1", type=float, help="value for λl1 used in paired stargan and for "
-                                                                 "λl1_forward in collagan",
+        self.parser.add_argument("--lambda-l1", type=float, help="value for λl1 used in paired stargan,"
+                                                                 " for λl1_forward in collagan, and λreconstruction"
+                                                                 " in munit",
                                  default=LAMBDA_L1)
         self.parser.add_argument("--lambda-l1-backward", type=float, help="value for λl1_backward (cyclic) used "
                                                                           "in collagan")
@@ -100,6 +103,12 @@ class OptionParser(metaclass=SingletonMeta):
                                  default=LAMBDA_PALETTE)
         self.parser.add_argument("--lambda-tv", type=float, help="value for λtotal-variation used in paired stargan",
                                  default=LAMBDA_TV)
+        self.parser.add_argument("--lambda-latent-reconstruction", type=float,
+                                 help="value for λlatent-reconstruction used in munit",
+                                 default=LAMBDA_LATENT_RECONSTRUCTION)
+        # self.parser.add_argument("--lambda-cyclic-reconstruction", type=float,
+        #                          help="value for λcyclic-reconstruction used in munit",
+        #                          default=LAMBDA_CYCLIC_RECONSTRUCTION)
         self.parser.add_argument("--d-steps", type=int,
                                  help="number of discriminator updates for each generator in stargan",
                                  default=DISCRIMINATOR_STEPS)
@@ -238,7 +247,8 @@ class OptionParser(metaclass=SingletonMeta):
         setattr(self.values, "test_sizes", test_sizes)
         setattr(self.values, "test_size", test_size)
 
-        setattr(self.values, "pretrain_steps", self.values.pretrain_epochs * self.values.train_size // self.values.batch)
+        setattr(self.values, "pretrain_steps",
+                self.values.pretrain_epochs * self.values.train_size // self.values.batch)
         if self.values.steps is None:
             self.values.steps = ceil(self.values.epochs * self.values.train_size / self.values.batch)
         else:

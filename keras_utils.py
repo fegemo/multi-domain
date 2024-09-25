@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow import keras
-
+from tensorflow.keras.layers import Layer
 
 class ConstantThenLinearDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
     def get_config(self):
@@ -48,3 +48,22 @@ class NParamsSupplier:
 
     def __call__(self, *args, **kwargs):
         return [*args[:self.n]]
+
+
+class ReflectPadding(keras.layers.Layer):
+    def __init__(self, padding, **kwargs):
+        super(ReflectPadding, self).__init__(**kwargs)
+        self.padding = padding
+
+    def call(self, inputs):
+        return tf.pad(inputs, [[0, 0], [self.padding, self.padding], [self.padding, self.padding], [0, 0]],
+                      mode="REFLECT")
+
+    def get_config(self):
+        config = super(ReflectPadding, self).get_config()
+        config.update({"padding": self.padding})
+        return config
+
+    def compute_output_shape(self, input_shape):
+        return input_shape[0], input_shape[1] + self.padding * 2, input_shape[2] + self.padding * 2, input_shape[3]
+

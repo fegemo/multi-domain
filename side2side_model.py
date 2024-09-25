@@ -44,11 +44,11 @@ class S2SModel(ABC):
         self.discriminator = self.create_discriminator()
         self.generator = self.create_generator()
 
-        generator_params = tf.reduce_sum([tf.reduce_prod(v.get_shape()) for v in self.generator.trainable_weights])
-        discriminator_params = tf.reduce_sum(
-            [tf.reduce_prod(v.get_shape()) for v in self.discriminator.trainable_weights])
-        logging.debug(f"Generator: {self.generator.name} with {generator_params:,} parameters")
-        logging.debug(f"Discriminator: {self.discriminator.name} with {discriminator_params:,} parameters")
+        # generator_params = tf.reduce_sum([tf.reduce_prod(v.get_shape()) for v in self.generator.trainable_weights])
+        # discriminator_params = tf.reduce_sum(
+        #     [tf.reduce_prod(v.get_shape()) for v in self.discriminator.trainable_weights])
+        # logging.debug(f"Generator: {self.generator.name} with {generator_params:,} parameters")
+        # logging.debug(f"Discriminator: {self.discriminator.name} with {discriminator_params:,} parameters")
 
         # initializes training checkpoint information
         io_utils.ensure_folder_structure(self.checkpoint_dir)

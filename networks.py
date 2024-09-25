@@ -228,7 +228,7 @@ def collagan_original_discriminator(number_of_domains, image_size, output_channe
     real_or_fake_image = layers.Input(shape=[image_size, image_size, output_channels], name="real_or_fake_image")
     inputs = [real_or_fake_image]
     if receive_source_image:
-        source_images = layers.Input(shape=[image_size, image_size, output_channels*number_of_domains],
+        source_images = layers.Input(shape=[image_size, image_size, output_channels * number_of_domains],
                                      name="source_images")
         inputs += [source_images]
 
