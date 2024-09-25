@@ -16,32 +16,32 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 40000,
+            "steps": 120000,
             "evaluate-steps": 1000,
             "lr": 0.0001,
-            "batch": 1,
+            "batch": 4,
             "lr-decay": "none",
             "model-name": "@model",
-            "experiment": "@dataset,l1@lambda-l1,latent@lambda-latent-reconstruction"
+            "experiment": "@dataset,&lambda-l1,&lambda-latent-reconstruction"
         }, {
-            "lambda-l1": [1, 10, 100, 400],
-            "lambda-latent-reconstruction": [0, 1, 10, 100]
+            "lambda-l1": [1, 10, 100],
+            "lambda-latent-reconstruction": [0, 1, 10]
         }, {
-            "tiny": {
-                "adhoc": ["no-aug"],
-            },
-            "rm2k": {
-                "adhoc": ["no-tran"]
-            },
-            "rmxp": {
-                "adhoc": []
-            },
-            "rmvx": {
-                "adhoc": ["no-tran"]
-            },
+            # "tiny": {
+            #     "adhoc": ["no-aug"],
+            # },
+            # "rm2k": {
+            #     "adhoc": ["no-tran"]
+            # },
+            # "rmxp": {
+            #     "adhoc": []
+            # },
+            # "rmvx": {
+            #     "adhoc": ["no-tran"]
+            # },
             "all": {
                 "adhoc": ["no-tran"],
-                "steps": 80000
+                # "steps": 80000
             }
         })
 
