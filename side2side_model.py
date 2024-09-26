@@ -8,7 +8,8 @@ from IPython import display
 
 import io_utils
 import frechet_inception_distance as fid
-from keras_utils import ConstantThenLinearDecay
+from functional_utils import listify
+from keras_utils import ConstantThenLinearDecay, count_network_parameters
 
 
 def show_eta(training_start_time, step_start_time, current_step, training_starting_step, total_steps,
@@ -41,18 +42,36 @@ class S2SModel(ABC):
         self.checkpoint_dir = self.get_output_folder("training-checkpoints")
         self.layout_summary = S2SModel.create_layout_summary()
 
-        self.discriminator = self.create_discriminator()
-        self.generator = self.create_generator()
+        # initializes networks inside two dicts: one for training only and another for inference (e.g., generator)
+        # each dict has keys for the network type (e.g., generator) and values as the network itself (or network list)
+        self.training_only_networks = self.create_training_only_networks()
+        self.inference_networks = self.create_inference_networks()
 
-        # generator_params = tf.reduce_sum([tf.reduce_prod(v.get_shape()) for v in self.generator.trainable_weights])
-        # discriminator_params = tf.reduce_sum(
-        #     [tf.reduce_prod(v.get_shape()) for v in self.discriminator.trainable_weights])
-        # logging.debug(f"Generator: {self.generator.name} with {generator_params:,} parameters")
-        # logging.debug(f"Discriminator: {self.discriminator.name} with {discriminator_params:,} parameters")
+        # count number of params in all training_only_networks and inference_networks
+        training_only_parameters = {
+            group: sum([count_network_parameters(network) for network in listify(networks)])
+            for group, networks
+            in self.training_only_networks.items()
+        }
+        total_training_only_parameters = sum(training_only_parameters.values())
+        inference_parameters = {
+            group: sum([count_network_parameters(network) for network in listify(networks)])
+            for group, networks
+            in self.inference_networks.items()
+        }
+        total_inference_parameters = sum(inference_parameters.values())
+        logging.debug(f"Training-only Networks: {total_training_only_parameters:,} parameters")
+        if len(training_only_parameters.keys()) > 1:
+            for group in training_only_parameters.keys():
+                logging.debug(f"\t{group}: {training_only_parameters[group]:,} parameters")
+        logging.debug(f"Inference Networks: {total_inference_parameters:,} parameters")
+        if len(inference_parameters.keys()) > 1:
+            for group in inference_parameters.keys():
+                logging.debug(f"\t{group}: {inference_parameters[group]:,} parameters")
 
         # initializes training checkpoint information
         io_utils.ensure_folder_structure(self.checkpoint_dir)
-        self.best_generator_checkpoint = tf.train.Checkpoint(generator=self.generator)
+        self.best_generator_checkpoint = tf.train.Checkpoint(**self.inference_networks)
         self.checkpoint_manager = tf.train.CheckpointManager(
             self.best_generator_checkpoint, directory=self.checkpoint_dir, max_to_keep=1)
 
@@ -75,13 +94,12 @@ class S2SModel(ABC):
     def save_model_description(self, folder_path):
         io_utils.ensure_folder_structure(folder_path)
         with open(os.sep.join([folder_path, "model-description.txt"]), "w") as fh:
-            for model in self.models:
-                model.summary(print_fn=lambda x: fh.write(x + "\n"))
-                fh.write("\n" * 3)
-
-    @property
-    def models(self):
-        return [self.discriminator, self.generator]
+            for network_type, networks in dict(self.training_only_networks, **self.inference_networks).items():
+                fh.write(f"{network_type}:\n")
+                for network in listify(networks):
+                    network.summary(print_fn=lambda x: fh.write(x + "\n"))
+                    fh.write("\n" * 2)
+                fh.write("\n" * 4)
 
     def fit(self, train_ds, test_ds, steps, update_steps, callbacks=[], starting_step=0):
         if starting_step == 0:
@@ -144,8 +162,7 @@ class S2SModel(ABC):
             # every UPDATE_STEPS and in the beginning, visualize x images to see how training is going...
             it_is_time_to_evaluate = (step + 1) % evaluate_steps == 0 or step == 0 or step == steps - 1
             if it_is_time_to_evaluate:
-                display.clear_output(wait=True)
-
+                print("\n")
                 if step != 0:
                     show_eta(training_start_time, step_start_time, step, starting_step, steps, evaluate_steps)
 
@@ -164,7 +181,8 @@ class S2SModel(ABC):
 
                 # check if we need to generate images for evaluation (and do it only once before the callback ifs)
                 if S2SModel.should_evaluate(callbacks):
-                    logging.info(f"Generating {len(example_indices_for_evaluation['test'][0])*2} images for evaluation...")
+                    logging.info(
+                        f"Generating {len(example_indices_for_evaluation['test'][0]) * 2} images for evaluation...")
                     examples_for_evaluation = self.generate_images_for_evaluation(example_indices_for_evaluation)
 
                 # callbacks
@@ -294,16 +312,38 @@ class S2SModel(ABC):
         file.write(str(step.numpy()))
 
     def save_generator(self):
-        py_model_path = self.get_output_folder(["models", "py", "generator"], True)
+        py_model_path = self.get_output_folder(["models"], )
         io_utils.delete_folder(py_model_path)
         io_utils.ensure_folder_structure(py_model_path)
 
-        self.generator.save(py_model_path)
+        if len(self.inference_networks) == 1:
+            # only has a single group (probably called "generators"),
+            # but there can be a single generator or many networks inside it (i.e., a list of generators)
+            generators = list(self.inference_networks.values())[0]
+            if isinstance(generators, list) and len(generators) > 1:
+                for generator in generators:
+                    generator_name = generator.name
+                    py_model_path = self.get_output_folder(["models", generator_name])
+                    generator.save(py_model_path)
+            else:
+                py_model_path = self.get_output_folder(["models"])
+                generators.save(py_model_path)
+        else:
+            # there are multiple groups of networks (e.g., "style_encoders" and "content_encoders")
+            for group, networks in self.inference_networks.items():
+                if isinstance(networks, list) and len(networks) > 1:
+                    for network in networks:
+                        network_name = network.name
+                        py_model_path = self.get_output_folder(["models", group, network_name])
+                        network.save(py_model_path)
+                else:
+                    py_model_path = self.get_output_folder(["models", group])
+                    networks.save(py_model_path)
         self.save_model_description(py_model_path)
 
     def load_generator(self):
-        py_model_path = self.get_output_folder(["models", "py", "generator"], True)
-        self.generator = tf.keras.models.load_model(py_model_path)
+        py_model_path = self.get_output_folder(["models"])
+        self.inference_networks = tf.keras.models.load_model(py_model_path)
 
     @abstractmethod
     def generate_images_from_dataset(self, dataset, step, num_images=None):
@@ -360,9 +400,9 @@ class S2SModel(ABC):
         )
 
     @abstractmethod
-    def create_discriminator(self):
+    def create_training_only_networks(self):
         pass
 
     @abstractmethod
-    def create_generator(self):
+    def create_inference_networks(self):
         pass

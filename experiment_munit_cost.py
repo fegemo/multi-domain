@@ -16,9 +16,9 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 120000,
+            "steps": 40000,
             "evaluate-steps": 1000,
-            "lr": 0.0001,
+            "lr": 0.00005,
             "batch": 4,
             "lr-decay": "none",
             "model-name": "@model",

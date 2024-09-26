@@ -15,10 +15,7 @@ from tqdm import tqdm
 from beaupy import select_multiple
 
 import io_utils
-
-
-def listify(something):
-    return something if isinstance(something, list) else [something]
+from functional_utils import listify
 
 
 def dict_hash(dictionary):

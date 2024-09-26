@@ -14,13 +14,9 @@ class MunitModel(S2SModel):
         self.lambda_reconstruction = config.lambda_l1
         self.lambda_latent_reconstruction = config.lambda_latent_reconstruction
 
-    @property
-    def models(self):
-        return [*self.discriminator, *self.generator]
-
-    def create_generator(self):
+    def create_inference_networks(self):
         config = self.config
-        domain_letters = config.domains[0]
+        domain_letters = [name[0].upper() for name in config.domains]
         if config.generator in ["munit", ""]:
             content_encoders = [munit_content_encoder(s) for s in domain_letters]
             style_encoders = [munit_style_encoder(s) for s in domain_letters]
@@ -34,21 +30,27 @@ class MunitModel(S2SModel):
             self.content_encoders = content_encoders
             self.style_encoders = style_encoders
             self.decoders = decoders
+            # generators is a "virtual" model that joins a corresponding content and style encoder with a decoder
+            # it is an auto-encoder that can be used to generate images from and to a given domain
             self.generators = generators
 
-            # TODO: make the superclass allow an array of generators
-            return generators
+            return {
+                "content_encoders": content_encoders,
+                "style_encoders": style_encoders,
+                "decoders": decoders
+            }
         else:
             raise ValueError(f"The provided {config.generator} type of generator has not been implemented")
 
-    def create_discriminator(self):
+    def create_training_only_networks(self):
         config = self.config
         domain_letters = [name[0].upper() for name in config.domains]
         if config.generator in ["munit", ""]:
             discriminators = [munit_discriminator_multi_scale(s) for s in domain_letters]
             self.discriminators = discriminators
-            # TODO: make the superclass allow an array of discriminators
-            return discriminators
+            return {
+                "discriminators": discriminators
+            }
         else:
             raise ValueError(f"The provided {config.discriminator} type of discriminator has not been implemented")
 
@@ -95,15 +97,17 @@ class MunitModel(S2SModel):
         number_of_domains = self.config.number_of_domains
 
         # shape=[d, 3] x [b, x, x, 1] => [d, 3] => [d]
-        real_loss = [tf.reduce_mean(tf.square(predicted_patches_real[d][out] - tf.ones_like(predicted_patches_real[d][out])))
-                     for out in range(3)
-                     for d in range(number_of_domains)]
+        real_loss = [
+            tf.reduce_mean(tf.square(predicted_patches_real[d][out] - tf.ones_like(predicted_patches_real[d][out])))
+            for out in range(3)
+            for d in range(number_of_domains)]
         real_loss = tf.reshape(real_loss, [number_of_domains, 3])
         real_loss = tf.reduce_mean(real_loss, axis=1)
 
-        fake_loss = [tf.reduce_mean(tf.square(predicted_patches_fake[d][out] - tf.zeros_like(predicted_patches_fake[d][out])))
-                     for out in range(3)
-                     for d in range(number_of_domains)]
+        fake_loss = [
+            tf.reduce_mean(tf.square(predicted_patches_fake[d][out] - tf.zeros_like(predicted_patches_fake[d][out])))
+            for out in range(3)
+            for d in range(number_of_domains)]
         fake_loss = tf.reshape(fake_loss, [number_of_domains, 3])
         fake_loss = tf.reduce_mean(fake_loss, axis=1)
 
@@ -171,7 +175,6 @@ class MunitModel(S2SModel):
             encoded_translated_contents = tf.gather(encoded_translated_contents, random_source_domain)
             encoded_translated_styles = [self.style_encoders[i](translated_images[i])
                                          for i in range(number_of_domains)]
-
 
             # 5. decode once more (this is not used in the tf implementation of munit)
             # decoded_translated_images = [self.decoders[i]([tf.gather(encoded_styles, i),
@@ -345,10 +348,11 @@ class MunitModel(S2SModel):
                     style_encoder = self.style_encoders[target_domains_slice[i]]
                     content_encoder = self.content_encoders[source_domains_slice[i]]
                     fake_images_slice = decoder([style_encoder(tf.expand_dims(source_images_slice[i], 0)),
-                                                content_encoder(tf.expand_dims(source_images_slice[i], 0))])[0]
+                                                 content_encoder(tf.expand_dims(source_images_slice[i], 0))])[0]
                     fake_images[batch_start + i] = fake_images_slice
 
-            logging.debug(f"Generated all {number_of_examples} fake images for {dataset_name} dataset, which occupy {fake_images.nbytes / 1024 / 1024} MB.")
+            logging.debug(
+                f"Generated all {number_of_examples} fake images for {dataset_name} dataset, which occupy {fake_images.nbytes / 1024 / 1024} MB.")
             return target_images, tf.constant(fake_images)
 
         return dict({

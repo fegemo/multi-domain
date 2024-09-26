@@ -266,10 +266,11 @@ class OptionParser(metaclass=SingletonMeta):
         description = param_separator.join(map(lambda p: f"{p[0]}{key_value_separator}{p[1]}", sorted_args))
         return description
 
-    def save_configuration(self, folder_path):
+    def save_configuration(self, folder_path, argv):
         from io_utils import ensure_folder_structure
         ensure_folder_structure(folder_path)
         with open(os.sep.join([folder_path, "configuration.txt"]), "w") as file:
+            file.write(" ".join(argv) + "\n\n")
             file.write(self.get_description("\n", ": ") + "\n")
 
 

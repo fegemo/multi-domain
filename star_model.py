@@ -31,26 +31,28 @@ class UnpairedStarGANModel(S2SModel):
             self.sampler = SingleTargetSampler(config)
         self.gen_supplier = NParamsSupplier(3 if config.source_domain_aware_generator else 2)
         self.crit_supplier = NParamsSupplier(2 if config.conditional_discriminator else 1)
+        self.generator = self.inference_networks["generator"]
+        self.discriminator = self.training_only_networks["discriminator"]
 
-    @property
-    def models(self):
-        return [self.discriminator, self.generator]
-
-    def create_generator(self):
+    def create_inference_networks(self):
         config = self.config
         if config.generator == "resnet" or config.generator == "":
-            return stargan_resnet_generator(config.image_size, config.output_channels, config.number_of_domains,
-                                            config.source_domain_aware_generator, config.capacity)
-        # elif config.generator_type == "unet":
-        #     return StarGANUnetGenerator()
+            return {
+                "generator": stargan_resnet_generator(config.image_size, config.output_channels,
+                                                      config.number_of_domains,
+                                                      config.source_domain_aware_generator, config.capacity)
+            }
         else:
             raise ValueError(f"The provided {config.generator} type for generator has not been implemented.")
 
-    def create_discriminator(self):
+    def create_training_only_networks(self):
         config = self.config
         if config.discriminator == "resnet" or config.discriminator == "":
-            return stargan_resnet_discriminator(config.number_of_domains, config.image_size, config.output_channels,
-                                                config.conditional_discriminator)
+            return {
+                "discriminator": stargan_resnet_discriminator(config.number_of_domains, config.image_size,
+                                                              config.output_channels,
+                                                              config.conditional_discriminator)
+            }
         else:
             raise ValueError(f"The provided {config.discriminator} type for discriminator has not been implemented.")
 
@@ -64,11 +66,12 @@ class UnpairedStarGANModel(S2SModel):
         palette_loss = 0.
         tv_loss = 0.
 
-        total_loss = adversarial_loss + \
-                     self.lambda_domain * domain_loss + \
-                     self.lambda_reconstruction * recreation_loss + \
-                     (self.lambda_palette * t) * palette_loss + \
-                     (self.lambda_tv * t) * tv_loss
+        total_loss = (
+                adversarial_loss +
+                self.lambda_domain * domain_loss +
+                self.lambda_reconstruction * recreation_loss +
+                (self.lambda_palette * t) * palette_loss +
+                (self.lambda_tv * t) * tv_loss)
 
         return {"total": total_loss, "adversarial": adversarial_loss, "domain": domain_loss,
                 "recreation": recreation_loss, "palette": palette_loss, "total_variation": tv_loss}
@@ -79,9 +82,10 @@ class UnpairedStarGANModel(S2SModel):
         fake_loss = tf.reduce_mean(critic_fake_patches)
         domain_loss = tf.reduce_mean(self.domain_classification_loss(real_domain, critic_real_domain))
 
-        total_loss = fake_loss + real_loss + \
-                     self.lambda_domain * domain_loss + \
-                     self.lambda_gp * gradient_penalty
+        total_loss = (
+                fake_loss + real_loss +
+                self.lambda_domain * domain_loss +
+                self.lambda_gp * gradient_penalty)
         return {"total": total_loss, "real": real_loss, "fake": fake_loss, "domain": domain_loss,
                 "gp": gradient_penalty}
 
@@ -123,7 +127,7 @@ class UnpairedStarGANModel(S2SModel):
         # back, left, front, right for pixel-sides: [d, b, s, s, c]
         domain_images = batch
         # extracts the palette from the combined images of each sample in the batch: (1) prepare and (2) extract
-        # (1) prepare the batch so it is: [b, d*s*s, c]
+        # (1) prepare the batch, so it is: [b, d*s*s, c]
         combined_images = tf.reshape(tf.transpose(batch, [1, 0, 2, 3, 4]), [batch_size, -1, channels])
         # (2) extract the palette for each image in the batch: [b, (p), c]
         palettes = palette.batch_extract_palette(combined_images, self.config.inner_channels)
@@ -308,7 +312,8 @@ class UnpairedStarGANModel(S2SModel):
                 fake_images[batch_start:batch_end] = fake_images_slice
 
             logging.debug(
-                f"Generated all {number_of_examples} fake images from {dataset_name}, which occupy {fake_images.nbytes / 1024 / 1024} MB.")
+                f"Generated all {number_of_examples} fake images from {dataset_name}, which occupy "
+                f"{fake_images.nbytes / 1024 / 1024} MB.")
             return target_images, tf.constant(fake_images)
 
         return dict({
@@ -519,7 +524,7 @@ class PairedStarGANModel(UnpairedStarGANModel):
         domain_images = batch
 
         # extracts the palette from the combined images of each sample in the batch: (1) prepare and (2) extract
-        # (1) prepare the batch so it is: [b, d*s*s, c]
+        # (1) prepare the batch, so it is: [b, d*s*s, c]
         combined_images = tf.reshape(tf.transpose(batch, [1, 0, 2, 3, 4]), [batch_size, -1, channels])
         # (2) extract the palette for each image in the batch: [b, (p), c]
         palettes = palette.batch_extract_palette(combined_images, self.config.inner_channels)

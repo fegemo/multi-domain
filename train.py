@@ -77,7 +77,7 @@ model.save_model_description(model.get_output_folder())
 if config.verbose:
     model.discriminator.summary()
     model.generator.summary()
-parser.save_configuration(model.get_output_folder())
+parser.save_configuration(model.get_output_folder(), sys.argv)
 
 
 # batch = next(iter(train_ds))
@@ -122,13 +122,14 @@ model.fit(train_ds, test_ds, steps, evaluate_steps, callbacks=callbacks)
 step = model.restore_best_generator()
 logging.info(f"Restored the BEST generator, which was in step {step}.")
 
+if config.save_model:
+    logging.info(f"Saving the generator...")
+    model.save_generator()
+
 # generating resulting images
 logging.info(f"Starting to generate the images from the test dataset with generator from step {step}...")
 model.generate_images_from_dataset(test_ds, step, num_images=100)
 
-if config.save_model:
-    logging.info(f"Saving the generator...")
-    model.save_generator()
 
 logging.info("Finished executing.")
 
@@ -139,3 +140,4 @@ logging.info("Finished executing.")
 # python train.py collagan --rm2k --log-folder output --epochs 300 --no-aug --model-name collagan --experiment playground --lambda-l1 100 --lr 0.0002 --lr-decay none --callback-evaluate-l1 --callback-evaluate-fid --callback-debug-discriminator
 # python train.py collagan --rm2k --log-folder output --epochs 400 --no-tran --model-name collagan --experiment l1100,d10,s10,lr0001,decayctl,indrop
 # python train.py collagan --rm2k --log-folder output --epochs 400 --no-tran --model-name collagan --experiment l1100,d10,s10,lr0001,decayctl,indrop,correctssim,correctdomain --lambda-l1 100 --lambda-domain 10 --lambda-ssim 10 --lr 0.0001 --lr-decay constant-than-linear --callback-evaluate-l1 --callback-evaluate-fid --callback-debug-discriminator --input-dropout
+# python train.py munit --log-folder output --steps 4000 --evaluate-steps 1000 --lr 0.0001 --batch 4 --lr-decay none --model-name munit --experiment all,lambda-l1-1,lambda-latent-reconstruction-0 --lambda-l1 1 --lambda-latent-reconstruction 0 --callback-evaluate-fid --callback-evaluate-l1 --save-model --tiny --rm2k --rmxp --rmvx --misc --no-tran

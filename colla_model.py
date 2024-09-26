@@ -44,20 +44,28 @@ class CollaGANModel(S2SModel):
         self.cce = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
         self.gen_supplier = NParamsSupplier(2)
         self.dis_supplier = NParamsSupplier(2 if config.conditional_discriminator else 1)
+        self.generator = self.inference_networks["generator"]
+        self.discriminator = self.training_only_networks["discriminator"]
 
-    def create_generator(self):
+    def create_inference_networks(self):
         config = self.config
         if config.generator in ["colla", ""]:
-            return collagan_affluent_generator(config.number_of_domains, config.image_size, config.output_channels,
-                                               config.capacity)
+            return {
+                "generator": collagan_affluent_generator(config.number_of_domains, config.image_size,
+                                                         config.output_channels,
+                                                         config.capacity)
+            }
         else:
             raise ValueError(f"The provided {config.generator} type for generator has not been implemented.")
 
-    def create_discriminator(self):
+    def create_training_only_networks(self):
         config = self.config
         if config.discriminator in ["colla", ""]:
-            return collagan_original_discriminator(config.number_of_domains, config.image_size, config.output_channels,
-                                                   config.conditional_discriminator)
+            return {
+                "discriminator": collagan_original_discriminator(config.number_of_domains, config.image_size,
+                                                                 config.output_channels,
+                                                                 config.conditional_discriminator)
+            }
         else:
             raise ValueError(f"The provided {config.discriminator} type for discriminator has not been implemented.")
 
@@ -75,7 +83,7 @@ class CollaGANModel(S2SModel):
         # adversarial (lsgan) loss
         adversarial_forward__loss = tf.reduce_mean(tf.math.squared_difference(fake_predicted_patches, 1.))
         adversarial_backward_loss = tf.reduce_mean(tf.math.squared_difference(cycled_predicted_patches, 1.)) * \
-                                    number_of_domains_float
+            number_of_domains_float
         adversarial_loss = (adversarial_forward__loss + adversarial_backward_loss) / \
                            (number_of_domains_float + 1.)
 
@@ -111,9 +119,9 @@ class CollaGANModel(S2SModel):
 
         # observation: ssim loss uses only the backward (cycled) images... that's on the colla's code and paper
         total_loss = adversarial_loss + \
-                     self.lambda_l1 * l1_forward__loss + self.lambda_l1_backward * l1_backward_loss + \
-                     self.lambda_ssim * ssim_backward_loss + \
-                     self.lambda_domain * classification_loss
+            self.lambda_l1 * l1_forward__loss + self.lambda_l1_backward * l1_backward_loss + \
+            self.lambda_ssim * ssim_backward_loss + \
+            self.lambda_domain * classification_loss
 
         return {"total": total_loss, "adversarial": adversarial_loss, "l1_forward": l1_forward__loss,
                 "l1_backward": l1_backward_loss, "ssim": ssim_loss, "domain": classification_loss}
@@ -127,7 +135,7 @@ class CollaGANModel(S2SModel):
         adversarial_forward_loss = adversarial_real + adversarial_fake
 
         adversarial_backward_loss = tf.reduce_mean(tf.math.squared_difference(source_predicted_patches, 1.)) + \
-                                    tf.reduce_mean(tf.math.square(cycled_predicted_patches))
+            tf.reduce_mean(tf.math.square(cycled_predicted_patches))
         adversarial_backward_loss *= tf.cast(number_of_domains, tf.float32)
 
         adversarial_loss = (adversarial_forward_loss + adversarial_backward_loss) / \
@@ -138,7 +146,7 @@ class CollaGANModel(S2SModel):
         domain_loss = self.cce(source_label_domain, source_predicted_domain)
 
         total_loss = adversarial_loss + \
-                     self.lambda_domain * domain_loss
+            self.lambda_domain * domain_loss
         return {"total": total_loss, "real": adversarial_real, "fake": adversarial_fake, "domain": domain_loss}
 
     def get_cycled_images_input(self, domain_images, forward_target_domain, input_dropout_mask, fake_image,
@@ -203,7 +211,8 @@ class CollaGANModel(S2SModel):
 
         return self.gen_supplier(zeroed_retarget_domain_images, backward_target_domain)
 
-    def get_source_images_for_conditional_discriminator(self, domain_images):
+    @staticmethod
+    def get_source_images_for_conditional_discriminator(domain_images):
         batch_shape = tf.shape(domain_images)
         batch_size, number_of_domains = batch_shape[0], batch_shape[1]
 
@@ -545,7 +554,7 @@ class CollaGANModel(S2SModel):
         back_predicted_domain = tf.math.argmax(back_predicted_domain, axis=1, output_type=tf.int32)
 
         # lsgan yields an unbounded real number, which should be 1 for real images and 0 for fake
-        # but we need to provide them in the [0, 1] range
+        # but, we need to provide them in the [0, 1] range
         concatenated_predictions = tf.concat([real_predicted_patches, fake_predicted_patches, back_predicted_patches],
                                              axis=-1)
         min_value = tf.math.reduce_min(concatenated_predictions)

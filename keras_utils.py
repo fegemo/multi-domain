@@ -67,3 +67,71 @@ class ReflectPadding(keras.layers.Layer):
     def compute_output_shape(self, input_shape):
         return input_shape[0], input_shape[1] + self.padding * 2, input_shape[2] + self.padding * 2, input_shape[3]
 
+
+# Got from: https://github.com/manicman1999/StyleGAN-Keras/blob/master/AdaIN.py
+# Input b and g should be 1x1xC
+class AdaInstanceNormalization(Layer):
+    def __init__(self,
+                 axis=-1,
+                 momentum=0.99,
+                 epsilon=1e-3,
+                 center=True,
+                 scale=True,
+                 **kwargs):
+        super(AdaInstanceNormalization, self).__init__(**kwargs)
+        self.axis = axis
+        self.momentum = momentum
+        self.epsilon = epsilon
+        self.center = center
+        self.scale = scale
+
+    def build(self, input_shape):
+        dim = input_shape[0][self.axis]
+        if dim is None:
+            raise ValueError('Axis ' + str(self.axis) + ' of '
+                                                        'input tensor should have a defined dimension '
+                                                        'but the layer received an input with shape ' +
+                             str(input_shape[0]) + '.')
+
+        super(AdaInstanceNormalization, self).build(input_shape)
+
+    def call(self, inputs, training=None):
+        """
+        Calculates the AdaIN normalization of the inputs [x, beta, gamma]
+        :param inputs: list of [x, beta, gamma] tensors
+        :param training: unused
+        :return:
+        """
+        x, beta, gamma = inputs[0], inputs[1], inputs[2]
+
+        input_shape = tf.shape(inputs[0])
+        reduction_axes = list(range(0, len(input_shape)))
+
+        if self.axis is not None:
+            del reduction_axes[self.axis]
+
+        del reduction_axes[0]
+        mean, var = tf.nn.moments(inputs[0], axes=reduction_axes, keepdims=True)
+        stddev = tf.sqrt(var) + self.epsilon
+        normalized_x = (inputs[0] - mean) / stddev
+
+        return normalized_x * gamma + beta
+
+    def get_config(self):
+        config = {
+            'axis': self.axis,
+            'momentum': self.momentum,
+            'epsilon': self.epsilon,
+            'center': self.center,
+            'scale': self.scale
+        }
+        base_config = super(AdaInstanceNormalization, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+    def compute_output_shape(self, input_shape):
+
+        return input_shape[0]
+
+
+def count_network_parameters(network):
+    return tf.reduce_sum([tf.reduce_prod(v.get_shape()) for v in network.trainable_weights])
