@@ -16,16 +16,17 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 40000,
+            "steps": 300000,
             "evaluate-steps": 1000,
-            "lr": 0.00005,
-            "batch": 4,
-            "lr-decay": "none",
+            "lr": 0.0001,
+            "batch": 1,
+            "lr-decay": "step",
             "model-name": "@model",
-            "experiment": "@dataset,&lambda-l1,&lambda-latent-reconstruction"
+            "experiment": "@dataset,&lambda-l1,&lambda-latent-reconstruction,&lambda-cyclic-reconstruction",
         }, {
-            "lambda-l1": [1, 10, 100],
-            "lambda-latent-reconstruction": [0, 1, 10]
+            "lambda-l1": [10, 100],
+            "lambda-latent-reconstruction": [1],
+            "lambda-cyclic-reconstruction": [10, 0, 1]
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],

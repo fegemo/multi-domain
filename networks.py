@@ -257,7 +257,23 @@ def collagan_original_discriminator(number_of_domains, image_size, output_channe
 
 # ----------------------------------------------------------------------------------------------------------------------
 # start of MUNIT code
-def munit_content_encoder(domain_letter):
+def munit_content_encoder(domain_letter, image_size, channels):
+    """
+    From the reference pytorch implementation:
+    https://github.com/NVlabs/MUNIT/blob/master/networks.py#L245
+    content_encoder:
+    - conv   3-> 64  relu reflect instno (7x7 kernel, 1 stride, 3 pad)
+    - conv  64->128  relu reflect instno (4x4 kernel, 2 stride, 1 pad)
+    - conv 128->256  relu reflect instno (4x4 kernel, 2 stride, 1 pad)
+    - 4x resblocks:
+        - conv 256->256  relu reflect instno (3x3 kernel, 1 stride, 1 pad)
+        - conv 256->256  none reflect instno (3x3 kernel, 1 stride, 1 pad)
+        - add  x + 2nd conv
+    :param domain_letter: initial representing the domain
+    :param image_size: size of the input images
+    :param channels: number of channels of the input images
+    :return: model that encodes the content, outputing a 16x16x256 tensor
+    """
     def resblock_content(input_tensor, filters):
         y = input_tensor
         for i in range(2):
@@ -270,7 +286,7 @@ def munit_content_encoder(domain_letter):
         y = layers.Add()([y, input_tensor])
         return y
 
-    input_layer = layers.Input(shape=(64, 64, 4))
+    input_layer = layers.Input(shape=(image_size, image_size, channels))
     x = keras_utils.ReflectPadding(3)(input_layer)
     x = layers.Conv2D(64, 7, strides=1, padding="valid", kernel_initializer="he_normal",
                       kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=False)(x)
@@ -278,10 +294,11 @@ def munit_content_encoder(domain_letter):
     x = layers.ReLU()(x)
 
     # 2x downsampling blocks
-    x = munit_conv_block(x, 128, 3, 2, True)
-    x = munit_conv_block(x, 256, 3, 2, True)
+    x = munit_conv_block(x, 128, 4, 2, True)
+    x = munit_conv_block(x, 256, 4, 2, True)
 
-    # 3x residual blocks
+    # 4x residual blocks
+    x = resblock_content(x, 256)
     x = resblock_content(x, 256)
     x = resblock_content(x, 256)
     x = resblock_content(x, 256)
@@ -290,33 +307,66 @@ def munit_content_encoder(domain_letter):
     return tf.keras.Model(input_layer, content_code, name=f"ContentEncoder{domain_letter.upper()}")
 
 
-def munit_style_encoder(domain_letter):
-    input_layer = layers.Input(shape=(64, 64, 4))
+def munit_style_encoder(domain_letter, image_size, channels):
+    """
+    From the reference pytorch implementation:
+    https://github.com/NVlabs/MUNIT/blob/master/networks.py#L188
+    style_encoder:
+    - conv   3-> 64  relu reflect nonorm (7x7 kernel, 1 stride, 3 pad)
+    - conv  64->128  relu reflect nonorm (4x4 kernel, 2 stride, 1 pad)
+    - conv 128->256  relu reflect nonorm (4x4 kernel, 2 stride, 1 pad)
+    - conv 256->256  relu reflect nonorm (4x4 kernel, 2 stride, 1 pad)
+    - conv 256->256  relu reflect nonorm (4x4 kernel, 2 stride, 1 pad)
+    - globalavgpool 256
+    - conv 256->  8  relu    zero nonorm (1x1 kernel, 1 stride, 0 pad)
+
+    :param domain_letter: initial representing the domain
+    :param image_size: size of the input images
+    :param channels: number of channels of the input images
+    :return: model that encodes the style, outputing an 8-dimensional vector
+    """
+    input_layer = layers.Input(shape=(image_size, image_size, channels))
     x = keras_utils.ReflectPadding(3)(input_layer)
     x = layers.Conv2D(64, 7, strides=1, padding="valid", kernel_initializer="he_normal",
-                      kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=False)(x)
-    x = tfalayers.InstanceNormalization()(x)
-    x = layers.ReLU()(x)
+                      kernel_regularizer=tf.keras.regularizers.l2(1e-4), activation="relu")(x)
 
     # 4x downscale blocks
-    x = munit_conv_block(x, 128)
-    x = munit_conv_block(x, 256)
-    x = munit_conv_block(x, 256)
-    x = munit_conv_block(x, 256)
+    x = munit_conv_block(x, 128, kernel_size=4)
+    x = munit_conv_block(x, 256, kernel_size=4)
+    x = munit_conv_block(x, 256, kernel_size=4)
+    x = munit_conv_block(x, 256, kernel_size=4)
 
-    x = layers.GlobalAvgPool2D()(x)
-    style_code = layers.Dense(8, kernel_regularizer=tf.keras.regularizers.l2(1e-4))(x)
+    x = layers.GlobalAvgPool2D(keepdims=True)(x)
+    style_code = layers.Conv2D(8, kernel_size=1, strides=1, kernel_regularizer=tf.keras.regularizers.l2(1e-4))(x)
+    style_code = layers.Reshape((8,))(style_code)
     return tf.keras.Model(input_layer, style_code, name=f"StyleEncoder{domain_letter.upper()}")
 
 
-def munit_decoder(domain_letter):
+def munit_decoder(domain_letter, channels):
+    """
+    From the reference pytorch implementation:
+    https://github.com/NVlabs/MUNIT/blob/master/networks.py#L223
+    decoder:
+    - 4x resblocks:
+        - conv  256->256 relu reflect adainor (3x3 kernel, 1 stride, 1 pad)
+        - conv  256->256 none reflect adainor (3x3 kernel, 1 stride, 1 pad)
+    - upsa
+    - conv  256->128 relu reflect lnnorm (5x5 kernel, 1 stride, 2 pad)
+    - upsa
+    - conv  128->64 relu reflect lnnorm (5x5 kernel, 1 stride, 2 pad)
+    - conv   64->4  tanh reflect nonorm (7x7 kernel, 1 stride, 3 pad)
+    :param domain_letter: initial representing the domain
+    :param channels: number of channels of the input images
+    :return: model that decodes the image, outputing a 64x64x4 tensor
+    """
     def mlp_munit():
         input_style_code = layers.Input(shape=(8,))
         adain_params_inner = layers.Dense(256, kernel_regularizer=tf.keras.regularizers.l2(1e-4), activation="relu")(
             input_style_code)
         adain_params_inner = layers.Dense(256, kernel_regularizer=tf.keras.regularizers.l2(1e-4), activation="relu")(
             adain_params_inner)
-        adain_params_inner = layers.Dense(3072, kernel_regularizer=tf.keras.regularizers.l2(1e-4), activation="relu")(
+        # 4096 = 256 (dense dimension) * 8 (style code) * 2 (weight and bias)
+        adain_params_inner = layers.Dense(4096, kernel_regularizer=tf.keras.regularizers.l2(1e-4))(
             adain_params_inner)
         return tf.keras.Model(input_style_code, [adain_params_inner])
 
@@ -367,16 +417,17 @@ def munit_decoder(domain_letter):
     input_content = layers.Input(shape=(16, 16, 256))
     w = content_code = input_content
 
-    # 3x resblocks
+    # 4x resblocks
     w = resblock_adain(w, 256, adain_params, 0)
     w = resblock_adain(w, 256, adain_params, 2)
     w = resblock_adain(w, 256, adain_params, 4)
+    w = resblock_adain(w, 256, adain_params, 6)
 
     # 2x upscale blocks
     w = munit_upscale_nn(w, 128)
     w = munit_upscale_nn(w, 64)
     x = keras_utils.ReflectPadding(3)(w)
-    output_image = layers.Conv2D(4, 7, strides=1, padding="valid",
+    output_image = layers.Conv2D(channels, 7, strides=1, padding="valid",
                                  kernel_initializer="he_normal", kernel_regularizer=tf.keras.regularizers.l2(1e-4),
                                  activation="tanh")(x)
     return tf.keras.Model([input_style, input_content], [output_image, style_code, content_code],
@@ -419,7 +470,28 @@ def munit_upscale_nn(input_tensor, filters, use_norm=False):
     return x
 
 
-def munit_discriminator_multi_scale(domain_letter):
+def munit_discriminator_multi_scale(domain_letter, image_size, channels):
+    """
+
+    From pytorch reference: https://github.com/NVlabs/MUNIT/blob/master/networks.py#L35:
+    discriminator_ms (3 redes idênticas a esta:)
+    - conv   3-> 64 lrelu reflect nonorm (4x4 kernel, 2 stride)
+    - conv  64->128 lrelu reflect nonorm
+    - conv 128->256 lrelu reflect nonorm
+    - conv 256->512 lrelu reflect nonorm
+    - conv 512->  1  relu    zero nonorm (1x1 kernel, 1 stride)
+
+    executa as redes com 0 avgpools, 1x avgpools e 2x avgpools (i.e., 64x64, 32x32, 16x16)
+    - avgp        (3x3 kernel, 2 stride) -> pra ficar com 1 só valor pra imagem toda
+
+    passa a imagem com original 256 (original da munit)
+    passa também avgpooled com  128
+    passa também avgpooled com   64
+    :param channels: number of channels of the image
+    :param image_size: size of the input images
+    :param domain_letter: domain representation ('B', 'L', 'F', 'R')
+    :return: the discriminator keras model
+    """
     def conv2d_blocks(input_tensor):
         x = input_tensor
         x = munit_conv_block_d(x, 64)
@@ -430,7 +502,7 @@ def munit_discriminator_multi_scale(domain_letter):
                           kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=True, padding="valid")(x)
         return x
 
-    input_layer = layers.Input(shape=(64, 64, 4))
+    input_layer = layers.Input(shape=(image_size, image_size, channels))
     x0 = conv2d_blocks(input_layer)
     ds1 = layers.AveragePooling2D(pool_size=(3, 3), strides=2)(input_layer)
     x1 = conv2d_blocks(ds1)

@@ -112,6 +112,10 @@ class S2SModel(ABC):
                 # configuration as used by collagan
                 lr_generator = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr, 400, 0.99, True)
                 lr_discriminator = lr_generator
+            elif self.config.lr_decay == "step":
+                # configuration as used by munit
+                lr_generator = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr, 30000, 0.5, True)
+                lr_discriminator = lr_generator
             else:
                 lr_generator = self.config.lr
                 lr_discriminator = self.config.lr
