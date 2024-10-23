@@ -12,21 +12,22 @@ if __name__ == "__main__":
         {
             "model": "munit",
             "adhoc": [
-                "callback-evaluate-fid", "callback-evaluate-l1",
+                "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 300000,
+            "steps": 90000,
             "evaluate-steps": 1000,
             "lr": 0.0001,
-            "batch": 1,
+            "batch": 16,
             "lr-decay": "step",
             "model-name": "@model",
-            "experiment": "@dataset,&lambda-l1,&lambda-latent-reconstruction,&lambda-cyclic-reconstruction",
+            "experiment": "@dataset,&lambda-l1,&lambda-latent-reconstruction,&lambda-cyclic-reconstruction,&discriminator-scales",
         }, {
             "lambda-l1": [10, 100],
             "lambda-latent-reconstruction": [1],
-            "lambda-cyclic-reconstruction": [10, 0, 1]
+            "lambda-cyclic-reconstruction": [10, 0, 1],
+            "discriminator-scales": [3, 1]
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],

@@ -257,7 +257,7 @@ def collagan_original_discriminator(number_of_domains, image_size, output_channe
 
 # ----------------------------------------------------------------------------------------------------------------------
 # start of MUNIT code
-def munit_content_encoder(domain_letter, image_size, channels):
+def munit_content_encoder(domain_letter, image_size, channels, number_of_input_images=1):
     """
     From the reference pytorch implementation:
     https://github.com/NVlabs/MUNIT/blob/master/networks.py#L245
@@ -272,6 +272,7 @@ def munit_content_encoder(domain_letter, image_size, channels):
     :param domain_letter: initial representing the domain
     :param image_size: size of the input images
     :param channels: number of channels of the input images
+    :param number_of_input_images number of input images, which is 1 for MUNIT but d for ReMIC
     :return: model that encodes the content, outputing a 16x16x256 tensor
     """
     def resblock_content(input_tensor, filters):
@@ -286,7 +287,7 @@ def munit_content_encoder(domain_letter, image_size, channels):
         y = layers.Add()([y, input_tensor])
         return y
 
-    input_layer = layers.Input(shape=(image_size, image_size, channels))
+    input_layer = layers.Input(shape=(image_size, image_size, channels*number_of_input_images))
     x = keras_utils.ReflectPadding(3)(input_layer)
     x = layers.Conv2D(64, 7, strides=1, padding="valid", kernel_initializer="he_normal",
                       kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=False)(x)
@@ -470,9 +471,8 @@ def munit_upscale_nn(input_tensor, filters, use_norm=False):
     return x
 
 
-def munit_discriminator_multi_scale(domain_letter, image_size, channels):
+def munit_discriminator_multi_scale(domain_letter, image_size, channels, scales):
     """
-
     From pytorch reference: https://github.com/NVlabs/MUNIT/blob/master/networks.py#L35:
     discriminator_ms (3 redes idênticas a esta:)
     - conv   3-> 64 lrelu reflect nonorm (4x4 kernel, 2 stride)
@@ -503,9 +503,119 @@ def munit_discriminator_multi_scale(domain_letter, image_size, channels):
         return x
 
     input_layer = layers.Input(shape=(image_size, image_size, channels))
-    x0 = conv2d_blocks(input_layer)
-    ds1 = layers.AveragePooling2D(pool_size=(3, 3), strides=2)(input_layer)
-    x1 = conv2d_blocks(ds1)
-    ds2 = layers.AveragePooling2D(pool_size=(3, 3), strides=2)(ds1)
-    x2 = conv2d_blocks(ds2)
-    return tf.keras.Model([input_layer], [x0, x1, x2], name=f"Discriminator{domain_letter.upper()}")
+    x = input_layer
+    outputs = []
+    for i in range(scales):
+        outputs.append(conv2d_blocks(x))
+        x = layers.AveragePooling2D(pool_size=(3, 3), strides=2)(x)
+
+    if scales == 1:
+        shape = list(map(lambda d: d.value, outputs[0].shape.dims[1:]))
+        outputs[0] = layers.Reshape((1, *shape))(outputs[0])
+    return tf.keras.Model([input_layer], outputs, name=f"Discriminator{domain_letter.upper()}")
+
+
+def remic_unified_content_encoder(domain_letter, image_size, channels, number_of_domains):
+    return munit_content_encoder(domain_letter, image_size, channels, number_of_domains)
+
+
+def remic_style_encoder(domain_letter, image_size, channels):
+    def resblock_style(input_tensor, filters):
+        """
+        We just copied this function from the MUNIT implementation, as the ReMIC paper does not describe the style
+        encoder resblock structure (neither the number of resblocks).
+        We actually removed the instance normalization, as the paper says it is not used in the style encoder
+        :param input_tensor:
+        :param filters:
+        :return:
+        """
+        y = input_tensor
+        for i in range(2):
+            y = keras_utils.ReflectPadding(1)(y)
+            y = layers.Conv2D(filters, 3, strides=1, padding="valid", kernel_initializer="he_normal",
+                              kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=False)(y)
+            if i == 0:
+                y = layers.ReLU()(y)
+        y = layers.Add()([y, input_tensor])
+        return y
+
+    input_layer = layers.Input(shape=(image_size, image_size, channels))
+    x = keras_utils.ReflectPadding(3)(input_layer)
+    x = layers.Conv2D(64, 7, strides=1, padding="valid", kernel_initializer="he_normal",
+                      kernel_regularizer=tf.keras.regularizers.l2(1e-4), activation="relu")(x)
+
+    # 4x downscale blocks
+    x = munit_conv_block(x, 128, kernel_size=4)
+    x = munit_conv_block(x, 256, kernel_size=4)
+    x = munit_conv_block(x, 256, kernel_size=4)
+    x = munit_conv_block(x, 256, kernel_size=4)
+
+    # the paper does not describe how many resblocks (it says "several"), so we suppose it is 4
+    # (as in the content encoder)
+    for _ in range(4):
+        x = resblock_style(x, 256)
+
+    x = layers.GlobalAvgPool2D(keepdims=True)(x)
+    style_code = layers.Conv2D(8, kernel_size=1, strides=1, kernel_regularizer=tf.keras.regularizers.l2(1e-4))(x)
+    style_code = layers.Reshape((8,))(style_code)
+    return tf.keras.Model(input_layer, style_code, name=f"StyleEncoder{domain_letter.upper()}")
+
+
+def remic_generator(domain_letter, channels):
+    # def adain_resblock(x, style, filters, kernel_size, adain_filters, init="he_normal"):
+    #     original_x = x
+    #
+    #     b = layers.Dense(adain_filters)(style)
+    #     b = layers.Reshape([1, 1, adain_filters])(b)
+    #     g = layers.Dense(adain_filters)(style)
+    #     g = layers.Reshape([1, 1, adain_filters])(g)
+    #
+    #     x = layers.Conv2D(filters, kernel_size, padding="same", kernel_initializer=init, use_bias=False)(x)
+    #     x = keras_utils.AdaInstanceNormalization()([x, b, g])
+    #     x = layers.LeakyReLU()(x)
+    #
+    #     b = layers.Dense(adain_filters)(style)
+    #     b = layers.Reshape([1, 1, adain_filters])(b)
+    #     g = layers.Dense(adain_filters)(style)
+    #     g = layers.Reshape([1, 1, adain_filters])(g)
+    #
+    #     x = layers.Conv2D(filters, kernel_size, padding="same", kernel_initializer=init, use_bias=False)(x)
+    #     x = keras_utils.AdaInstanceNormalization()([x, b, g])
+    #     x = layers.Add()([original_x, x])
+    #
+    #     return x
+    #
+    # latent_input_layer = layers.Input(shape=(16, 16, 4))
+    # style_input_layer = layers.Input(shape=(8,))
+    #
+    # x = latent_input_layer
+    # s = style_input_layer
+    #
+    # # 4x residual blocks
+    # for _ in range(4):
+    #     x = adain_resblock(x, s, 256, 3, style_code_length)
+    #
+    # # 2x upsample blocks
+    # x = layers.UpSampling2D()(x)
+    # x = layers.Conv2D(128, kernel_size=5, strides=1, padding="same")(x)
+    # x = layers.UpSampling2D()(x)
+    # x = layers.Conv2D(64, kernel_size=5, strides=1, padding="same")(x)
+    #
+    # x = layers.Conv2D(4, kernel_size=7, strides=1, padding="same", activation="tanh")(x)
+    # output_layer = x
+    #
+    # return tf.keras.Model([latent_input_layer, style_input_layer], [output_layer], name="Generator")
+    return munit_decoder(domain_letter, channels)
+
+
+def remic_discriminator(domain_letter, image_size, channels, scales):
+    # input_layer = layers.Input(shape=(64, 64, 4))
+    # x = layers.Conv2D(64, kernel_size=4, strides=2, padding="same")(input_layer)
+    # x = layers.LeakyReLU(0.2)(x)
+    # x = layers.Conv2D(128, kernel_size=4, strides=2, padding="same")(x)
+    # x = layers.LeakyReLU(0.2)(x)
+    # x = layers.Conv2D(256, kernel_size=4, strides=2, padding="same")(x)
+    # x = layers.LeakyReLU(0.2)(x)
+    # x = layers.Conv2D(512, kernel_size=4, strides=2, padding="same")(x)
+    # x = layers.LeakyReLU(0.2)(x)
+    return munit_discriminator_multi_scale(domain_letter, image_size, channels, scales)

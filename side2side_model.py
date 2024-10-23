@@ -166,7 +166,7 @@ class S2SModel(ABC):
             # every UPDATE_STEPS and in the beginning, visualize x images to see how training is going...
             it_is_time_to_evaluate = (step + 1) % evaluate_steps == 0 or step == 0 or step == steps - 1
             if it_is_time_to_evaluate:
-                print("\n")
+                print("\n\n")
                 if step != 0:
                     show_eta(training_start_time, step_start_time, step, starting_step, steps, evaluate_steps)
 
@@ -191,10 +191,10 @@ class S2SModel(ABC):
 
                 # callbacks
                 if "debug_discriminator" in callbacks:
-                    logging.info("Showing discriminator output patches (3 train + 3 test)...")
-                    self.show_discriminated_images(train_ds.unbatch(), "train", step + 1, 3)
+                    logging.info("Showing discriminator output patches (4 train + 4 test)...")
+                    self.show_discriminated_images(train_ds.unbatch(), "train", step + 1, 4)
                     self.show_discriminated_images(test_ds.unbatch().shuffle(self.config.test_size), "test",
-                                                   step + 1, 3)
+                                                   step + 1, 4)
                 if "evaluate_l1" in callbacks:
                     logging.StreamHandler().terminator = ""
                     logging.info(f"Comparing L1 between generated images from train and test...")
@@ -357,7 +357,7 @@ class S2SModel(ABC):
     def debug_discriminator_output(self, batch, image_path):
         pass
 
-    def show_discriminated_images(self, dataset, ds_name, step, num_images=3):
+    def show_discriminated_images(self, dataset, ds_name, step, num_images=4):
         if num_images is None:
             num_images = dataset.cardinality()
 

@@ -160,6 +160,11 @@ class OptionParser(metaclass=SingletonMeta):
                                       "specify this, but its code shows that it replaces all that have been"
                                       "dropped out", default="dropout")
 
+        # --- munit and remic: specific options
+        self.parser.add_argument("--discriminator-scales", help="Number of scales for the multi-scale "
+                                                                "discriminator used in MUNIT and ReMIC", default=3,
+                                 type=int)
+
         # --- all: regarding the datasets to use for training and evaluation
         self.parser.add_argument("--rmxp", action="store_true", default=False, help="Uses RPG Maker XP dataset")
         self.parser.add_argument("--rm2k", action="store_true", default=False, help="Uses RPG Maker 2000"
