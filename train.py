@@ -8,6 +8,7 @@ from colla_model import CollaGANModel
 from dataset_utils import load_multi_domain_ds
 from configuration import OptionParser
 from munit_model import MunitModel
+from remic_model import RemicModel
 from star_model import UnpairedStarGANModel, PairedStarGANModel
 import setup
 
@@ -68,6 +69,8 @@ elif config.model == "collagan":
     class_name = CollaGANModel
 elif config.model == "munit":
     class_name = MunitModel
+elif config.model == "remic":
+    class_name = RemicModel
 else:
     raise Exception(f"The asked model of {config.model} was not found.")
 
@@ -142,3 +145,4 @@ logging.info("Finished executing.")
 # python train.py collagan --rm2k --log-folder output --epochs 400 --no-tran --model-name collagan --experiment l1100,d10,s10,lr0001,decayctl,indrop,correctssim,correctdomain --lambda-l1 100 --lambda-domain 10 --lambda-ssim 10 --lr 0.0001 --lr-decay constant-than-linear --callback-evaluate-l1 --callback-evaluate-fid --callback-debug-discriminator --input-dropout
 # python train.py munit --log-folder output --steps 4000 --evaluate-steps 1000 --lr 0.0001 --batch 1 --lr-decay step --model-name munit --experiment all,lambda-l1-1,lambda-latent-reconstruction-0 --lambda-l1 1 --lambda-latent-reconstruction 0 --callback-evaluate-fid --callback-evaluate-l1 --save-model --tiny --rm2k --rmxp --rmvx --misc --no-tran
 # python train.py munit --log-folder output --steps 4000 --evaluate-steps 250 --lr 0.0001 --batch 1 --lr-decay step --model-name munit --experiment pytorch-impl --lambda-l1 10 --lambda-latent-reconstruction 1 --lambda-cyclic-reconstruction 10 --domains back left --callback-evaluate-fid --callback-evaluate-l1 --rmxp
+# python train.py remic --steps 4000 --evaluate-steps 500 --lr 0.0001 --batch 3 --model-name remic --rmxp --lambda-l1 10 --lambda-latent-reconstruction 1 --lambda-cyclic-reconstruction 20 --discriminator-scales 1 --lr-decay none

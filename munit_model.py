@@ -13,10 +13,16 @@ from networks import munit_content_encoder, munit_style_encoder, munit_decoder, 
 
 class MunitModel(S2SModel):
     def __init__(self, config):
+        self.discriminators = None
+        self.generators = None
+        self.decoders = None
+        self.style_encoders = None
+        self.content_encoders = None
         super().__init__(config)
         self.lambda_reconstruction = config.lambda_l1
         self.lambda_latent_reconstruction = config.lambda_latent_reconstruction
         self.lambda_cyclic_reconstruction = config.lambda_cyclic_reconstruction
+        self.lsgan_loss = tf.keras.losses.MeanSquaredError()
 
     def create_inference_networks(self):
         config = self.config
@@ -72,8 +78,8 @@ class MunitModel(S2SModel):
         discriminator_scales = self.config.discriminator_scales
         # loss from the discriminator
         adversarial_loss = [
-            [tf.reduce_mean(tf.square(predicted_patches_fake[d][out] - tf.ones_like(predicted_patches_fake[d][out])))
-             for out in range(discriminator_scales)]
+            [self.lsgan_loss(tf.ones_like(predicted_patches_fake[d][ds]), predicted_patches_fake[d][ds])
+             for ds in range(discriminator_scales)]
             for d in range(number_of_domains)]
         adversarial_loss = tf.reduce_mean(adversarial_loss, axis=1)
         # adversarial_loss (shape=[d])
@@ -117,19 +123,16 @@ class MunitModel(S2SModel):
     def discriminator_loss(self, predicted_patches_real, predicted_patches_fake):
         number_of_domains = self.config.number_of_domains
         discriminator_scales = self.config.discriminator_scales
-        l1_loss = lambda output, target: tf.reduce_mean(tf.math.abs(tf.math.squared_difference(output, target)))
 
-        # if discriminator_scales == 1:
-
-        # shape=[d, ds] x [b, x, x, 1] => [d, 3] => [d]
+        # shape=[d, ds] x [b, x, x, 1] => [d, ds] => [d]
         real_loss = [
-            [l1_loss(predicted_patches_real[d][out], tf.ones_like(predicted_patches_real[d][out]))
-             for out in range(discriminator_scales)]
+            [self.lsgan_loss(tf.ones_like(predicted_patches_real[d][ds]), predicted_patches_real[d][ds])
+             for ds in range(discriminator_scales)]
             for d in range(number_of_domains)]
         real_loss = tf.reduce_mean(real_loss, axis=1)
 
         fake_loss = [
-            [l1_loss(predicted_patches_fake[d][out], tf.zeros_like(predicted_patches_fake[d][out]))
+            [self.lsgan_loss(tf.zeros_like(predicted_patches_fake[d][out]), predicted_patches_fake[d][out])
              for out in range(discriminator_scales)]
             for d in range(number_of_domains)]
         fake_loss = tf.reduce_mean(fake_loss, axis=1)

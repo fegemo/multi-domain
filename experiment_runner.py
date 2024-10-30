@@ -26,6 +26,10 @@ def dict_hash(dictionary):
     return dhash.hexdigest()
 
 
+def get_human_readable_combination(combination_dict):
+    return ", ".join([f"{k}-{v}" for k, v in combination_dict.items()])
+
+
 class Experimenter:
     valid_datasets = ["tiny", "rm2k", "rmxp", "rmvx", "misc"]
     virtual_datasets = valid_datasets + ["all"]
@@ -77,12 +81,15 @@ class Experimenter:
             print("All runs WERE ALREADY completed.")
             return
         else:
-            print(f"Starting the experiments from the beginning with hash {self.hash_checkpoint_name()}.")
+            print(f"Starting the experiments from the beginning with hash {self.hash_checkpoint_name()}, "
+                  f"saving at {self.output_path}.")
 
         run_index = -1
         combination = "''"
         try:
-            for run_index, combination in tqdm(enumerate(all_combinations), total=total):
+            pbar = tqdm(enumerate(all_combinations), total=total, unit="test")
+            for run_index, combination in pbar:
+                pbar.set_description(f"Params: {get_human_readable_combination(combination)}")
                 execution_status, _ = self.lookup_start_and_total_runs()
                 if execution_status[run_index]:
                     print("Skipped the run with index", run_index, "because it was already completed.")

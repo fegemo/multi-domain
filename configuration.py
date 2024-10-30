@@ -23,7 +23,7 @@ LAMBDA_SSIM = 10.
 LAMBDA_PALETTE = 0.
 LAMBDA_TV = 0.
 LAMBDA_LATENT_RECONSTRUCTION = 1.
-LAMBDA_CYCLIC_RECONSTRUCTION = 0  # 10 for munit on summer<>>winter and cityscapes<>synthia datasets
+LAMBDA_CYCLIC_RECONSTRUCTION = 0  # 10 for munit on summer<>>winter and cityscapes<>synthia datasets (MUNIT)
 DISCRIMINATOR_STEPS = 5
 EPOCHS = 160
 PRETRAIN_EPOCHS = 0  # 30 in colla's code
@@ -31,7 +31,7 @@ LR_DECAY = "constant-then-linear"
 LR = 0.0001
 TRAINING_SAMPLER = "multi-target"
 
-LOG_FOLDER = "temp-side2side"
+LOG_FOLDER = "output"
 
 
 class SingletonMeta(type):
@@ -260,6 +260,8 @@ class OptionParser(metaclass=SingletonMeta):
             self.values.epochs = ceil(self.values.steps * self.values.batch / self.values.train_size)
 
         setattr(self.values, "inner_channels", min(self.values.input_channels, self.values.output_channels))
+        setattr(self.values, "domains_capitalized", list(map(lambda name: name[0].upper() + name[1:],
+                                                             self.values.domains)))
 
         if return_parser:
             return self.values, self

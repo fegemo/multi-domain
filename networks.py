@@ -287,8 +287,17 @@ def munit_content_encoder(domain_letter, image_size, channels, number_of_input_i
         y = layers.Add()([y, input_tensor])
         return y
 
-    input_layer = layers.Input(shape=(image_size, image_size, channels*number_of_input_images))
-    x = keras_utils.ReflectPadding(3)(input_layer)
+    if number_of_input_images > 1:
+        # the single content encoder in ReMIC receives multiple images as input (first dimension0. Then, we permute
+        # the images to the last dimension and reshape the tensor to have the images concatenated in the last dimension
+        input_layer = layers.Input(shape=(number_of_input_images, image_size, image_size, channels))
+        x = layers.Permute((2, 3, 4, 1))(input_layer)
+        x = layers.Reshape((image_size, image_size, channels * number_of_input_images))(x)
+    else:
+        # each content encoder in MUNIT receives a single image as input
+        input_layer = layers.Input(shape=(image_size, image_size, channels))
+        x = input_layer
+    x = keras_utils.ReflectPadding(3)(x)
     x = layers.Conv2D(64, 7, strides=1, padding="valid", kernel_initializer="he_normal",
                       kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=False)(x)
     x = tfalayers.InstanceNormalization()(x)
@@ -515,8 +524,8 @@ def munit_discriminator_multi_scale(domain_letter, image_size, channels, scales)
     return tf.keras.Model([input_layer], outputs, name=f"Discriminator{domain_letter.upper()}")
 
 
-def remic_unified_content_encoder(domain_letter, image_size, channels, number_of_domains):
-    return munit_content_encoder(domain_letter, image_size, channels, number_of_domains)
+def remic_unified_content_encoder(domain_letter, image_size, channels, number_of_input_images):
+    return munit_content_encoder(domain_letter, image_size, channels, number_of_input_images)
 
 
 def remic_style_encoder(domain_letter, image_size, channels):

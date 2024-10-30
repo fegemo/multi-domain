@@ -432,17 +432,6 @@ class CollaGANModel(S2SModel):
             fake_image = generator(self.gen_supplier(domain_images, target_domain), training=True)
             return target_image, fake_image
 
-            # fake_image = np.empty(tf.shape(target_image))
-            # batch_size = 128
-            # for batch_start in range(0, len(fake_image), batch_size):
-            #     batch_end = batch_start + batch_size
-            #     batch_end = min(batch_end, len(fake_image))
-            #     domain_images_batch = domain_images[batch_start:batch_end]
-            #     target_domain_batch = target_domain[batch_start:batch_end]
-            #     fake_image[batch_start:batch_end] = generator(
-            #         self.gen_supplier(domain_images_batch, target_domain_batch), training=True)
-            # return target_image, tf.constant(fake_image, tf.float32)
-
         return dict({
             "train": generate_images_from_dataset("train"),
             "test": generate_images_from_dataset("test")

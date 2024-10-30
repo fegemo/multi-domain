@@ -1,6 +1,7 @@
 import os
 
 import tensorflow as tf
+from itertools import permutations
 
 
 # Some images have transparent pixels with colors other than black
@@ -253,3 +254,21 @@ def create_input_dropout_index_list(inputs_to_drop, number_of_domains):
         null_lists_per_target_index.append(null_list_for_current_target)
 
     return null_lists_per_target_index
+
+
+def create_domain_permutation_list(number_of_domains):
+    """
+    Creates lists of possible domain permutations to be used for training Many x Many models, such as ReMIC.
+
+    Returns a list with shape=(TO_DROP, ?, DOMAINS) that is, for each possible number of dropped inputs (first
+    dimension, with TO_DROP in [1, number_of_domains[), all permutations that drop that number of inputs
+    (second dimension), and the indices of the domains that are dropped (third dimension).
+    :param number_of_domains: number of domains in the dataset.
+    :return: a list with shape=(TO_DROP, ?, DOMAINS) with the permutations.
+    """
+    drop_list = []
+    for to_drop in range(1, number_of_domains):
+        sample_permutation = to_drop * [0] + (number_of_domains - to_drop) * [1]
+        all_permutations = set(permutations(sample_permutation))
+        drop_list.append(list(all_permutations))
+    return drop_list
