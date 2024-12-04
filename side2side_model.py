@@ -166,8 +166,8 @@ class S2SModel(ABC):
             # every UPDATE_STEPS and in the beginning, visualize x images to see how training is going...
             it_is_time_to_evaluate = (step + 1) % evaluate_steps == 0 or step == 0 or step == steps - 1
             if it_is_time_to_evaluate:
-                print("\n\n")
                 if step != 0:
+                    print("\n")
                     show_eta(training_start_time, step_start_time, step, starting_step, steps, evaluate_steps)
 
                 step_start_time = time.time()

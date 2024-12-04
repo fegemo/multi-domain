@@ -81,8 +81,7 @@ class Experimenter:
             print("All runs WERE ALREADY completed.")
             return
         else:
-            print(f"Starting the experiments from the beginning with hash {self.hash_checkpoint_name()}, "
-                  f"saving at {self.output_path}.")
+            print(f"Starting the experiments from the beginning with hash {self.hash_checkpoint_name()}.")
 
         run_index = -1
         combination = "''"
