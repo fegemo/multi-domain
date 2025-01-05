@@ -12,7 +12,7 @@ if __name__ == "__main__":
         {
             "model": "remic",
             "adhoc": [
-                "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
+                "callback-evaluate-fid", "callback-evaluate-l1",
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
@@ -21,14 +21,14 @@ if __name__ == "__main__":
             "lr": 0.0001,
             "batch": 16,
             "lr-decay": "none",
-            "input-dropout": "original",
+            "input-dropout": "conservative",
             "discriminator-scales": 1,
             "model-name": "@model",
             "experiment": "@dataset,&lambda-l1,&lambda-latent-reconstruction,&lambda-cyclic-reconstruction",
         }, {
-            "lambda-l1": [10, 100],
-            "lambda-latent-reconstruction": [0, 1, 10],
-            "lambda-cyclic-reconstruction": [0, 20, 200],
+            "lambda-l1": [10],
+            "lambda-latent-reconstruction": [1, 10],
+            "lambda-cyclic-reconstruction": [100, 200],
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],
