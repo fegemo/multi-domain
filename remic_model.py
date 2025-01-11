@@ -29,7 +29,16 @@ class RemicModel(MunitModel):
         self.lambda_image_consistency = config.lambda_l1
         self.lambda_latent_consistency = config.lambda_latent_reconstruction
         self.lambda_image_reconstruction = config.lambda_cyclic_reconstruction
-        self.sampler = UniformDropoutSampler(config)
+        if config.input_dropout == "none":
+            self.sampler = NoDropoutSampler(config)
+        elif config.input_dropout == "original":
+            self.sampler = UniformDropoutSampler(config)
+        elif config.input_dropout == "conservative":
+            self.sampler = ConservativeDropoutSampler(config)
+        elif config.input_dropout == "curriculum":
+            self.sampler = CurriculumDropoutSampler(config)
+        else:
+            raise ValueError(f"The provided {config.input_dropout} type for input dropout has not been implemented.")
         self.l1_loss = lambda y_true, y_pred: tf.reduce_mean(tf.abs(y_true - y_pred))
 
     def create_inference_networks(self):
