@@ -698,7 +698,7 @@ class CurriculumDropoutSampler(UniformDropoutSampler):
         # until 33% of the training, drop 2 inputs
         # until 50% of the training, drop 3 inputs
         # remainder 50% of the training, drop randomly
-        n = self.select_number_of_inputs_to_drop(batch_size, t)
+        n = super().select_number_of_inputs_to_drop(batch_size, t)
         return tf.where(t < 0.166667, 1, tf.where(t < 0.333333, 2, tf.where(t < 0.5, 3, n)))
 
 
