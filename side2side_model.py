@@ -4,13 +4,11 @@ from abc import ABC, abstractmethod
 import tensorflow as tf
 from tensorboard.plugins.custom_scalar import layout_pb2, summary as cs_summary
 import time
-from IPython import display
 
 import io_utils
 import frechet_inception_distance as fid
 from functional_utils import listify
 from keras_utils import ConstantThenLinearDecay, count_network_parameters
-
 
 def show_eta(training_start_time, step_start_time, current_step, training_starting_step, total_steps,
              update_steps):
@@ -328,10 +326,10 @@ class S2SModel(ABC):
                 for generator in generators:
                     generator_name = generator.name
                     py_model_path = self.get_output_folder(["models", generator_name])
-                    generator.save(py_model_path)
+                    generator.export(py_model_path)
             else:
                 py_model_path = self.get_output_folder(["models"])
-                generators.save(py_model_path)
+                generators.export(py_model_path)
         else:
             # there are multiple groups of networks (e.g., "style_encoders" and "content_encoders")
             for group, networks in self.inference_networks.items():
@@ -339,10 +337,10 @@ class S2SModel(ABC):
                     for network in networks:
                         network_name = network.name
                         py_model_path = self.get_output_folder(["models", group, network_name])
-                        network.save(py_model_path)
+                        network.export(py_model_path)
                 else:
                     py_model_path = self.get_output_folder(["models", group])
-                    networks.save(py_model_path)
+                    networks.export(py_model_path)
         self.save_model_description(py_model_path)
 
     def load_generator(self):
