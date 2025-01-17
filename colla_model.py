@@ -429,8 +429,19 @@ class CollaGANModel(S2SModel):
             target_domain_mask = tf.one_hot(target_domain, number_of_domains, on_value=0., off_value=1.)
             domain_images *= target_domain_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
 
-            fake_image = generator(self.gen_supplier(domain_images, target_domain), training=True)
-            return target_image, fake_image
+            # call the generator but with batched domain_images and target_domain
+            batch_size = 4
+            num_batches = tf.shape(domain_images)[0] // batch_size
+
+            fake_images = []
+            for i in range(num_batches):
+                batch_domain_images = domain_images[i * batch_size:(i + 1) * batch_size]
+                batch_target_domain = target_domain[i * batch_size:(i + 1) * batch_size]
+                fake_image_batch = generator(self.gen_supplier(batch_domain_images, batch_target_domain), training=True)
+                fake_images.append(fake_image_batch)
+
+            fake_images = tf.concat(fake_images, axis=0)
+            return target_image, fake_images
 
         return dict({
             "train": generate_images_from_dataset("train"),
