@@ -129,9 +129,8 @@ class AdaInstanceNormalization(Layer):
         return dict(list(base_config.items()) + list(config.items()))
 
     def compute_output_shape(self, input_shape):
-
         return input_shape[0]
 
 
 def count_network_parameters(network):
-    return tf.reduce_sum([tf.reduce_prod(v.get_shape()) for v in network.trainable_weights])
+    return tf.reduce_sum([tf.reduce_prod(v.shape) for v in network.trainable_weights])
