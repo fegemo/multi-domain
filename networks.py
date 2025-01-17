@@ -9,11 +9,11 @@ def resblock(x, filters, kernel_size, init):
     original_x = x
 
     x = layers.Conv2D(filters, kernel_size, padding="same", kernel_initializer=init, use_bias=False)(x)
-    x = tfalayers.InstanceNormalization()(x)
+    x = layers.GroupNormalization(groups=filters)(x)
     x = layers.LeakyReLU()(x)
 
     x = layers.Conv2D(filters, kernel_size, padding="same", kernel_initializer=init, use_bias=False)(x)
-    x = tfalayers.InstanceNormalization()(x)
+    x = layers.GroupNormalization(groups=filters)(x)
     x = layers.Add()([original_x, x])
 
     # the StarGAN official implementation skips this last activation of the resblock
@@ -77,14 +77,14 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
 
     filters = 64 * capacity
     x = layers.Conv2D(filters, kernel_size=7, strides=1, padding="same", kernel_initializer=init, use_bias=False)(x)
-    x = tfalayers.InstanceNormalization(epsilon=0.00001)(x)
+    x = layers.GroupNormalization(groups=filters, epsilon=0.00001)(x)
     x = layers.ReLU()(x)
 
     # downsampling blocks: 128*cap, then 256*cap
     for i in range(2):
         filters *= 2
         x = layers.Conv2D(filters, kernel_size=4, strides=2, padding="same", kernel_initializer=init, use_bias=False)(x)
-        x = tfalayers.InstanceNormalization(epsilon=0.00001)(x)
+        x = layers.GroupNormalization(groups=filters, epsilon=0.00001)(x)
         x = layers.ReLU()(x)
 
     # bottleneck blocks
@@ -96,7 +96,7 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
         filters /= 2
         x = layers.Conv2DTranspose(filters, kernel_size=4, strides=2, padding="same", kernel_initializer=init,
                                    use_bias=False)(x)
-        x = tfalayers.InstanceNormalization(epsilon=0.00001)(x)
+        x = layers.GroupNormalization(groups=filters, epsilon=0.00001)(x)
         x = layers.ReLU()(x)
 
     x = layers.Conv2D(output_channels, kernel_size=7, strides=1, padding="same", kernel_initializer=init,
@@ -114,7 +114,7 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels, 
         # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L44
         x = block_input
         x = layers.Conv2D(filters, 3, strides=1, padding="same", kernel_regularizer=regularizer)(x)
-        x = tfalayers.InstanceNormalization()(x)
+        x = layers.GroupNormalization(groups=filters)(x)
         x = layers.ReLU()(x)
         return x
 
@@ -281,7 +281,7 @@ def munit_content_encoder(domain_letter, image_size, channels, number_of_input_i
             y = keras_utils.ReflectPadding(1)(y)
             y = layers.Conv2D(filters, 3, strides=1, padding="valid", kernel_initializer="he_normal",
                               kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=False)(y)
-            y = tfalayers.InstanceNormalization(epsilon=1e-5)(y)
+            y = layers.GroupNormalization(groups=filters, epsilon=1e-5)(y)
             if i == 0:
                 y = layers.ReLU()(y)
         y = layers.Add()([y, input_tensor])
@@ -300,7 +300,7 @@ def munit_content_encoder(domain_letter, image_size, channels, number_of_input_i
     x = keras_utils.ReflectPadding(3)(x)
     x = layers.Conv2D(64, 7, strides=1, padding="valid", kernel_initializer="he_normal",
                       kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=False)(x)
-    x = tfalayers.InstanceNormalization()(x)
+    x = layers.GroupNormalization(groups=64)(x)
     x = layers.ReLU()(x)
 
     # 2x downsampling blocks
@@ -450,7 +450,7 @@ def munit_conv_block(input_tensor, filters, kernel_size=3, strides=2, use_norm=F
     x = layers.Conv2D(filters, kernel_size, strides=strides, padding="valid", kernel_initializer="he_normal",
                       kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=(not use_norm))(x)
     if use_norm:
-        x = tfalayers.InstanceNormalization(epsilon=1e-5)(x)
+        x = layers.GroupNormalization(groups=filters,epsilon=1e-5)(x)
     x = layers.ReLU()(x)
     return x
 
@@ -462,8 +462,8 @@ def munit_conv_block_d(input_tensor, filters, use_norm=False):
                       kernel_initializer=tf.random_normal_initializer(0, 0.02),
                       kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=(not use_norm))(x)
     if use_norm:
-        x = tfalayers.InstanceNormalization(epsilon=1e-5)(x)
-    x = layers.LeakyReLU(alpha=0.2)(x)
+        x = layers.GroupNormalization(groups=filters, epsilon=1e-5)(x)
+    x = layers.LeakyReLU(negative_slope=0.2)(x)
     return x
 
 
