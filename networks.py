@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras import layers
-from tensorflow_addons import layers as tfalayers
+from tensorflow.keras.ops import concatenate
 
 import keras_utils
 
@@ -50,7 +50,7 @@ def stargan_resnet_discriminator(number_of_domains, image_size, output_channels,
                                    use_bias=False)(x)
     classification = layers.Reshape((number_of_domains,), name="domain_classification")(classification)
 
-    return tf.keras.Model(inputs=inputs, outputs=[patches, classification], name="StarGANDiscriminator")
+    return tf.keras.Model(inputs=inputs, outputs=(patches, classification), name="StarGANDiscriminator")
 
 
 def stargan_resnet_generator(image_size, output_channels, number_of_domains, receive_source_domain, capacity=1):
@@ -93,7 +93,7 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
 
     # upsampling blocks: 128*cap, then 64*cap
     for i in range(2):
-        filters /= 2
+        filters //= 2
         x = layers.Conv2DTranspose(filters, kernel_size=4, strides=2, padding="same", kernel_initializer=init,
                                    use_bias=False)(x)
         x = layers.GroupNormalization(groups=filters, epsilon=0.00001)(x)
@@ -149,14 +149,14 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels, 
     base_filters = 64 * capacity
     filters_per_domain = base_filters // number_of_domains
 
-    source_image_split = tf.unstack(source_images_input, number_of_domains, axis=1)
+    source_image_split = tf.keras.ops.unstack(source_images_input, number_of_domains, axis=1)
     affluents_conv_0_2 = []
     affluents_conv_1_2 = []
     affluents_conv_2_2 = []
     affluents_conv_3_2 = []
     affluents_down_4__ = []
     for d in range(number_of_domains):
-        conv_0_0 = tf.concat([source_image_split[d], target_domain], axis=-1)
+        conv_0_0 = concatenate([source_image_split[d], target_domain], axis=-1)
         conv_0_1 = conv_block(conv_0_0, filters_per_domain * 1)
         conv_0_2 = conv_block(conv_0_1, filters_per_domain * 1)
         down_1__ = downsample(conv_0_2, filters_per_domain * 2)
@@ -177,31 +177,31 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels, 
         affluents_down_4__ += [down_4__]
 
     # DECODER starts here...
-    concat_down_4__ = tf.concat(affluents_down_4__, axis=-1)
+    concat_down_4__ = concatenate(affluents_down_4__, axis=-1)
     concat_conv_4_1 = conv_block(concat_down_4__, filters_per_domain * 16)
     concat_conv_4_2 = conv_block(concat_conv_4_1, filters_per_domain * 16)
     up_4___________ = upsample__(concat_conv_4_2, filters_per_domain * 8)
 
-    concat_down_3_2 = tf.concat(affluents_conv_3_2, axis=-1)
-    concat_skip_3__ = tf.concat([concat_down_3_2, up_4___________], axis=-1)
+    concat_down_3_2 = concatenate(affluents_conv_3_2, axis=-1)
+    concat_skip_3__ = concatenate([concat_down_3_2, up_4___________], axis=-1)
     up_conv_3_1____ = conv_block(concat_skip_3__, filters_per_domain * 8)
     up_conv_3_2____ = conv_block(up_conv_3_1____, filters_per_domain * 8)
     up_3___________ = upsample__(up_conv_3_2____, filters_per_domain * 4)
 
-    concat_down_2_2 = tf.concat(affluents_conv_2_2, axis=-1)
-    concat_skip_2__ = tf.concat([concat_down_2_2, up_3___________], axis=-1)
+    concat_down_2_2 = concatenate(affluents_conv_2_2, axis=-1)
+    concat_skip_2__ = concatenate([concat_down_2_2, up_3___________], axis=-1)
     up_conv_2_1____ = conv_block(concat_skip_2__, filters_per_domain * 4)
     up_conv_2_2____ = conv_block(up_conv_2_1____, filters_per_domain * 4)
     up_2___________ = upsample__(up_conv_2_2____, filters_per_domain * 2)
 
-    concat_down_1_2 = tf.concat(affluents_conv_1_2, axis=-1)
-    concat_skip_1__ = tf.concat([concat_down_1_2, up_2___________], axis=-1)
+    concat_down_1_2 = concatenate(affluents_conv_1_2, axis=-1)
+    concat_skip_1__ = concatenate([concat_down_1_2, up_2___________], axis=-1)
     up_conv_1_1____ = conv_block(concat_skip_1__, filters_per_domain * 2)
     up_conv_1_2____ = conv_block(up_conv_1_1____, filters_per_domain * 2)
     up_1___________ = upsample__(up_conv_1_2____, filters_per_domain * 1)
 
-    concat_down_0_2 = tf.concat(affluents_conv_0_2, axis=-1)
-    concat_skip_0__ = tf.concat([concat_down_0_2, up_1___________], axis=-1)
+    concat_down_0_2 = concatenate(affluents_conv_0_2, axis=-1)
+    concat_skip_0__ = concatenate([concat_down_0_2, up_1___________], axis=-1)
     up_conv_0_1____ = conv_block(concat_skip_0__, filters_per_domain * 1)
     up_conv_0_2____ = conv_block(up_conv_0_1____, filters_per_domain * 1)
 
@@ -252,7 +252,7 @@ def collagan_original_discriminator(number_of_domains, image_size, output_channe
         conv_last___)
     classification = layers.Reshape((number_of_domains,), name="domain_classification")(classification)
 
-    return tf.keras.Model(inputs=inputs, outputs=[patches, classification], name="CollaGANDiscriminator")
+    return tf.keras.Model(inputs=inputs, outputs=(patches, classification), name="CollaGANDiscriminator")
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -314,7 +314,7 @@ def munit_content_encoder(domain_letter, image_size, channels, number_of_input_i
     x = resblock_content(x, 256)
 
     content_code = x
-    return tf.keras.Model(input_layer, content_code, name=f"ContentEncoder{domain_letter.upper()}")
+    return tf.keras.Model(inputs=input_layer, outputs=content_code, name=f"ContentEncoder{domain_letter.upper()}")
 
 
 def munit_style_encoder(domain_letter, image_size, channels):
@@ -394,7 +394,6 @@ def munit_decoder(domain_letter, channels):
 
     def adaptive_instance_norm2d(input_tensor, adain_params_inner, idx_adain):
         assert input_tensor.shape[-1] == 256
-        # tf.print("input_tensor", input_tensor.shape, "adain_params_inner", adain_params_inner.shape, "idx_adain", idx_adain)
         y = input_tensor
         idx_head = idx_adain * 2 * 256
         adain_scale = layers.Lambda(lambda z: z[:, idx_head:idx_head + 256])(adain_params_inner)
@@ -409,13 +408,13 @@ def munit_decoder(domain_letter, channels):
         y = layers.Conv2D(filters, 3, strides=1, padding="valid", kernel_initializer="he_normal",
                           kernel_regularizer=tf.keras.regularizers.l2(1e-4),
                           bias_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=False)(y)
-        y = layers.Lambda(lambda z: adaptive_instance_norm2d(z[0], z[1], idx_adain))([y, adain_params_inner])
+        y = layers.Lambda(lambda z: adaptive_instance_norm2d(z[0], z[1], idx_adain), output_shape=input_tensor.shape[1:])([y, adain_params_inner[0]])
         y = layers.ReLU()(y)
         y = keras_utils.ReflectPadding(1)(y)
         y = layers.Conv2D(filters, 3, strides=1, padding="valid", kernel_initializer="he_normal",
                           kernel_regularizer=tf.keras.regularizers.l2(1e-4),
                           bias_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=False)(y)
-        y = layers.Lambda(lambda z: adaptive_instance_norm2d(z[0], z[1], idx_adain + 1))([y, adain_params_inner])
+        y = layers.Lambda(lambda z: adaptive_instance_norm2d(z[0], z[1], idx_adain + 1), output_shape=input_tensor.shape[1:])([y, adain_params_inner[0]])
         y = layers.Add()([y, input_tensor])
         return y
 
@@ -440,7 +439,7 @@ def munit_decoder(domain_letter, channels):
     output_image = layers.Conv2D(channels, 7, strides=1, padding="valid",
                                  kernel_initializer="he_normal", kernel_regularizer=tf.keras.regularizers.l2(1e-4),
                                  activation="tanh")(x)
-    return tf.keras.Model([input_style, input_content], [output_image, style_code, content_code],
+    return tf.keras.Model(inputs=(input_style, input_content), outputs=(output_image, style_code, content_code),
                           name=f"Decoder{domain_letter.upper()}")
 
 
@@ -521,7 +520,7 @@ def munit_discriminator_multi_scale(domain_letter, image_size, channels, scales)
     if scales == 1:
         shape = list(map(lambda d: d.value, outputs[0].shape.dims[1:]))
         outputs[0] = layers.Reshape((1, *shape))(outputs[0])
-    return tf.keras.Model([input_layer], outputs, name=f"Discriminator{domain_letter.upper()}")
+    return tf.keras.Model(inputs=input_layer, outputs=outputs, name=f"Discriminator{domain_letter.upper()}")
 
 
 def remic_unified_content_encoder(domain_letter, image_size, channels, number_of_input_images):
@@ -567,7 +566,7 @@ def remic_style_encoder(domain_letter, image_size, channels):
     x = layers.GlobalAvgPool2D(keepdims=True)(x)
     style_code = layers.Conv2D(8, kernel_size=1, strides=1, kernel_regularizer=tf.keras.regularizers.l2(1e-4))(x)
     style_code = layers.Reshape((8,))(style_code)
-    return tf.keras.Model(input_layer, style_code, name=f"StyleEncoder{domain_letter.upper()}")
+    return tf.keras.Model(inputs=input_layer, outputs=style_code, name=f"StyleEncoder{domain_letter.upper()}")
 
 
 def remic_generator(domain_letter, channels):
