@@ -57,8 +57,8 @@ class RemicModel(MunitModel):
             all_images_input = tf.keras.layers.Input(shape=(number_of_domains, image_size, image_size, inner_channels))
             x = single_image_input
             x_all = all_images_input
-            generators = [tf.keras.Model([x, x_all],
-                                         decoders[d]([style_encoders[d](x), unified_content_encoder(x_all)]),
+            generators = [tf.keras.Model(inputs=(x, x_all),
+                                         outputs=decoders[d]([style_encoders[d](x), unified_content_encoder(x_all)]),
                                          name=f"Generator{domain_letters[d]}")
                           for d in range(number_of_domains)]
             # generators is a list of "virtual" models, as in MUNIT (see MunitModel implementation)
@@ -147,7 +147,7 @@ class RemicModel(MunitModel):
     def discriminator_loss(self, predicted_patches_real, predicted_patches_fake):
         return super().discriminator_loss(predicted_patches_real, predicted_patches_fake)
 
-    @tf.function
+    # @tf.function
     def train_step(self, batch, step, update_steps, t):
         """
         These steps were inferred from the ReMIC paper (there is no reference implementation):
@@ -238,16 +238,22 @@ class RemicModel(MunitModel):
                 # for image reconstruction loss
                 decoded_images_with_random_style)
 
-        # applies the gradients to the models
+        # since the update to keras 3.0 (due to tensorflow 2.18), the optimizer needs to be called with
+        # only a single set of gradients and variables. Therefore, we need to concatenate the gradients and
+        # variables of all models before calling the optimizer
         discriminator_gradients = [tape.gradient(d_loss["total"][d], self.discriminators[d].trainable_variables)
                                    for d in range(number_of_domains)]
+        discriminator_gradients = [g for grad in discriminator_gradients for g in grad]
         generator_gradients = [tape.gradient(g_loss["total"][d], self.generators[d].trainable_variables)
                                for d in range(number_of_domains)]
-        for d in range(number_of_domains):
-            self.discriminator_optimizer.apply_gradients(zip(discriminator_gradients[d],
-                                                             self.discriminators[d].trainable_variables))
-            self.generator_optimizer.apply_gradients(zip(generator_gradients[d],
-                                                         self.generators[d].trainable_variables))
+        generator_gradients = [g for grad in generator_gradients for g in grad]
+
+        all_discriminator_trainable_variables = [v for d in range(number_of_domains)
+                                                 for v in self.discriminators[d].trainable_variables]
+        all_generator_trainable_variables = [v for d in range(number_of_domains)
+                                                for v in self.generators[d].trainable_variables]
+        self.discriminator_optimizer.apply_gradients(zip(discriminator_gradients, all_discriminator_trainable_variables))
+        self.generator_optimizer.apply_gradients(zip(generator_gradients, all_generator_trainable_variables))
 
         # writes statistics of the training step
         with tf.name_scope("discriminator"):

@@ -257,15 +257,22 @@ class MunitModel(S2SModel):
                                          decoded_translated_images)
 
         # 7. apply the gradients to the models
-        discriminator_gradients = [tape.gradient(d_loss["total"][i], self.discriminators[i].trainable_variables)
-                                   for i in range(number_of_domains)]
-        generator_gradients = [tape.gradient(g_loss["total"][i], self.generators[i].trainable_variables)
-                               for i in range(number_of_domains)]
-        for i in range(number_of_domains):
-            self.discriminator_optimizer.apply_gradients(zip(discriminator_gradients[i],
-                                                             self.discriminators[i].trainable_variables))
-            self.generator_optimizer.apply_gradients(zip(generator_gradients[i],
-                                                         self.generators[i].trainable_variables))
+        # since the update to keras 3.0 (due to tensorflow 2.18), the optimizer needs to be called with
+        # only a single set of gradients and variables. Therefore, we need to concatenate the gradients and
+        # variables of all models before calling the optimizer
+        discriminator_gradients = [tape.gradient(d_loss["total"][d], self.discriminators[d].trainable_variables)
+                                   for d in range(number_of_domains)]
+        discriminator_gradients = [g for grad in discriminator_gradients for g in grad]
+        generator_gradients = [tape.gradient(g_loss["total"][d], self.generators[d].trainable_variables)
+                               for d in range(number_of_domains)]
+        generator_gradients = [g for grad in generator_gradients for g in grad]
+
+        all_discriminator_trainable_variables = [v for d in range(number_of_domains)
+                                                 for v in self.discriminators[d].trainable_variables]
+        all_generator_trainable_variables = [v for d in range(number_of_domains)
+                                                for v in self.generators[d].trainable_variables]
+        self.discriminator_optimizer.apply_gradients(zip(discriminator_gradients, all_discriminator_trainable_variables))
+        self.generator_optimizer.apply_gradients(zip(generator_gradients, all_generator_trainable_variables))
 
         # write statistics of the training step
         with tf.name_scope("discriminator"):
