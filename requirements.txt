@@ -1,19 +1,13 @@
-tensorflow_addons==0.18.0
-tensorflow==2.10.1
-matplotlib==3.7.1
-scipy==1.9.1
-scikit-image==0.20.0
-ipython==8.12.0
-tqdm==4.65.0
-#tensorflowjs==3.21.0
+tensorflow[and-cuda]==2.18.0
+matplotlib==3.9.4
+tqdm==4.67.1
+numpy==2.0.2
 
-numpy==1.24.2
-Pillow==9.5.0
-tensorboard==2.10.1
-graphlib-backport
+# scipy and scikit-image are required for FID calculation
+# scipy is used for the linalg.sqrtm function (tf has, but it is really slow as of 2.18.0)
+# scikit-image is used for the resize function (resizing with tf yields different results, for some reason)
+scipy==1.13.1
+scikit-image==0.24.0
 
-beaupy
-typing_extensions>=4.7.0
-
-# for tensorflow_addons not to include a new (breaking) version of typeguard:
-typeguard==2.7
+# beaupy is used for the ExperimentRunner (choosing which tests to run in interactive mode)
+beaupy==3.10.1

@@ -1,5 +1,4 @@
 import numpy as np
-from IPython import display
 from matplotlib import pyplot as plt
 
 import histogram
@@ -165,11 +164,6 @@ class Pix2PixModel(S2SModel):
 
         if save_name is not None:
             plt.savefig(save_name, transparent=True)
-
-        # cannot call show otherwise it flushes and empties the figure, sending to tensorboard
-        # only a blank image... hence, let us just display the saved image
-        display.display(figure)
-        # plt.show()
 
         return figure
 

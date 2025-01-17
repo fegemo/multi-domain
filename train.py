@@ -4,6 +4,15 @@ from math import ceil
 
 import tensorflow as tf
 
+# allows tf to use all the amount of vram of the device
+# important for running on low vram environments (as my local 4gb)
+# gpus = tf.config.list_physical_devices("GPU")
+# if gpus:
+#     tf.config.set_logical_device_configuration(
+#         gpus[0],
+#         [tf.config.LogicalDeviceConfiguration(memory_limit=4096)]
+#     )
+
 from colla_model import CollaGANModel
 from dataset_utils import load_multi_domain_ds
 from configuration import OptionParser

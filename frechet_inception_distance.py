@@ -1,16 +1,13 @@
 import gc
-import os
-import numpy
 import numpy as np
 from numpy import cov
 from numpy import trace
 from numpy import iscomplexobj
 from numpy import asarray
 from scipy.linalg import sqrtm
-from keras.applications.inception_v3 import InceptionV3
-from keras.applications.inception_v3 import preprocess_input
+from tensorflow.keras.applications import InceptionV3
+from tensorflow.keras.applications.inception_v3 import preprocess_input
 from skimage.transform import resize
-from skimage.io import imread
 
 
 # scale an array of images to a new size
@@ -46,7 +43,7 @@ def _calculate_fid(model, images1, images2, batch_size=136):
     mu1, sigma1 = act1.mean(axis=0), cov(act1, rowvar=False)
     mu2, sigma2 = act2.mean(axis=0), cov(act2, rowvar=False)
     # calculate sum squared difference between means
-    ssdiff = numpy.sum((mu1 - mu2) ** 2.0)
+    ssdiff = np.sum((mu1 - mu2) ** 2.0)
     # calculate sqrt of product between cov
     covmean = sqrtm(sigma1.dot(sigma2))
     # check and correct imaginary numbers from sqrt
@@ -57,22 +54,7 @@ def _calculate_fid(model, images1, images2, batch_size=136):
     return fid
 
 
-def _load_directory_of_images(path):
-    list_files = os.listdir(path)
-    image_list = [imread(os.sep.join([path, filename])) for filename in list_files]
-    return asarray(image_list)
-
-
-def _compare_datasets(dataset1_path, dataset2_path, model):
-    # loads the images from directories
-    images1 = dataset1_path
-    images2 = dataset2_path
-
-    if type(dataset1_path) == str:
-        images1 = _load_directory_of_images(dataset1_path)
-    if type(dataset2_path) == str:
-        images2 = _load_directory_of_images(dataset2_path)
-
+def _compare_datasets(images1, images2, model):
     # convert integer to floating point values
     images1 = images1.astype('float32')
     images2 = images2.astype('float32')

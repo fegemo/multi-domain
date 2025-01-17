@@ -467,7 +467,7 @@ class CollaGANModel(S2SModel):
             for m in range(1, number_of_domains):
                 image_path = os.sep.join([base_image_path, f"{i}_at_step_{step}_missing_{m}.png"])
                 fig = plt.figure(figsize=(4 * number_of_domains, 4 * number_of_domains))
-                plt.suptitle(f"Missing {m} image(s)", fontdict={"size": 20})
+                plt.suptitle(f"Missing {m} image(s)", fontdict={"fontsize": 20})
                 for target_index in range(number_of_domains):
                     input_dropout_mask = tf.one_hot(target_index, number_of_domains, on_value=0., off_value=1.)
 
