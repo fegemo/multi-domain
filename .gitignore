@@ -19,3 +19,7 @@ datasets/tiny-hero
 output
 temp*
 study*
+.venv/
+__pycache__/
+venv-tf.2.10.1
+venv-36-tfjs
