@@ -147,7 +147,7 @@ class RemicModel(MunitModel):
     def discriminator_loss(self, predicted_patches_real, predicted_patches_fake):
         return super().discriminator_loss(predicted_patches_real, predicted_patches_fake)
 
-    # @tf.function
+    @tf.function
     def train_step(self, batch, step, update_steps, t):
         """
         These steps were inferred from the ReMIC paper (there is no reference implementation):
