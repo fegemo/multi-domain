@@ -458,7 +458,7 @@ class RemicModel(MunitModel):
 
         number_of_domains = self.config.number_of_domains
         null_list = dataset_utils.create_input_dropout_index_list(list(range(1, number_of_domains)), number_of_domains)
-        num_cols = number_of_domains * 2  # generate images with the original style, than with a random style code
+        num_cols = number_of_domains * 2  # generate images with the original style, then with a random style code
         num_rows = reduce(lambda acc, v: acc + len(v), null_list[0], 0)
 
         permutations_for_each_target_domain = [reduce(lambda acc, p: acc + p, null_list[d], [])
