@@ -19,7 +19,7 @@ if __name__ == "__main__":
             "steps": 240000,
             "evaluate-steps": 1000,
             "lr": 0.00011,
-            "batch": 32,
+            "batch": 4,
             "lr-decay": "none",
             "input-dropout": "original",
             "discriminator-scales": 3,
