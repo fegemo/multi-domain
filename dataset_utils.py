@@ -88,11 +88,15 @@ def augment_hue_rotation(image, seed):
     return image
 
 
+# had to move this keras layer instantiation outside the tf.function to
+# avoid a bug in tf 2.11+ that caused an error:
+#ValueError: tf.function only supports singleton tf.Variables created on the first call. Make sure the tf.Variable is only created once or created outside tf.function. See https://www.tensorflow.org/guide/function#creating_tfvariables for more information.
+translate_layer = tf.keras.layers.RandomTranslation(
+    (-0.15, 0.075), 0.125, fill_mode="constant", interpolation="nearest")
+
 def augment_translation(images):
     image = tf.concat([*images], axis=-1)
-    translate = tf.keras.layers.RandomTranslation(
-        (-0.15, 0.075), 0.125, fill_mode="constant", interpolation="nearest")
-    image = translate(image, training=True)
+    image = translate_layer(image, training=True)
     images = tf.split(image, len(images), axis=-1)
     return tf.tuple(images)
 
@@ -113,9 +117,7 @@ def augment(should_rotate_hue, should_translate, channels, *images):
     # translation
     if should_translate:
         concat_channels = tf.concat(tf.unstack(stacked_images, num=len(images)), axis=-1)
-        translate = tf.keras.layers.RandomTranslation(
-            (-0.15 * 3, 0.075 * 3), 0.125 * 3, fill_mode="constant", interpolation="nearest")
-        concat_channels = translate(concat_channels, training=True)
+        concat_channels = translate_layer(concat_channels, training=True)
         stacked_images = tf.split(concat_channels, len(images), axis=-1)
         stacked_images = tf.stack(stacked_images)
 
