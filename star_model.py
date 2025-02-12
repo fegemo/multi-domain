@@ -8,7 +8,7 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 import io_utils
-import palette
+import palette_utils
 from keras_utils import NParamsSupplier
 from networks import stargan_resnet_generator, stargan_resnet_discriminator
 from side2side_model import S2SModel
@@ -130,7 +130,7 @@ class UnpairedStarGANModel(S2SModel):
         # (1) prepare the batch, so it is: [b, d*s*s, c]
         combined_images = tf.reshape(tf.transpose(batch, [1, 0, 2, 3, 4]), [batch_size, -1, channels])
         # (2) extract the palette for each image in the batch: [b, (p), c]
-        palettes = palette.batch_extract_palette(combined_images, self.config.inner_channels)
+        palettes = palette_utils.batch_extract_palette(combined_images)
 
         # TRAINING THE DISCRIMINATOR
         # ==========================
@@ -527,7 +527,7 @@ class PairedStarGANModel(UnpairedStarGANModel):
         # (1) prepare the batch, so it is: [b, d*s*s, c]
         combined_images = tf.reshape(tf.transpose(batch, [1, 0, 2, 3, 4]), [batch_size, -1, channels])
         # (2) extract the palette for each image in the batch: [b, (p), c]
-        palettes = palette.batch_extract_palette(combined_images, self.config.inner_channels)
+        palettes = palette_utils.batch_extract_palette(combined_images)
 
         # 1. select a random source domain with a random target
         source_domain, source_image, target_domain, target_image = self.sampler.sample(domain_images)
