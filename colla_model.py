@@ -43,11 +43,15 @@ class CollaGANModel(S2SModel):
             self.cycled_source_replacer = ForwardOnlyCycledSourceReplacer(config)
 
         self.cce = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
-        # self.gen_supplier = NParamsSupplier(2)
-        self.gen_supplier = NParamsSupplier(3)
+        self.gen_supplier = NParamsSupplier(3 if config.generator == "palette" else 2)
         self.dis_supplier = NParamsSupplier(2 if config.conditional_discriminator else 1)
         self.generator = self.inference_networks["generator"]
         self.discriminator = self.training_only_networks["discriminator"]
+
+        if config.generator == "palette":
+            self.annealing_scheduler = LinearAnnealingScheduler([self.generator.quantization])
+        else:
+            self.annealing_scheduler = NoopAnnealingScheduler()
 
     def create_inference_networks(self):
         config = self.config
@@ -248,8 +252,7 @@ class CollaGANModel(S2SModel):
         number_of_domains, batch_size, image_size, channels = batch_shape[0], batch_shape[1], \
             batch_shape[2], batch_shape[4]
 
-        # --- temporary change: change the temperature of the soft assignment palette quantization layer in the generator
-        self.generator.quantization.temperature.assign(tf.maximum(0.0, 1.0 - t))
+        self.annealing_scheduler.update(t)
         palettes = palette_utils.batch_extract_palette_ragged(tf.transpose(batch, [1, 0, 2, 3, 4]))
 
         # 1. select a random target domain with a subset of the images as input
@@ -837,3 +840,27 @@ class DroppedOutCycledSourceReplacer(CycledSourceReplacer):
         # the mask becomes of shape [b, 1, d, 1, 1, 1], which can be broadcast to the repeated_domain_images' shape
 
         return inverted_input_dropout_mask
+
+
+class AnnealingScheduler(ABC):
+    def __init__(self, annealing_layers=None):
+        if annealing_layers is None:
+            annealing_layers = []
+        self.annealing_layers = annealing_layers
+
+    def update(self, t):
+        new_temperature = self.get_value(t)
+        for l in self.annealing_layers:
+            l.temperature.assign(new_temperature)
+
+    @abstractmethod
+    def get_value(self, t):
+        pass
+
+class LinearAnnealingScheduler(AnnealingScheduler):
+    def get_value(self, t):
+        return tf.maximum(0.0, 1.0 - t)
+
+class NoopAnnealingScheduler(AnnealingScheduler):
+    def get_value(self, t):
+        return 1.0
