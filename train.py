@@ -137,10 +137,23 @@ logging.info(f"Restored the BEST generator, which was in step {step}.")
 if config.save_model:
     logging.info(f"Saving the generator...")
     model.save_generator()
+    logging.info(f"Generator saved.")
 
 # generating resulting images
-logging.info(f"Starting to generate the images from the test dataset with generator from step {step}...")
-model.generate_images_from_dataset(test_ds, step, num_images=100)
+num_examples_to_generate = tf.minimum(5, config.test_size)
+skip_examples = tf.maximum(1, config.test_size // num_examples_to_generate)
+skip_examples = tf.cast(skip_examples, tf.int64)
+num_examples_to_generate = tf.cast(num_examples_to_generate, tf.int64)
+logging.info(f"Starting to generate {num_examples_to_generate} images from the test dataset "
+             f"with generator from step {step}, "
+             f"hopping {skip_examples} example(s) each time.")
+skipping_test_ds = (
+    test_ds.unbatch()
+    .enumerate()
+    .filter(lambda c, _: c % skip_examples == 0)
+    .take(num_examples_to_generate)
+)
+model.generate_images_from_dataset(skipping_test_ds, step, num_images=num_examples_to_generate.numpy())
 
 
 logging.info("Finished executing.")

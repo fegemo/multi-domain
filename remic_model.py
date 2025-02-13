@@ -444,13 +444,7 @@ class RemicModel(MunitModel):
             "test": generate_images_from_example_indices(example_indices_for_evaluation["test"])
         }
 
-    def generate_images_from_dataset(self, dataset, step, num_images=None):
-        dataset = dataset.unbatch()
-        if num_images is None:
-            num_images = dataset.cardinality()
-
-        dataset = list(dataset.take(num_images).as_numpy_iterator())
-
+    def generate_images_from_dataset(self, enumerated_dataset, step, num_images=None):
         base_image_path = self.get_output_folder("test-images")
 
         io_utils.delete_folder(base_image_path)
@@ -466,9 +460,9 @@ class RemicModel(MunitModel):
         oh_to_readable_domains = lambda oh: "+".join([self.config.domains[l][0] for l in range(len(oh)) if oh[l] != 0])
         # permutations_for_each_target_domain (d, x, d), with x being the number of permutations for the target domain,
         # which is the number of rows of the image
-        for c, domain_images in enumerate(tqdm(dataset, total=len(dataset))):
+        for c, domain_images in tqdm(enumerated_dataset, total=num_images):
             # each character will appear in a separate png file
-            image_path = os.sep.join([base_image_path, f"image_{c}_at_step_{step}.png"])
+            image_path = os.sep.join([base_image_path, f"{c:04d}_at_step_{step}.png"])
             fig = plt.figure(figsize=(4 * num_cols, 4 * num_rows))
 
             generated_with_original_style = []

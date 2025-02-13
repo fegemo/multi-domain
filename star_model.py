@@ -412,13 +412,7 @@ class UnpairedStarGANModel(S2SModel):
         plt.savefig(image_path, transparent=True)
         plt.close(fig)
 
-    def generate_images_from_dataset(self, dataset, step, num_images=None):
-        dataset = dataset.unbatch()
-        if num_images is None:
-            num_images = dataset.cardinality()
-
-        dataset = list(dataset.take(num_images).as_numpy_iterator())
-
+    def generate_images_from_dataset(self, enumerated_dataset, step, num_images=None):
         base_image_path = self.get_output_folder("test-images")
 
         io_utils.delete_folder(base_image_path)
@@ -426,8 +420,8 @@ class UnpairedStarGANModel(S2SModel):
 
         number_of_domains = self.config.number_of_domains
         # for each image in the dataset...
-        for i, domain_images in enumerate(tqdm(dataset, total=len(dataset))):
-            image_path = os.sep.join([base_image_path, f"{i}_at_step_{step}.png"])
+        for i, domain_images in tqdm(enumerated_dataset, total=num_images):
+            image_path = os.sep.join([base_image_path, f"{i:04d}_at_step_{step}.png"])
             fig = plt.figure(figsize=(4 * number_of_domains, 4 * number_of_domains))
             for source_index in range(number_of_domains):
                 source_image = tf.gather(domain_images, source_index)

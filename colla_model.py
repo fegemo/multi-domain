@@ -469,13 +469,7 @@ class CollaGANModel(S2SModel):
             "test": generate_images_from_dataset("test")
         })
 
-    def generate_images_from_dataset(self, dataset, step, num_images=None):
-        dataset = dataset.unbatch()
-        if num_images is None:
-            num_images = dataset.cardinality()
-
-        dataset = list(dataset.take(num_images).as_numpy_iterator())
-
+    def generate_images_from_dataset(self, enumerated_dataset, step, num_images=None):
         base_image_path = self.get_output_folder("test-images")
 
         io_utils.delete_folder(base_image_path)
@@ -483,14 +477,14 @@ class CollaGANModel(S2SModel):
 
         number_of_domains = self.config.number_of_domains
         # for each image i in the dataset...
-        for i, domain_images in enumerate(tqdm(dataset, total=len(dataset))):
+        for i, domain_images in tqdm(enumerated_dataset, total=num_images):
             # domain_images is a tuple of d images, each with shape [s, s, c]
             one_image_shape = tf.shape(domain_images[0])
             image_size, channels = one_image_shape[0], one_image_shape[-1]
             palette = palette_utils.extract_palette(tf.reshape(domain_images, (-1, image_size, channels)))
             # for each number m of missing domains [1 to d[
             for m in range(1, number_of_domains):
-                image_path = os.sep.join([base_image_path, f"{i}_at_step_{step}_missing_{m}.png"])
+                image_path = os.sep.join([base_image_path, f"{i:04d}_at_step_{step}_missing_{m}.png"])
                 fig = plt.figure(figsize=(4 * number_of_domains, 4 * number_of_domains))
                 plt.suptitle(f"Missing {m} image(s)", fontdict={"fontsize": 20})
                 for target_index in range(number_of_domains):
