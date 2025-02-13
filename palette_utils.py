@@ -11,20 +11,14 @@ def get_invalid_color(channels):
 def extract_palette(image):
     """
     Extracts the unique colors from an image (3D tensor)
-    Parameters
-    ----------
-    image a 3D tensor with shape (height, width, channels). Values should be int32 inside [0, 255]. Can also be a
-    batched 4D tensor, in which case it looks for the combined (single) palette for all such images (this is useful
-    if we have front/right/back/left of a sprite and want a combined palette).
-
-    Returns a tensor of colors (RGB) representing an image's palette
-    -------
+    :params: image: a 3D tensor with shape (height, width, channels). Values should be inside [0, 255].
+    :returns: a 2D tensor with shape (num_colors, channels) with the palette colors as uint8 inside [0, 255]
     """
     channels = tf.shape(image)[-1]
 
     # incoming image shape: (s, s, channels)
     # reshaping to: (s*s, channels)
-    image = tf.cast(image, tf.int8)
+    image = tf.cast(image, tf.uint8)
     image = tf.reshape(image, [-1, channels])
 
     # colors are sorted as they appear in the image sweeping from top-left to bottom-right
@@ -34,17 +28,19 @@ def extract_palette(image):
 
 def batch_extract_palette(images):
     """
-    Extracts the palette of each image in the batch, returning a ragged tensor of shape [b, (colors), c]
-    :param images:
-    :return:
+    Extracts the palette of each image in the batch, returning a regular tensor of shape [b, max_colors, c]. The
+    palettes are padded with the invalid color [32768, 32768, 32768, 32768] to have the same number of colors.
+    :param images: batch of images: [b, s, s, c] with values inside [-1, 1]
+    :return: a tensor with shape [b, max_colors, c] with the palette colors as float32 inside [-1, 1]
     """
+    channels = tf.shape(images)[-1]
     images = dataset_utils.denormalize(images)
-    images = tf.cast(images, tf.int32)
+    images = tf.cast(images, tf.uint8)
 
     palettes_ragged = tf.map_fn(fn=extract_palette, elems=images,
                                 fn_output_signature=RaggedTensorSpec(
-                                    ragged_rank=0,
-                                    dtype=tf.int32))
+                                ragged_rank=0,
+                                dtype=tf.uint8))
     palettes = tf.RaggedTensor.to_tensor(palettes_ragged, default_value=get_invalid_color(channels))
     palettes = tf.cast(palettes, tf.float32)
     palettes = dataset_utils.normalize(palettes)
@@ -55,13 +51,14 @@ def batch_extract_palette(images):
 def extract_palette_ragged(image):
     """
     Extracts the unique colors from an image (3D tensor) -- returns a ragged tensor with shape [1, (colors), c]
-    :params: image: a 3D tensor with shape (height, width, channels). Values should be float32 inside [-1, 1].
+    :params: image: a 3D tensor with shape (height, width, channels). Values should be inside [0, 255].
+    :returns: a ragged tensor with shape [1, (num_colors), channels] with the palette colors as uint8 inside [0, 255]
     """
     channels = tf.shape(image)[-1]
 
     # incoming image shape: (s, s, channels)
     # reshaping to: (s*s, channels)
-    image = tf.cast(image, tf.int8)
+    image = tf.cast(image, tf.uint8)
     image = tf.reshape(image, [-1, channels])
 
     # colors are sorted as they appear in the image sweeping from top-left to bottom-right
@@ -77,18 +74,18 @@ def extract_palette_ragged(image):
 def batch_extract_palette_ragged(images):
     """
     Extracts the palette of each image in the batch, returning a ragged tensor of shape [b, (colors), c]
-    :param images: batch of images: [b, s, s, c]
-    :return:
+    :param images: batch of images: [b, s, s, c] with values inside [-1, 1]
+    :return: a ragged tensor with shape [b, (colors), c] with the palette colors as float32 inside [-1, 1]
     """
     images = dataset_utils.denormalize(images)
-    images = tf.cast(images, tf.int8)
+    images = tf.cast(images, tf.uint8)
     channels = images.shape[-1]
 
     palettes_ragged = tf.map_fn(fn=extract_palette_ragged, elems=images,
                                 fn_output_signature=RaggedTensorSpec(
                                     shape=(1, None, channels),
                                     ragged_rank=1,
-                                    dtype=tf.int8))
+                                    dtype=tf.uint8))
 
     palettes_ragged = palettes_ragged.merge_dims(1, 2)
     palettes_ragged = tf.cast(palettes_ragged, tf.float32)

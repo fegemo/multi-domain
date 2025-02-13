@@ -382,7 +382,10 @@ class CollaGANModel(S2SModel):
         for i, example in enumerate(examples):
             domain_images, target_domain = example
             image_size, channels = domain_images[0].shape[0], domain_images[0].shape[2]
-            palette = palette_utils.extract_palette(tf.reshape(domain_images, (1*number_of_domains*image_size, image_size, channels))) #, self.config.inner_channels)
+            concatenated_images_to_extract_palette = tf.reshape(domain_images, (number_of_domains * image_size, image_size, channels))
+            concatenated_images_to_extract_palette = dataset_utils.denormalize(concatenated_images_to_extract_palette)
+            palette = palette_utils.extract_palette(concatenated_images_to_extract_palette)
+            palette = dataset_utils.normalize(tf.cast(palette, tf.float32))
 
             real_image = domain_images[target_domain]
             domain_images = tf.constant(domain_images)
@@ -411,7 +414,7 @@ class CollaGANModel(S2SModel):
                 elif j == target_domain:
                     plt.title("Target", fontdict={"fontsize": 24})
 
-                plt.imshow(images[j] * 0.5 + 0.5)
+                plt.imshow(tf.clip_by_value(images[j] * 0.5 + 0.5, 0, 1))
                 plt.axis("off")
 
         figure.tight_layout()
@@ -481,7 +484,8 @@ class CollaGANModel(S2SModel):
             # domain_images is a tuple of d images, each with shape [s, s, c]
             one_image_shape = tf.shape(domain_images[0])
             image_size, channels = one_image_shape[0], one_image_shape[-1]
-            palette = palette_utils.extract_palette(tf.reshape(domain_images, (-1, image_size, channels)))
+            palette = palette_utils.extract_palette(dataset_utils.denormalize(tf.reshape(domain_images,(-1, image_size, channels))))
+            palette = dataset_utils.normalize(tf.cast(palette, tf.float32))
             # for each number m of missing domains [1 to d[
             for m in range(1, number_of_domains):
                 image_path = os.sep.join([base_image_path, f"{i:04d}_at_step_{step}_missing_{m}.png"])
@@ -516,7 +520,7 @@ class CollaGANModel(S2SModel):
                                 plt.title("Dropped", fontdict={"fontsize": 20})
                             image = domain_images[source_index]
 
-                        plt.imshow(image * 0.5 + 0.5)
+                        plt.imshow(tf.clip_by_value(image * 0.5 + 0.5, 0, 1))
                         plt.axis("off")
 
                 plt.savefig(image_path, transparent=True)
@@ -530,7 +534,7 @@ class CollaGANModel(S2SModel):
         batch_shape = tf.shape(batch)
         number_of_domains, batch_size, image_size, channels = batch_shape[0], batch_shape[1], batch_shape[2], batch_shape[4]
 
-        palettes = palette_utils.batch_extract_palette_ragged(tf.reshape(tf.transpose(batch, [1, 0, 2, 3, 4]), (-1, image_size, channels)), self.config.inner_channels)
+        palettes = palette_utils.batch_extract_palette_ragged(tf.reshape(tf.transpose(batch, [1, 0, 2, 3, 4]), (-1, image_size, channels)))
         domain_images, target_domain, _ = self.sampler.sample(batch, 0.5)
         # domain_images (shape=[b, d, s, s, c])
         # target_domain (shape=[b,])
