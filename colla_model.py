@@ -48,8 +48,8 @@ class CollaGANModel(S2SModel):
         self.generator = self.inference_networks["generator"]
         self.discriminator = self.training_only_networks["discriminator"]
 
-        if config.generator == "palette":
-            self.annealing_scheduler = LinearAnnealingScheduler([self.generator.quantization])
+        if config.generator == "palette" and config.annealing != "none":
+            self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, [self.generator.quantization])
         else:
             self.annealing_scheduler = NoopAnnealingScheduler()
 
@@ -858,8 +858,12 @@ class AnnealingScheduler(ABC):
         pass
 
 class LinearAnnealingScheduler(AnnealingScheduler):
+    def __init__(self, initial_temperature, layers):
+        super().__init__(layers)
+        self.initial_temperature = initial_temperature
+
     def get_value(self, t):
-        return tf.maximum(0.0, 1.0 - t)
+        return tf.maximum(0.0, (1.0 - t) * self.initial_temperature)
 
 class NoopAnnealingScheduler(AnnealingScheduler):
     def get_value(self, t):

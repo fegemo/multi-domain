@@ -155,10 +155,15 @@ class OptionParser(metaclass=SingletonMeta):
                                                          "original, aggressive, balanced, conservative, curriculum}",
                                  default="none")
         self.parser.add_argument("--cycled-source-replacer",
-                                 help="one from {forward, dropout} indicating which images should be replaced by the"
-                                      "forward generated one when computing the cycled images. Colla's paper does not"
-                                      "specify this, but its code shows that it replaces all that have been"
+                                 help="one from {forward, dropout} indicating which images should be replaced by the "
+                                      "forward generated one when computing the cycled images. Colla's paper does not "
+                                      "specify this, but its code shows that it replaces all that have been "
                                       "dropped out", default="dropout")
+        self.parser.add_argument("--annealing", help="one from {none, linear, exponential}, used"
+                                                              " to control how the temperature decreases when using"
+                                                              " palette quantization", default="none")
+        self.parser.add_argument("--temperature", type=float, help="initial temperature for"
+                                                                             " the annealing strategy", default=0.1)
 
         # --- munit and remic: specific options
         self.parser.add_argument("--discriminator-scales", help="Number of scales for the multi-scale "
