@@ -6,12 +6,12 @@ import tensorflow as tf
 
 # allows tf to use all the amount of vram of the device
 # important for running on low vram environments (as my local 4gb)
-# gpus = tf.config.list_physical_devices("GPU")
-# if gpus:
-#     tf.config.set_logical_device_configuration(
-#         gpus[0],
-#         [tf.config.LogicalDeviceConfiguration(memory_limit=4096)]
-#     )
+gpus = tf.config.list_physical_devices("GPU")
+if gpus:
+    tf.config.set_logical_device_configuration(
+        gpus[0],
+        [tf.config.LogicalDeviceConfiguration(memory_limit=4096)]
+    )
 
 from colla_model import CollaGANModel
 from dataset_utils import load_multi_domain_ds
@@ -140,7 +140,7 @@ if config.save_model:
     logging.info(f"Generator saved.")
 
 # generating resulting images
-num_examples_to_generate = tf.minimum(5, config.test_size)
+num_examples_to_generate = tf.minimum(100, config.test_size)
 skip_examples = tf.maximum(1, config.test_size // num_examples_to_generate)
 skip_examples = tf.cast(skip_examples, tf.int64)
 num_examples_to_generate = tf.cast(num_examples_to_generate, tf.int64)
