@@ -20,6 +20,7 @@ if __name__ == "__main__":
             "evaluate-steps": 1000,
             "lr": 0.0001,
             "lr-decay": "constant-then-linear",
+            "batch": 4,
             "input-dropout": "conservative",
             "capacity": 4,
             "cycled-source-replacer": "forward",
