@@ -21,6 +21,7 @@ class CollaGANModel(S2SModel):
         self.lambda_l1_backward = config.lambda_l1_backward or config.lambda_l1
         self.lambda_domain = config.lambda_domain
         self.lambda_ssim = config.lambda_ssim
+        self.lambda_palette = config.lambda_palette
 
         if config.input_dropout == "none":
             self.sampler = SimpleSampler(config)
@@ -84,7 +85,7 @@ class CollaGANModel(S2SModel):
     def generator_loss(self, fake_predicted_patches, cycled_predicted_patches, fake_image, real_image,
                        cycled_images, source_images_5d,
                        fake_predicted_domain, cycle_predicted_domain, target_domain,
-                       input_dropout_mask, batch_shape):
+                       input_dropout_mask, batch_shape, palettes):
         number_of_domains = batch_shape[0]
         batch_size, image_size, channels = batch_shape[1], batch_shape[2], batch_shape[4]
         number_of_domains_float = tf.cast(number_of_domains, tf.float32)
@@ -129,14 +130,22 @@ class CollaGANModel(S2SModel):
         classification_loss = (classification_forward__loss + classification_backward_loss) / \
                               (number_of_domains_float + 1.)
 
+        # palette loss (forward, backward)
+        palette_forward = palette_utils.calculate_palette_loss(fake_image, palettes)
+        palette_backward = palette_utils.calculate_palette_loss(cycled_images,
+            tf.tile(palettes, [number_of_domains, 1, 1]))
+        palette_loss = palette_forward + palette_backward
+
         # observation: ssim loss uses only the backward (cycled) images... that's on the colla's code and paper
         total_loss = adversarial_loss + \
             self.lambda_l1 * l1_forward__loss + self.lambda_l1_backward * l1_backward_loss + \
             self.lambda_ssim * ssim_backward_loss + \
-            self.lambda_domain * classification_loss
+            self.lambda_domain * classification_loss + \
+            self.lambda_palette * palette_loss
 
         return {"total": total_loss, "adversarial": adversarial_loss, "l1_forward": l1_forward__loss,
-                "l1_backward": l1_backward_loss, "ssim": ssim_loss, "domain": classification_loss}
+                "l1_backward": l1_backward_loss, "ssim": ssim_loss, "domain": classification_loss,
+                "palette": palette_loss}
 
     def discriminator_loss(self, source_predicted_patches, cycled_predicted_patches, source_predicted_domain,
                            real_predicted_patches, fake_predicted_patches, batch_shape):
@@ -314,7 +323,8 @@ class CollaGANModel(S2SModel):
             g_loss = self.generator_loss(fake_predicted_patches, cycled_predicted_patches, fake_image, real_image,
                                          cycled_images, domain_images, fake_predicted_domain,
                                          cycled_predicted_domain,
-                                         target_domain, input_dropout_mask, batch_shape)
+                                         target_domain, input_dropout_mask, batch_shape,
+                                         palettes)
 
             # 5. calculate loss terms for the discriminator
             d_loss = self.discriminator_loss(source_predicted_patches, cycled_predicted_patches,
@@ -337,6 +347,7 @@ class CollaGANModel(S2SModel):
                 tf.summary.scalar("ssim_loss", g_loss["ssim"], step=summary_step)
                 tf.summary.scalar("l1_forward_loss", g_loss["l1_forward"], step=summary_step)
                 tf.summary.scalar("l1_backward_loss", g_loss["l1_backward"], step=summary_step)
+                tf.summary.scalar("palette_loss", g_loss["palette"], step=summary_step)
 
         with tf.name_scope("discriminator"):
             with self.summary_writer.as_default():

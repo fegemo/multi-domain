@@ -24,14 +24,15 @@ if __name__ == "__main__":
             "capacity": 4,
             "cycled-source-replacer": "forward",
             "lambda-l1": 100.,
-            "lambda-ssim": 100.,
+            "lambda-ssim": 10.,
             "lambda-domain": 10.,
             "model-name": "@model",
-            "experiment": "@dataset,&annealing,&temperature",
+            "experiment": "@dataset,&annealing,&temperature,&lambda-palette",
             "annealing": "linear",
             "generator": "palette",
         }, {
-            "temperature": [1, 0.1, 0.01],
+            # "temperature": [1, 0.1, 0.01],
+            "lambda-palette": [1., 10., 100.],
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],

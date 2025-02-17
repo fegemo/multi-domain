@@ -61,7 +61,7 @@ class UnpairedStarGANModel(S2SModel):
         adversarial_loss = -tf.reduce_mean(critic_fake_patches)
         domain_loss = tf.reduce_mean(self.domain_classification_loss(fake_domain, critic_fake_domain))
         recreation_loss = tf.reduce_mean(tf.abs(source_image - recreated_image))
-        # palette_loss = palette.calculate_palette_loss(target_palette, fake_image)
+        # palette_loss = palette.calculate_palette_loss(fake_image, target_palette)
         # tv_loss = tf.reduce_mean(tf.image.total_variation(fake_image))
         palette_loss = 0.
         tv_loss = 0.

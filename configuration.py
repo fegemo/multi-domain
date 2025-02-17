@@ -99,7 +99,8 @@ class OptionParser(metaclass=SingletonMeta):
                                                                           "in collagan")
         self.parser.add_argument("--lambda-ssim", type=float, help="value for λssim used in collagan",
                                  default=LAMBDA_SSIM)
-        self.parser.add_argument("--lambda-palette", type=float, help="value for λpalette used in paired stargan",
+        self.parser.add_argument("--lambda-palette", type=float, help="value for λpalette used in paired "
+                                                                      "stargan and collagan",
                                  default=LAMBDA_PALETTE)
         self.parser.add_argument("--lambda-tv", type=float, help="value for λtotal-variation used in paired stargan",
                                  default=LAMBDA_TV)
