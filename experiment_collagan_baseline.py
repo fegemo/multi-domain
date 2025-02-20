@@ -12,36 +12,40 @@ if __name__ == "__main__":
         {
             "model": "collagan",
             "adhoc": [
-                "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
+                "callback-evaluate-fid", "callback-evaluate-l1",
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 40000,
+            "steps": 300000,
             "evaluate-steps": 1000,
+            "capacity": 4,
             "d-steps": 1,
-            "lr": 0.0001,
-            "batch": 1,
-            "lambda-l1": 1,
+            "lr": 0.00011,
+            "batch": 4,
+            "lr-decay": "constant-than-linear",
+            "input-dropout": "conservative",
+            "cycled-source-replacer": "forward",
+            "model-name": "@model",
+            "experiment": "@dataset,annealing,&lambda-l1,&lambda-ssim,&lambda-domain,&lambda-palette",
+            "generator": "colla",
+        }, {
+            "lambda-l1": 100,
             "lambda-ssim": 10,
             "lambda-domain": 10,
-            "lr-decay": "constant-than-linear",
-            "model-name": "@model",
-            "experiment": "@dataset,@adhoc"
+            "lambda-palette": 0
         }, {
-            "input-dropout": ["none", "original"]
-        }, {
-            "tiny": {
-                "adhoc": ["no-aug"],
-            },
-            "rm2k": {
-                "adhoc": ["no-tran"]
-            },
-            "rmxp": {
-                "adhoc": []
-            },
-            "rmvx": {
-                "adhoc": ["no-tran"]
-            },
+            # "tiny": {
+            #     "adhoc": ["no-aug"],
+            # },
+            # "rm2k": {
+            #     "adhoc": ["no-tran"]
+            # },
+            # "rmxp": {
+            #     "adhoc": []
+            # },
+            # "rmvx": {
+            #     "adhoc": ["no-tran"]
+            # },
             "all": {
                 "adhoc": ["no-tran"],
             }

@@ -16,38 +16,41 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 40000,
+            "steps": 300000,
             "evaluate-steps": 1000,
-            "capacity": 2,
+            "capacity": 4,
             "d-steps": 1,
-            "lr": 0.0001,
+            "lr": 0.00011,
             "batch": 4,
-            # "lambda-l1-backward": 10,  # if omitted, automatically calculated as lambda_l1/10.
             "lr-decay": "constant-than-linear",
-            "input-dropout": "original",
+            "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "model-name": "@model",
-            "experiment": "@dataset,&lambda-l1,&lambda-ssim,&lambda-domain"
+            "experiment": "@dataset,annealing,&lambda-l1,&lambda-ssim,&lambda-domain,&lambda-palette",
+            "generator": "palette",
+            "temperature": 0.1,
+            "annealing": "linear",
         }, {
-            "lambda-l1": [20, 100],
-            "lambda-ssim": [0, 1, 10, 100],
-            "lambda-domain": [0, 1, 10, 100]
+            "lambda-l1": [100],
+            "lambda-ssim": [1, 10],
+            "lambda-domain": [10],
+            "lambda-palette": [0, 100, 1000],
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],
             # },
-            "rm2k": {
-                "adhoc": ["no-tran"]
-            },
-            "rmxp": {
-                "adhoc": []
-            },
+            # "rm2k": {
+            #     "adhoc": ["no-tran"]
+            # },
+            # "rmxp": {
+            #     "adhoc": []
+            # },
             # "rmvx": {
             #     "adhoc": ["no-tran"]
             # },
-            # "all": {
-            #     "adhoc": ["no-tran"],
-            # }
+            "all": {
+                "adhoc": ["no-tran"],
+            }
         })
 
     runner.execute(config)

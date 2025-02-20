@@ -160,7 +160,7 @@ class OptionParser(metaclass=SingletonMeta):
                                       "forward generated one when computing the cycled images. Colla's paper does not "
                                       "specify this, but its code shows that it replaces all that have been "
                                       "dropped out", default="dropout")
-        self.parser.add_argument("--annealing", help="one from {none, linear, exponential}, used"
+        self.parser.add_argument("--annealing", help="one from {none, linear}, used"
                                                               " to control how the temperature decreases when using"
                                                               " palette quantization", default="none")
         self.parser.add_argument("--temperature", type=float, help="initial temperature for"
