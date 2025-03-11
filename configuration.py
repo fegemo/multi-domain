@@ -24,6 +24,7 @@ LAMBDA_PALETTE = 0.
 LAMBDA_TV = 0.
 LAMBDA_LATENT_RECONSTRUCTION = 1.
 LAMBDA_CYCLIC_RECONSTRUCTION = 0  # 10 for munit on summer<>>winter and cityscapes<>synthia datasets (MUNIT)
+LAMBDA_HISTOGRAM = 1.
 DISCRIMINATOR_STEPS = 5
 EPOCHS = 160
 PRETRAIN_EPOCHS = 0  # 30 in colla's code
@@ -110,6 +111,8 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--lambda-cyclic-reconstruction", type=float,
                                  help="value for λcyclic-reconstruction used in munit",
                                  default=LAMBDA_CYCLIC_RECONSTRUCTION)
+        self.parser.add_argument("--lambda-histogram", type=float, help="value for λhistogram used in "
+                                                                        "collagan", default=LAMBDA_HISTOGRAM)
         self.parser.add_argument("--d-steps", type=int,
                                  help="number of discriminator updates for each generator in stargan",
                                  default=DISCRIMINATOR_STEPS)

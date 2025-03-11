@@ -6,6 +6,7 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 import dataset_utils
+import histogram_utils
 import io_utils
 import palette_utils
 from networks import collagan_affluent_generator, collagan_original_discriminator, collagan_palette_affluent_generator
@@ -22,6 +23,7 @@ class CollaGANModel(S2SModel):
         self.lambda_domain = config.lambda_domain
         self.lambda_ssim = config.lambda_ssim
         self.lambda_palette = config.lambda_palette
+        self.lambda_histogram = config.lambda_histogram
 
         if config.input_dropout == "none":
             self.sampler = SimpleSampler(config)
@@ -136,16 +138,22 @@ class CollaGANModel(S2SModel):
             tf.tile(palettes, [number_of_domains, 1, 1]))
         palette_loss = palette_forward + palette_backward
 
+        # histogram loss (forward)
+        real_histogram = histogram_utils.calculate_rgbuv_histogram(real_image)
+        fake_histogram = histogram_utils.calculate_rgbuv_histogram(fake_image)
+        histogram_loss = histogram_utils.hellinger_loss(real_histogram, fake_histogram)
+
         # observation: ssim loss uses only the backward (cycled) images... that's on the colla's code and paper
         total_loss = adversarial_loss + \
             self.lambda_l1 * l1_forward__loss + self.lambda_l1_backward * l1_backward_loss + \
             self.lambda_ssim * ssim_backward_loss + \
             self.lambda_domain * classification_loss + \
-            self.lambda_palette * palette_loss
+            self.lambda_palette * palette_loss + \
+            self.lambda_histogram * histogram_loss
 
         return {"total": total_loss, "adversarial": adversarial_loss, "l1_forward": l1_forward__loss,
                 "l1_backward": l1_backward_loss, "ssim": ssim_loss, "domain": classification_loss,
-                "palette": palette_loss}
+                "palette": palette_loss, "histogram": histogram_loss}
 
     def discriminator_loss(self, source_predicted_patches, cycled_predicted_patches, source_predicted_domain,
                            real_predicted_patches, fake_predicted_patches, batch_shape):
@@ -348,6 +356,7 @@ class CollaGANModel(S2SModel):
                 tf.summary.scalar("l1_forward_loss", g_loss["l1_forward"], step=summary_step)
                 tf.summary.scalar("l1_backward_loss", g_loss["l1_backward"], step=summary_step)
                 tf.summary.scalar("palette_loss", g_loss["palette"], step=summary_step)
+                tf.summary.scalar("histogram_loss", g_loss["histogram"], step=summary_step)
 
         with tf.name_scope("discriminator"):
             with self.summary_writer.as_default():

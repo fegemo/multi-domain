@@ -1,7 +1,7 @@
 import numpy as np
 from matplotlib import pyplot as plt
 
-import histogram
+import histogram_utils
 import io_utils
 from networks import *
 from side2side_model import S2SModel
@@ -133,8 +133,8 @@ class Pix2PixModel(S2SModel):
         figure = plt.figure(figsize=(4 * num_columns, 4 * num_images))
         predicted_images = []
 
-        source_image_histograms = [histogram.calculate_rgbuv_histogram(image[0]) for image in examples]
-        target_image_histograms = [histogram.calculate_rgbuv_histogram(image[1]) for image in examples]
+        source_image_histograms = [histogram_utils.calculate_rgbuv_histogram(image[0]) for image in examples]
+        target_image_histograms = [histogram_utils.calculate_rgbuv_histogram(image[1]) for image in examples]
         predicted_images_histograms = []
 
         for i, (source_image, target_image) in enumerate(examples):
@@ -142,7 +142,7 @@ class Pix2PixModel(S2SModel):
                 predicted_image = self.generator(source_image, training=True)
                 predicted_images.append(predicted_image)
                 predicted_images_histograms.append(
-                    histogram.calculate_rgbuv_histogram(predicted_image[tf.newaxis, ...]))
+                    histogram_utils.calculate_rgbuv_histogram(predicted_image[tf.newaxis, ...]))
 
             images = [source_image, target_image, predicted_images[i]]
             for j in range(len(images)):
@@ -249,17 +249,17 @@ class Pix2PixHistogramModel(Pix2PixAugmentedModel):
         super().__init__(train_ds, test_ds, model_name, architecture_name, lambda_l1, keep_checkpoint)
         self.lambda_histogram = lambda_histogram
         if histo_loss == "hellinger":
-            self.histo_loss = histogram.hellinger_loss
+            self.histo_loss = histogram_utils.hellinger_loss
         elif histo_loss == "l1":
-            self.histo_loss = histogram.l1_loss
+            self.histo_loss = histogram_utils.l1_loss
         elif histo_loss == "l2":
-            self.histo_loss = histogram.l2_loss
+            self.histo_loss = histogram_utils.l2_loss
         else:
             raise Exception(f"Unrecognized histogram loss passed to the model: {histo_loss}")
 
     def generator_loss(self, fake_predicted, fake_image, real_image):
-        real_histogram = histogram.calculate_rgbuv_histogram(real_image)
-        fake_histogram = histogram.calculate_rgbuv_histogram(fake_image)
+        real_histogram = histogram_utils.calculate_rgbuv_histogram(real_image)
+        fake_histogram = histogram_utils.calculate_rgbuv_histogram(fake_image)
         histogram_loss = self.histo_loss(real_histogram, fake_histogram)
 
         total_loss, adversarial_loss, l1_loss = super().generator_loss(fake_predicted, fake_image, real_image)
