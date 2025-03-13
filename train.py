@@ -6,12 +6,15 @@ import tensorflow as tf
 
 # allows tf to use all the amount of vram of the device
 # important for running on low vram environments (as my local 4gb)
-gpus = tf.config.list_physical_devices("GPU")
-if gpus:
-    tf.config.set_logical_device_configuration(
-        gpus[0],
-        [tf.config.LogicalDeviceConfiguration(memory_limit=4096)]
-    )
+
+# UNCOMMENT IF YOU WANT TO USE ALL THE 4GB VRAM
+# gpus = tf.config.list_physical_devices("GPU")
+# if gpus:
+#     tf.config.set_logical_device_configuration(
+#         gpus[0],
+#         [tf.config.LogicalDeviceConfiguration(memory_limit=4096)]
+#     )
+# DO NOT COMMIT THIS CHANGE UNCOMMENTED (otherwise Verlab will use only 4GB VRAM too)
 
 import setup
 from utility.dataset_utils import load_multi_domain_ds
@@ -53,22 +56,6 @@ tf.random.set_seed(config.seed)
 # loading the dataset according to the required model
 train_ds, test_ds = load_multi_domain_ds(config)
 
-# previews one batch of images from the test dataset
-# sample_batch = next(iter(test_ds))
-# batch_shape = tf.shape(sample_batch).numpy()
-# number_of_domains, batch_size = batch_shape[0], batch_shape[1]
-# fig = plt.figure(figsize=(4*number_of_domains, 4*batch_size))
-# for i in range(batch_size):
-#     idx = i * number_of_domains + 1
-#     for j in range(number_of_domains):
-#         plt.subplot(batch_size, number_of_domains, idx)
-#         plt.imshow(sample_batch[j][i] * 0.5 + 0.5)
-#         plt.axis("off")
-#
-#         idx += 1
-# plt.show()
-# plt.close()
-
 
 # instantiates the proper model
 if config.model == "stargan-unpaired":
@@ -95,26 +82,6 @@ if config.verbose:
 parser.save_configuration(model.get_output_folder(), sys.argv)
 
 
-# batch = next(iter(train_ds))
-# random_input = model.select_random_input(batch, options.batch)
-# image_and_domain, random_source_index, random_source_image, random_target_index = random_input
-# random_target_index = tf.argmax(random_target_index)
-# target_images = tf.gather(tf.transpose(batch, [1, 0, 2, 3, 4]), random_target_index, axis=1, batch_dims=1)
-#
-#
-# for i in range(options.batch):
-#     s = random_source_index[i]
-#     t = random_target_index[i]
-#     print(f"input {i} of batch has source {s} and target {t}")
-#
-#     plt.figure(figsize=(4*2, 4))
-#     plt.subplot(1, 2, 1)
-#     plt.imshow(random_source_image[i] * 0.5 + 0.5)
-#     plt.axis("off")
-#     plt.subplot(1, 2, 2)
-#     plt.imshow(target_images[i] * 0.5 + 0.5)
-#     plt.axis("off")
-# plt.show()
 
 # configuration for training
 steps = config.steps
@@ -133,6 +100,7 @@ callbacks = [c[len("callback_"):] for c in ["callback_debug_discriminator", "cal
 
 model.fit(train_ds, test_ds, steps, evaluate_steps, callbacks=callbacks)
 
+
 # restores the best generator (best l1 - priority, or best fid)
 step = model.restore_best_generator()
 logging.info(f"Restored the BEST generator, which was in step {step}.")
@@ -141,6 +109,7 @@ if config.save_model:
     logging.info(f"Saving the generator...")
     model.save_generator()
     logging.info(f"Generator saved.")
+
 
 # generating resulting images
 num_examples_to_generate = tf.minimum(100, config.test_size)
@@ -161,6 +130,7 @@ model.generate_images_from_dataset(skipping_test_ds, step, num_images=num_exampl
 
 logging.info("Finished executing.")
 
+# Sample commands (most might not work anymore, as some argument names might have changed):
 # python train.py stargan-unpaired --rm2k --log-folder output --epochs 240 --no-aug --model-name stargan-unpaired --experiment rm2k-240ep-noaug-lrdecay-lr0.0001-tfadd0.18.0-discwithdecay-bce-singletargetdomain --sampler single-target
 # python train.py stargan-paired --rm2k --log-folder output --epochs 4 --no-aug --model-name playground --experiment playground
 # python train.py collagan --rm2k --log-folder output --epochs 40 --no-aug --model-name collagan --experiment playground
