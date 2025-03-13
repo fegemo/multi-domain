@@ -63,12 +63,12 @@ class OptionParser(metaclass=SingletonMeta):
 
     def initialize(self):
         self.parser.add_argument(
-            "model", help="one from { stargan-unpaired, stargan-paired, collagan, yamatagan }"
+            "model", help="one from { stargan-unpaired, stargan-paired, collagan, munit, remic, yamatagan }"
                           "- the model to train")
-        self.parser.add_argument("--generator", help="network from { resnet, unet } for stargan or "
-                                                     "{ affluent } for collagan", default="")
-        self.parser.add_argument("--discriminator", help="network from { resnet, unet } for stargan or "
-                                                         "{ original } for collagan", default="")
+        self.parser.add_argument("--generator", help="network from { resnet } for stargan or "
+                                                     "{ affluent, palette } for collagan", default="")
+        self.parser.add_argument("--discriminator", help="different network topology, currently an "
+                                                         "unused option", default="")
         self.parser.add_argument("--conditional-discriminator", help="Makes the discriminator receive"
                                                                      " the source image just like in Pix2Pix (only"
                                                                      " for stargan-paired and collagan).",
