@@ -3,7 +3,7 @@
 import tensorflow as tf
 
 from configuration import OptionParser
-from star_model import UnpairedStarGANModel
+from .star_model import UnpairedStarGANModel
 from utility.keras_utils import NParamsSupplier
 
 

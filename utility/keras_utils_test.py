@@ -1,6 +1,6 @@
 import tensorflow as tf
 
-from keras_utils import TileLayer
+from .keras_utils import TileLayer
 
 
 class TestTileLayer(tf.test.TestCase):

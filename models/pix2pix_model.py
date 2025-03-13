@@ -2,8 +2,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from utility import io_utils, histogram_utils
-from networks import *
-from side2side_model import S2SModel
+from .networks import *
+from .side2side_model import S2SModel
 
 
 class Pix2PixModel(S2SModel):

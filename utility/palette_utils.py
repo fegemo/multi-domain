@@ -1,7 +1,7 @@
 import tensorflow as tf
 from tensorflow import RaggedTensorSpec
 
-import dataset_utils
+from . import dataset_utils
 
 
 def get_invalid_color(channels):

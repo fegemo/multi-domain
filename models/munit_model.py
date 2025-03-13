@@ -7,8 +7,8 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from utility import io_utils
-from side2side_model import S2SModel
-from networks import munit_content_encoder, munit_style_encoder, munit_decoder, munit_discriminator_multi_scale
+from .side2side_model import S2SModel
+from .networks import munit_content_encoder, munit_style_encoder, munit_decoder, munit_discriminator_multi_scale
 
 
 class MunitModel(S2SModel):

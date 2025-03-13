@@ -2,7 +2,7 @@ from unittest.mock import patch
 import tensorflow as tf
 
 from configuration import OptionParser
-from dataset_utils import load_image, create_multi_domain_image_loader, blacken_transparent_pixels
+from .dataset_utils import load_image, create_multi_domain_image_loader, blacken_transparent_pixels
 
 
 class TestDatasetUtils(tf.test.TestCase):

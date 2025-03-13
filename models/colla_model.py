@@ -6,8 +6,8 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from utility import palette_utils, dataset_utils, io_utils, histogram_utils
-from networks import collagan_affluent_generator, collagan_original_discriminator, collagan_palette_affluent_generator
-from side2side_model import S2SModel
+from .networks import collagan_affluent_generator, collagan_original_discriminator, collagan_palette_affluent_generator
+from .side2side_model import S2SModel
 from utility.keras_utils import NParamsSupplier
 
 

@@ -7,8 +7,8 @@ from tensorflow.keras import layers, Model
 from tqdm import tqdm
 
 from utility import dataset_utils, io_utils
-from remic_model import ConservativeDropoutSampler, UniformDropoutSampler
-from side2side_model import S2SModel
+from .remic_model import ConservativeDropoutSampler, UniformDropoutSampler
+from .side2side_model import S2SModel
 
 
 class YamataModel(S2SModel):

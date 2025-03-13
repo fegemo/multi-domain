@@ -9,8 +9,8 @@ from tqdm import tqdm
 
 from utility import palette_utils, io_utils
 from utility.keras_utils import NParamsSupplier
-from networks import stargan_resnet_generator, stargan_resnet_discriminator
-from side2side_model import S2SModel
+from .networks import stargan_resnet_generator, stargan_resnet_discriminator
+from .side2side_model import S2SModel
 
 
 class UnpairedStarGANModel(S2SModel):

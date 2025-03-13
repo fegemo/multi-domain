@@ -7,8 +7,8 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from utility import dataset_utils, io_utils
-from munit_model import MunitModel
-from networks import remic_generator, remic_discriminator, remic_style_encoder, remic_unified_content_encoder
+from .munit_model import MunitModel
+from .networks import remic_generator, remic_discriminator, remic_style_encoder, remic_unified_content_encoder
 
 
 class RemicModel(MunitModel):
