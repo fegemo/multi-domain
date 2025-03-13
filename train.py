@@ -6,20 +6,21 @@ import tensorflow as tf
 
 # allows tf to use all the amount of vram of the device
 # important for running on low vram environments (as my local 4gb)
-# gpus = tf.config.list_physical_devices("GPU")
-# if gpus:
-#     tf.config.set_logical_device_configuration(
-#         gpus[0],
-#         [tf.config.LogicalDeviceConfiguration(memory_limit=4096)]
-#     )
+gpus = tf.config.list_physical_devices("GPU")
+if gpus:
+    tf.config.set_logical_device_configuration(
+        gpus[0],
+        [tf.config.LogicalDeviceConfiguration(memory_limit=4096)]
+    )
 
-from colla_model import CollaGANModel
-from dataset_utils import load_multi_domain_ds
-from configuration import OptionParser
-from munit_model import MunitModel
-from remic_model import RemicModel
-from star_model import UnpairedStarGANModel, PairedStarGANModel
 import setup
+from utility.dataset_utils import load_multi_domain_ds
+from configuration import OptionParser
+from models.colla_model import CollaGANModel
+from models.munit_model import MunitModel
+from models.remic_model import RemicModel
+from models.yamata_model import YamataModel
+from models.star_model import UnpairedStarGANModel, PairedStarGANModel
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -80,6 +81,8 @@ elif config.model == "munit":
     class_name = MunitModel
 elif config.model == "remic":
     class_name = RemicModel
+elif config.model == "yamata":
+    class_name = YamataModel
 else:
     raise Exception(f"The asked model of {config.model} was not found.")
 

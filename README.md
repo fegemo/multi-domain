@@ -121,7 +121,7 @@ The code is organized in the following way:
   - Change it if you want to add a new hyperparameter or change the default value of one
 - `setup.py`: Downloads and/or unzips the datasets to the `datasets` folder
     - It is executed when the training script is run for the first time. No need to run it manually
-- Model files:
+- Model files (folder [models](models)):
   - `side2side_model.py`: Base class for all multi-domain models to extend. Abstract methods:
     - `create_training_only_networks()`: Creates the discriminator(s) of the respective model
     - `create_inference_networks()`: Creates the generator(s) of the respective model
@@ -135,13 +135,13 @@ The code is organized in the following way:
     - `generate_images_from_dataset(dataset, step, number_of_images)`: Generates images from the test partition
       at the end of training
     - `debug_discriminator_output(batch, image_path)`: Creates an image with the discriminator output for debugging
-  - [`star_model.py`](star_model.py): Implementation of the StarGAN model (unpaired (original) and paired StarGAN)
-  - [`colla_model.py`](colla_model.py): Implementation of the CollaGAN model
-  - [`munit_model.py`](munit_model.py): Implementation of the MUNIT model
-  - [`remic_model.py`](remic_model.py): Implementation of the ReMIC model
-  - [`yamata_model.py`](yamata_model.py): Implementation of the YamataGAN model
+  - [`star_model.py`](models/star_model.py): Implementation of the StarGAN model (unpaired (original) and paired StarGAN)
+  - [`colla_model.py`](models/colla_model.py): Implementation of the CollaGAN model
+  - [`munit_model.py`](models/munit_model.py): Implementation of the MUNIT model
+  - [`remic_model.py`](models/remic_model.py): Implementation of the ReMIC model
+  - [`yamata_model.py`](models/yamata_model.py): Implementation of the YamataGAN model
   - `networks.py`: Network topologies for the generator and discriminator of all models
-- Utility scripts:
+- Utility scripts (folder [utility](utility)):
   - `dataset_utils.py`: Loads the datasets and preprocesses the images
         - It also contains the data augmentation techniques used during training
   - `keras_utils.py`: Contains utility functions to create the models and the loss functions

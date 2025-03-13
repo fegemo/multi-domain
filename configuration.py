@@ -283,7 +283,7 @@ class OptionParser(metaclass=SingletonMeta):
         return description
 
     def save_configuration(self, folder_path, argv):
-        from io_utils import ensure_folder_structure
+        from utility.io_utils import ensure_folder_structure
         ensure_folder_structure(folder_path)
         with open(os.sep.join([folder_path, "configuration.txt"]), "w") as file:
             file.write(" ".join(argv) + "\n\n")

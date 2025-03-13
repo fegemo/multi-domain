@@ -14,8 +14,8 @@ from copy import deepcopy
 from tqdm import tqdm
 from beaupy import select_multiple
 
-import io_utils
-from functional_utils import listify
+from utility import io_utils
+from utility.functional_utils import listify
 
 
 def dict_hash(dictionary):
