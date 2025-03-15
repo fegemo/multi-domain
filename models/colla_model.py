@@ -422,7 +422,7 @@ class CollaGANModel(S2SModel):
                     tf.expand_dims(target_domain, 0),
                     tf.expand_dims(palette, 0)
                 ),
-                training=True)
+                training=False)
 
             images = [*domain_images, real_image, fake_image[0]]
             for j in range(num_columns):
@@ -483,7 +483,7 @@ class CollaGANModel(S2SModel):
                 batch_domain_images = domain_images[i * batch_size:(i + 1) * batch_size]
                 batch_target_domain = target_domain[i * batch_size:(i + 1) * batch_size]
                 batch_palette = palette_utils.batch_extract_palette_ragged(batch_domain_images)
-                fake_image_batch = generator(self.gen_supplier(batch_domain_images, batch_target_domain, batch_palette), training=True)
+                fake_image_batch = generator(self.gen_supplier(batch_domain_images, batch_target_domain, batch_palette), training=False)
                 fake_images.append(fake_image_batch)
 
             fake_images = tf.concat(fake_images, axis=0)
@@ -530,7 +530,7 @@ class CollaGANModel(S2SModel):
                     dropped_input_image = tf.expand_dims(dropped_input_image, 0)
                     target_domain = tf.expand_dims(target_index, 0)
                     fake_image = self.generator(
-                        self.gen_supplier(dropped_input_image, target_domain, palette[tf.newaxis, ...]), training=True)
+                        self.gen_supplier(dropped_input_image, target_domain, palette[tf.newaxis, ...]), training=False)
 
                     for source_index in range(number_of_domains):
                         idx = (target_index * number_of_domains) + source_index + 1
@@ -573,7 +573,7 @@ class CollaGANModel(S2SModel):
 
         # real_image is the target for each example in the batch
         real_image = tf.gather(domain_images, target_domain, batch_dims=1)
-        fake_image = self.generator(self.gen_supplier(forward__input_image, target_domain, palettes), training=True)
+        fake_image = self.generator(self.gen_supplier(forward__input_image, target_domain, palettes), training=False)
 
         forward__target_mask = tf.cast(1. - forward__target_mask, tf.bool)
         backward_input_image = domain_images * backward_target_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
@@ -582,7 +582,7 @@ class CollaGANModel(S2SModel):
             fake_image[:, tf.newaxis, ...],
             backward_input_image)
 
-        back_image = self.generator(self.gen_supplier(backward_input_image, source_domain, palettes), training=True)
+        back_image = self.generator(self.gen_supplier(backward_input_image, source_domain, palettes), training=False)
 
         real_predicted_patches, real_predicted_domain = self.discriminator(real_image, training=True)
         fake_predicted_patches, fake_predicted_domain = self.discriminator(fake_image, training=True)

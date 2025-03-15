@@ -218,14 +218,16 @@ class DynamicDifferentiablePalette(Layer):
         super().__init__(**kwargs)
         self.temperature = tf.Variable(temperature, trainable=False)
 
-    def call(self, inputs):
+    def call(self, inputs, training=None):
         """
-        Args:
-            inputs: Tuple of (images, palettes)
-            - images: Tensor of shape [B, H, W, C] (channels_last)
-            - palettes: RaggedTensor of shape [B, (K), C] (variable K per batch)
-        Returns:
-            Quantized images: Tensor of shape [B, H, W, C]
+        Returns the image with its colors quantized to the palette. During training, it is done with
+        a soft assignment using the softmax function with a temperature. During inference, it is done
+        with a hard assignment, using the closest color in the palette (hence, losing differentiability).
+
+        :param inputs: Tuple of (images, palettes), with shapes [b, h, w, c] and [b, (k), c] respectively
+        :param training: True if training (uses soft assignment through softmax with temperature)
+            or False otherwise (uses hard assignment, losing differentiability)
+        :return: Quantized images: Tensor of shape [b, h, w, c]
         """
         images, palettes = inputs
 
@@ -239,8 +241,12 @@ class DynamicDifferentiablePalette(Layer):
                 axis=-1
             )  # [H, W, K]
 
-            weights = tf.nn.softmax(-distances / self.temperature, axis=-1)
-            return tf.einsum('...k,kc->...c', weights, palette)  # [H, W, C]
+            if training:
+                weights = tf.nn.softmax(-distances / self.temperature, axis=-1)
+                return tf.einsum('...k,kc->...c', weights, palette)  # [H, W, C]
+            else:
+                indices = tf.argmin(distances, axis=-1)
+                return tf.gather(palette, indices)
 
         # there is no easy way to vectorize this operation, so we use map_fn to
         # process each <image,palette> pair independently
