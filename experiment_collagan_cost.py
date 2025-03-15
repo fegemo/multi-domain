@@ -35,7 +35,7 @@ if __name__ == "__main__":
             "lambda-ssim": [0.25],
             "lambda-domain": [10],
             "lambda-palette": [0],
-            "lambda-histogram": [0, 1],
+            "lambda-histogram": [0, 0.5],
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],
