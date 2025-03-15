@@ -44,7 +44,6 @@ class CollaGANModel(S2SModel):
 
         self.cce = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
         self.gen_supplier = NParamsSupplier(3 if config.generator == "palette" else 2)
-        self.dis_supplier = NParamsSupplier(2 if config.conditional_discriminator else 1)
         self.generator = self.inference_networks["generator"]
         self.discriminator = self.training_only_networks["discriminator"]
 
@@ -75,8 +74,7 @@ class CollaGANModel(S2SModel):
         if config.discriminator in ["colla", ""]:
             return {
                 "discriminator": collagan_original_discriminator(config.number_of_domains, config.image_size,
-                                                                 config.output_channels,
-                                                                 config.conditional_discriminator)
+                                                                 config.output_channels)
             }
         else:
             raise ValueError(f"The provided {config.discriminator} type for discriminator has not been implemented.")
@@ -244,23 +242,6 @@ class CollaGANModel(S2SModel):
         return self.gen_supplier(zeroed_retarget_domain_images, backward_target_domain,
                                  palettes)
 
-    @staticmethod
-    def get_source_images_for_conditional_discriminator(domain_images):
-        batch_shape = tf.shape(domain_images)
-        batch_size, number_of_domains = batch_shape[0], batch_shape[1]
-
-        target_mask = tf.reshape(1. - tf.eye(number_of_domains), [number_of_domains * number_of_domains])
-        #           = [0, 1, 1, 1,  1, 0, 1, 1,  1, 1, 0, 1,  1, 1, 1, 0]
-        # [d*d]
-        target_mask = tf.reshape(tf.tile(target_mask, [batch_size]), [batch_size, -1])
-        # [b,d*d]
-        target_mask = target_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
-        # [b,d*d,1,1,1]
-
-        domain_images = tf.tile(domain_images, [1, number_of_domains, 1, 1, 1]) * target_mask
-        # [b,d*d,s,s,c] with zeros where the target domain is
-        return domain_images
-
     @tf.function
     def train_step(self, batch, step, evaluate_steps, t):
         # [d, b, s, s, c] = domain, batch, size, size, channels
@@ -299,29 +280,17 @@ class CollaGANModel(S2SModel):
             # cycled_images (shape=[b*d, s, s, c])
 
             # 3. discriminate the real (target) and fake images, then the cycled ones and the source (to train the disc)
-            real_predicted_patches, real_predicted_domain = self.discriminator(
-                self.dis_supplier(real_image, tf.reshape(dropped_input_image,
-                                                         [batch_size, image_size, image_size,
-                                                          channels * number_of_domains])), training=True)
-            fake_predicted_patches, fake_predicted_domain = self.discriminator(
-                self.dis_supplier(fake_image, tf.reshape(dropped_input_image,
-                                                         [batch_size, image_size, image_size,
-                                                          channels * number_of_domains])), training=True)
+            real_predicted_patches, real_predicted_domain = self.discriminator(real_image, training=True)
+            fake_predicted_patches, fake_predicted_domain = self.discriminator(fake_image, training=True)
             # xxxx_predicted_patches (shape=[b, 1, 1, 1])
             # xxxx_predicted_domain  (shape=[b, d] -> logits)
 
-            cycled_predicted_patches, cycled_predicted_domain = self.discriminator(
-                self.dis_supplier(cycled_images, tf.reshape(cycled_generator_input[0],
-                                                            [-1, image_size, image_size,
-                                                             channels * number_of_domains])), training=True)
+            cycled_predicted_patches, cycled_predicted_domain = self.discriminator(cycled_images, training=True)
             # cycled_predicted_patches (shape=[b*d, 1, 1, 1])
             # cycled_predicted_domain  (shape=[b*d, d] -> logits)
 
             source_predicted_patches, source_predicted_domain = self.discriminator(
-                self.dis_supplier(tf.reshape(domain_images, [-1, image_size, image_size, channels]),
-                                  tf.reshape(self.get_source_images_for_conditional_discriminator(domain_images),
-                                             [batch_size * number_of_domains, image_size, image_size,
-                                              channels * number_of_domains])),
+                tf.reshape(domain_images, [-1, image_size, image_size, channels]),
                 training=True)
             # source_predicted_patches (shape=[b*d, 1, 1, 1])
             # source_predicted_domain  (shape=[b*d, d] -> logits)
