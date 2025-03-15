@@ -28,12 +28,12 @@ if __name__ == "__main__":
             "model-name": "@model",
             "experiment": "baseline,&lambda-l1,&lambda-ssim,&lambda-domain,&lambda-palette,&lambda-histogram",
             "generator": "affluent",
-        }, {
             "lambda-l1": 100,
             "lambda-ssim": 10,
             "lambda-domain": 10,
             "lambda-palette": 0,
             "lambda-histogram": 0
+        }, {
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],
