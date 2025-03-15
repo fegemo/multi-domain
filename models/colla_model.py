@@ -55,7 +55,7 @@ class CollaGANModel(S2SModel):
 
     def create_inference_networks(self):
         config = self.config
-        if config.generator in ["colla", ""]:
+        if config.generator in ["colla", "affluent", ""]:
             return {
                 "generator": collagan_affluent_generator(config.number_of_domains, config.image_size,
                                                          config.output_channels,
@@ -130,9 +130,12 @@ class CollaGANModel(S2SModel):
                               (number_of_domains_float + 1.)
 
         # palette loss (forward, backward)
-        palette_forward = palette_utils.calculate_palette_loss(fake_image, palettes)
-        palette_backward = palette_utils.calculate_palette_loss(cycled_images,
-                                                                tf.tile(palettes, [number_of_domains, 1, 1]))
+        # palette_forward = palette_utils.calculate_palette_loss(fake_image, palettes)
+        # palette_backward = palette_utils.calculate_palette_loss(cycled_images,
+        #                                                         tf.tile(palettes, [number_of_domains, 1, 1]))
+        # ommitting palette loss calculation, as it turned out unnecessary with the temperature annealing
+        palette_forward = 0.
+        palette_backward = 0.
         palette_loss = palette_forward + palette_backward
 
         # histogram loss (forward)

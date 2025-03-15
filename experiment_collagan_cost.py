@@ -16,7 +16,7 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 240000,
+            "steps": 480000,
             "evaluate-steps": 1000,
             "capacity": 4,
             "d-steps": 1,
@@ -32,10 +32,10 @@ if __name__ == "__main__":
             "annealing": "linear",
         }, {
             "lambda-l1": [100],
-            "lambda-ssim": [10],
+            "lambda-ssim": [0.25],
             "lambda-domain": [10],
-            "lambda-palette": [0, 1],
-            "lambda-histogram": [0, 1, 10],
+            "lambda-palette": [0],
+            "lambda-histogram": [0, 1],
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],

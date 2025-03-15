@@ -16,23 +16,24 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 300000,
+            "steps": 480000,
             "evaluate-steps": 1000,
             "capacity": 4,
             "d-steps": 1,
-            "lr": 0.00011,
+            "lr": 0.0001,
             "batch": 4,
-            "lr-decay": "constant-than-linear",
+            "lr-decay": "constant-then-linear",
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "model-name": "@model",
-            "experiment": "@dataset,annealing,&lambda-l1,&lambda-ssim,&lambda-domain,&lambda-palette",
-            "generator": "colla",
+            "experiment": "baseline,&lambda-l1,&lambda-ssim,&lambda-domain,&lambda-palette,&lambda-histogram",
+            "generator": "affluent",
         }, {
             "lambda-l1": 100,
             "lambda-ssim": 10,
             "lambda-domain": 10,
-            "lambda-palette": 0
+            "lambda-palette": 0,
+            "lambda-histogram": 0
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],
