@@ -32,10 +32,10 @@ if __name__ == "__main__":
             "annealing": "linear",
         }, {
             "lambda-l1": [100],
-            "lambda-ssim": [0.25],
+            "lambda-ssim": [0.1],
             "lambda-domain": [10],
             "lambda-palette": [0],
-            "lambda-histogram": [0, 0.5],
+            "lambda-histogram": [0, 0.25],
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],

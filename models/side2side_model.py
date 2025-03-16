@@ -458,6 +458,7 @@ class S2SModel(ABC):
 
         batch = list(dataset.take(num_images).as_numpy_iterator())
         self.debug_discriminator_output(batch, image_path)
+
     def get_output_folder(self, sub_folder=None, skip_run=False, run=None):
         log_folder = self.config.log_folder
         model_name = self.config.model_name

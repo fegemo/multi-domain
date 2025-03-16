@@ -172,8 +172,7 @@ class CollaGANModel(S2SModel):
         # source_label_domain (shape=[b*d, d])
         domain_loss = self.cce(source_label_domain, source_predicted_domain)
 
-        total_loss = adversarial_loss + \
-            self.lambda_domain * domain_loss
+        total_loss = adversarial_loss + domain_loss
         return {"total": total_loss, "real": adversarial_real, "fake": adversarial_fake, "domain": domain_loss}
 
     def get_cycled_images_input(self, domain_images, forward_target_domain, input_dropout_mask, fake_image,
