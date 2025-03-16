@@ -520,13 +520,14 @@ class CollaGANModel(S2SModel):
         print(f"Generated {(i + 1) * number_of_domains * (number_of_domains - 1)} images in the test-images folder.")
 
     def debug_discriminator_output(self, batch, image_path):
-        # batch (shape=(d, b, s, s, c))
-        batch = tf.transpose(batch, [1, 0, 2, 3, 4])
-        batch_shape = tf.shape(batch)
+        # batch (shape=(b, d, s, s, c))
+        batch_transpose = tf.transpose(batch, [1, 0, 2, 3, 4])
+        # batch_transpose (shape=(d, b, s, s, c))
+        batch_shape = tf.shape(batch_transpose)
         number_of_domains, batch_size, image_size, channels = batch_shape[0], batch_shape[1], batch_shape[2], batch_shape[4]
 
-        palettes = palette_utils.batch_extract_palette_ragged(tf.reshape(tf.transpose(batch, [1, 0, 2, 3, 4]), (-1, image_size, channels)))
-        domain_images, target_domain, _ = self.sampler.sample(batch, 0.5)
+        palettes = palette_utils.batch_extract_palette_ragged(tf.reshape(tf.constant(batch), [batch_size, -1, image_size, channels]))
+        domain_images, target_domain, _ = self.sampler.sample(batch_transpose, 0.5)
         # domain_images (shape=[b, d, s, s, c])
         # target_domain (shape=[b,])
 
@@ -696,6 +697,13 @@ class InputDropoutSampler(ExampleSampler):
                                  dtype="int32")
 
     def sample(self, batch, t):
+        """
+        Samples a batch of images and a target domain index, plus a mask for input dropout
+        :param batch: tensor of images with shape [d, b, s, s, c]
+        :param t: the progress of training between [0, 1]
+        :return: tensor of images with shape [b, d, s, s, c], tensor of target domain indices with shape [b,],
+                    tensor of input dropout masks with shape [b, d]
+        """
         batch_shape = tf.shape(batch)
         number_of_domains, batch_size = batch_shape[0], batch_shape[1]
 
