@@ -1,29 +1,8 @@
 import logging
 import sys
 from math import ceil
-
-import tensorflow as tf
-
-# allows tf to use all the amount of vram of the device
-# important for running on low vram environments (as my local 4gb)
-
-# UNCOMMENT IF YOU WANT TO USE ALL THE 4GB VRAM
-# gpus = tf.config.list_physical_devices("GPU")
-# if gpus:
-#     tf.config.set_logical_device_configuration(
-#         gpus[0],
-#         [tf.config.LogicalDeviceConfiguration(memory_limit=4096)]
-#     )
-# DO NOT COMMIT THIS CHANGE UNCOMMENTED (otherwise Verlab will use only 4GB VRAM too)
-
-import setup
-from utility.dataset_utils import load_multi_domain_ds
 from configuration import OptionParser
-from models.colla_model import CollaGANModel
-from models.munit_model import MunitModel
-from models.remic_model import RemicModel
-from models.yamata_model import YamataModel
-from models.star_model import UnpairedStarGANModel, PairedStarGANModel
+import tensorflow as tf
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
@@ -32,9 +11,32 @@ logging.basicConfig(
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("PIL").setLevel(logging.WARNING)
 
-
 config, parser = OptionParser().parse(sys.argv[1:], True)
 logging.info(f"Running with options: {parser.get_description(', ', ':')}")
+
+# configures GPU VRAM usage according to config.vram (limit, default behavior or allow growth on demand)
+gpus = tf.config.list_physical_devices("GPU")
+if gpus:
+    if config.vram == -1:
+        tf.config.experimental.set_memory_growth(gpus[0], True)
+    elif config.vram == 0:
+        # do nothing -- allow tf to allocate as much as it wants at once
+        pass
+    else:
+        # put a hard limit on the VRAM usage
+        tf.config.set_logical_device_configuration(
+            gpus[0],
+            [tf.config.LogicalDeviceConfiguration(memory_limit=config.vram)]
+        )
+
+import setup
+from utility.dataset_utils import load_multi_domain_ds
+from models.colla_model import CollaGANModel
+from models.munit_model import MunitModel
+from models.remic_model import RemicModel
+from models.yamata_model import YamataModel
+from models.star_model import UnpairedStarGANModel, PairedStarGANModel
+
 if config.verbose:
     logging.debug(f"Tensorflow version: {tf.__version__}")
 
