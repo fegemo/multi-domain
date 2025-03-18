@@ -87,7 +87,7 @@ parser.save_configuration(model.get_output_folder(), sys.argv)
 
 # configuration for training
 steps = config.steps
-epochs = steps / ceil(len(train_ds) / config.batch)
+epochs = config.epochs
 evaluate_steps = config.evaluate_steps
 
 logging.info(
