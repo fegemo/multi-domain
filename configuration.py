@@ -113,6 +113,9 @@ class OptionParser(metaclass=SingletonMeta):
                                  default=LAMBDA_CYCLIC_RECONSTRUCTION)
         self.parser.add_argument("--lambda-histogram", type=float, help="value for λhistogram used in "
                                                                         "collagan", default=LAMBDA_HISTOGRAM)
+        self.parser.add_argument("--lambda-regularization", type=float, help="value for λregularization "
+                                                                             "used in collagan's generator",
+                                 default=0.01)
         self.parser.add_argument("--d-steps", type=int,
                                  help="number of discriminator updates for each generator in stargan",
                                  default=DISCRIMINATOR_STEPS)

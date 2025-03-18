@@ -21,6 +21,7 @@ class CollaGANModel(S2SModel):
         self.lambda_ssim = config.lambda_ssim
         self.lambda_palette = config.lambda_palette
         self.lambda_histogram = config.lambda_histogram
+        self.lambda_regularization = config.lambda_regularization
 
         if config.input_dropout == "none":
             self.sampler = SimpleSampler(config)
@@ -83,12 +84,17 @@ class CollaGANModel(S2SModel):
                        cycled_images, source_images_5d,
                        fake_predicted_domain, cycle_predicted_domain, target_domain,
                        input_dropout_mask, batch_shape, palettes):
+        # cycled_images (shape=[b*d, s, s, c])
+        # input_dropout_mask (shape=[b, d])
         number_of_domains = batch_shape[0]
         batch_size, image_size, channels = batch_shape[1], batch_shape[2], batch_shape[4]
         number_of_domains_float = tf.cast(number_of_domains, tf.float32)
         source_images = tf.reshape(source_images_5d, [batch_size * number_of_domains, image_size, image_size, channels])
         cycled_images_5d = tf.reshape(cycled_images, [batch_size, number_of_domains, image_size, image_size, channels])
         input_dropout_mask_1d = tf.reshape(input_dropout_mask, [batch_size * number_of_domains])
+        # source_images (shape=[b, d, s, s, c])
+        # cycle_images_5d (shape=[b, d, s, s, c])
+        # input_dropout_mask_1d (shape=[b*d])
 
         # adversarial (lsgan) loss
         adversarial_forward__loss = tf.reduce_mean(tf.math.squared_difference(fake_predicted_patches, 1.))
@@ -112,7 +118,9 @@ class CollaGANModel(S2SModel):
         # ssim_forward_ (shape=[b,])
         # ssim_backward (shape=[b*d,])
         ssim_forward__loss = tf.reduce_mean(-tf.math.log((1. + ssim_forward_) / 2.))
-        ssim_backward_loss = tf.reduce_mean(tf.reduce_sum(-tf.math.log((1. + ssim_backward) / 2.)))
+        # ssim_forward_loss (shape=[b,])
+        ssim_backward_loss = tf.reduce_mean(-tf.math.log((1. + ssim_backward) / 2.))
+        # ssim_backward_loss (shape=[b,])
         ssim_loss = (ssim_forward__loss + ssim_backward_loss * number_of_domains_float) / (number_of_domains_float + 1.)
 
         # domain classification loss (forward, backward)
@@ -141,17 +149,21 @@ class CollaGANModel(S2SModel):
         fake_histogram = histogram_utils.calculate_rgbuv_histogram(fake_image)
         histogram_loss = histogram_utils.hellinger_loss(real_histogram, fake_histogram)
 
+        # regularization loss (l2 - weight decay)
+        regularization_loss = tf.reduce_sum(self.generator.losses)
+
         # observation: ssim loss uses only the backward (cycled) images... that's on the colla's code and paper
         total_loss = adversarial_loss + \
             self.lambda_l1 * l1_forward__loss + self.lambda_l1_backward * l1_backward_loss + \
             self.lambda_ssim * ssim_backward_loss + \
             self.lambda_domain * classification_loss + \
             self.lambda_palette * palette_loss + \
-            self.lambda_histogram * histogram_loss
+            self.lambda_histogram * histogram_loss + \
+            self.lambda_regularization * regularization_loss
 
         return {"total": total_loss, "adversarial": adversarial_loss, "l1_forward": l1_forward__loss,
                 "l1_backward": l1_backward_loss, "ssim": ssim_loss, "domain": classification_loss,
-                "palette": palette_loss, "histogram": histogram_loss}
+                "palette": palette_loss, "histogram": histogram_loss, "weight_decay": regularization_loss}
 
     def discriminator_loss(self, source_predicted_patches, cycled_predicted_patches, source_predicted_domain,
                            real_predicted_patches, fake_predicted_patches, batch_shape):
@@ -324,6 +336,7 @@ class CollaGANModel(S2SModel):
                 tf.summary.scalar("l1_backward_loss", g_loss["l1_backward"], step=summary_step)
                 tf.summary.scalar("palette_loss", g_loss["palette"], step=summary_step)
                 tf.summary.scalar("histogram_loss", g_loss["histogram"], step=summary_step)
+                tf.summary.scalar("weight_decay", g_loss["weight_decay"], step=summary_step)
 
         with tf.name_scope("discriminator"):
             with self.summary_writer.as_default():
