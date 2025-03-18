@@ -86,6 +86,7 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--batch", type=int, help="the batch size", default=BATCH_SIZE)
         self.parser.add_argument("--lr-decay", help="one from {none, constant-then-linear}", default=LR_DECAY)
         self.parser.add_argument("--lr", type=float, help="(initial) learning rate", default=LR)
+        self.parser.add_argument("--ttur", type=float, help="multiplier for the discriminator lr", default=1.)
         self.parser.add_argument(
             "--lambda-gp", type=float, help="value for λgradient_penalty used in stargan", default=LAMBDA_GP)
         self.parser.add_argument("--lambda-domain", type=float,
@@ -115,7 +116,7 @@ class OptionParser(metaclass=SingletonMeta):
                                                                         "collagan", default=LAMBDA_HISTOGRAM)
         self.parser.add_argument("--lambda-regularization", type=float, help="value for λregularization "
                                                                              "used in collagan's generator",
-                                 default=0.01)
+                                 default=0.001)
         self.parser.add_argument("--d-steps", type=int,
                                  help="number of discriminator updates for each generator in stargan",
                                  default=DISCRIMINATOR_STEPS)

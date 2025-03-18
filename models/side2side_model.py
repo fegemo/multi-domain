@@ -203,18 +203,20 @@ class S2SModel(ABC):
             if self.config.lr_decay == "constant-then-linear":
                 # configuration as used by stargan
                 lr_generator = ConstantThenLinearDecay(self.config.lr, steps // self.config.d_steps)
-                lr_discriminator = ConstantThenLinearDecay(self.config.lr, steps)
+                lr_discriminator = ConstantThenLinearDecay(self.config.lr * self.config.ttur, steps)
             elif self.config.lr_decay == "exponential":
                 # configuration as used by collagan
                 lr_generator = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr, 400, 0.99, True)
-                lr_discriminator = lr_generator
+                lr_discriminator = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr * self.config.ttur,
+                                                                                  400, 0.99, True)
             elif self.config.lr_decay == "step":
                 # configuration as used by munit
                 lr_generator = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr, 30000, 0.5, True)
-                lr_discriminator = lr_generator
+                lr_discriminator = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr * self.config.ttur,
+                                                                                  30000, 0.5, True)
             else:
                 lr_generator = self.config.lr
-                lr_discriminator = self.config.lr
+                lr_discriminator = self.config.lr * self.config.ttur
             self.generator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_generator, beta_1=0.5, beta_2=0.999)
             self.discriminator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_discriminator, beta_1=0.5,
                                                                     beta_2=0.999)
@@ -400,10 +402,10 @@ class S2SModel(ABC):
                 for generator in generators:
                     generator_name = generator.name
                     py_model_path = self.get_output_folder(["models", generator_name])
-                    generator.export(py_model_path)
+                    generator.export(py_model_path, verbose=self.config.verbose)
             else:
                 py_model_path = self.get_output_folder(["models"])
-                generators.export(py_model_path)
+                generators.export(py_model_path, verbose=self.config.verbose)
         else:
             # there are multiple groups of networks (e.g., "style_encoders" and "content_encoders")
             for group, networks in self.inference_networks.items():
