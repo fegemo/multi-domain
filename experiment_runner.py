@@ -86,7 +86,7 @@ class Experimenter:
         run_index = -1
         combination = "''"
         try:
-            pbar = tqdm(enumerate(all_combinations), total=total, unit="test")
+            pbar = tqdm(enumerate(all_combinations), total=total, unit="test", dynamic_ncols=True)
             for run_index, combination in pbar:
                 pbar.set_description(f"Params: {get_human_readable_combination(combination)}")
                 execution_status, _ = self.lookup_start_and_total_runs()
