@@ -83,7 +83,7 @@ class CollaGANModel(S2SModel):
     def generator_loss(self, fake_predicted_patches, cycled_predicted_patches, fake_image, real_image,
                        cycled_images, source_images_5d,
                        fake_predicted_domain, cycle_predicted_domain, target_domain,
-                       input_dropout_mask, batch_shape, palettes):
+                       input_dropout_mask, batch_shape, palettes, temperature):
         # cycled_images (shape=[b*d, s, s, c])
         # input_dropout_mask (shape=[b, d])
         number_of_domains = batch_shape[0]
@@ -140,8 +140,13 @@ class CollaGANModel(S2SModel):
         # palette_backward = palette_utils.calculate_palette_loss(cycled_images,
         #                                                         tf.tile(palettes, [number_of_domains, 1, 1]))
         # ommitting palette loss calculation, as it turned out unnecessary with the temperature annealing
-        palette_forward = 0.
-        palette_backward = 0.
+        # palette_forward = 0.
+        # palette_backward = 0.
+        palette_forward = palette_utils.calculate_palette_coverage_loss(fake_image, palettes, temperature=temperature)
+        palette_backward = palette_utils.calculate_palette_coverage_loss(cycled_images,
+                                                                         tf.tile(palettes,
+                                                                                 [number_of_domains, 1, 1]),
+                                                                         temperature=temperature)
         palette_loss = palette_forward + palette_backward
 
         # histogram loss (forward)
@@ -260,7 +265,7 @@ class CollaGANModel(S2SModel):
         number_of_domains, batch_size, image_size, channels = batch_shape[0], batch_shape[1], \
             batch_shape[2], batch_shape[4]
 
-        self.annealing_scheduler.update(t)
+        temperature = self.annealing_scheduler.update(t)
         palettes = palette_utils.batch_extract_palette_ragged(tf.transpose(batch, [1, 0, 2, 3, 4]))
 
         # 1. select a random target domain with a subset of the images as input
@@ -311,7 +316,7 @@ class CollaGANModel(S2SModel):
                                          cycled_images, domain_images, fake_predicted_domain,
                                          cycled_predicted_domain,
                                          target_domain, input_dropout_mask, batch_shape,
-                                         palettes)
+                                         palettes, temperature)
 
             # 5. calculate loss terms for the discriminator
             d_loss = self.discriminator_loss(source_predicted_patches, cycled_predicted_patches,
@@ -861,6 +866,7 @@ class AnnealingScheduler(ABC):
         new_temperature = self.get_value(t)
         for l in self.annealing_layers:
             l.temperature.assign(new_temperature)
+        return new_temperature
 
     @abstractmethod
     def get_value(self, t):
