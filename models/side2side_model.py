@@ -402,10 +402,12 @@ class S2SModel(ABC):
                 for generator in generators:
                     generator_name = generator.name
                     py_model_path = self.get_output_folder(["models", generator_name])
-                    generator.export(py_model_path, verbose=self.config.verbose)
+                    # generator.export(py_model_path, verbose=self.config.verbose)
+                    tf.saved_model.save(generator, py_model_path)
             else:
                 py_model_path = self.get_output_folder(["models"])
-                generators.export(py_model_path, verbose=self.config.verbose)
+                # generators.export(py_model_path, verbose=self.config.verbose)
+                tf.saved_model.save(generators, py_model_path)
         else:
             # there are multiple groups of networks (e.g., "style_encoders" and "content_encoders")
             for group, networks in self.inference_networks.items():
