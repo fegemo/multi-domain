@@ -16,13 +16,13 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 10000,
+            "steps": 300000,
             "evaluate-steps": 1000,
             "capacity": 4,
-            "lr": 0.0001,
+            "lr": 0.00001,
             "ttur": 0.1,
             "lr-decay": "constant-then-linear",
-            "batch": 4,
+            "batch": 40,
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "lambda-l1": 100.,
@@ -36,7 +36,7 @@ if __name__ == "__main__":
             "temperature": 0.1,
             "vram": -1,
         }, {
-            "lambda-histogram": [0., 1.],
+            "lambda-histogram": [0., 0.25],
             "lambda-palette": [1., 0.],
         }, {
             # "tiny": {
