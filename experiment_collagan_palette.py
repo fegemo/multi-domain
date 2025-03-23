@@ -16,28 +16,80 @@ if __name__ == "__main__":
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 600000,
+            "steps": 240000,
             "evaluate-steps": 1000,
             "capacity": 4,
-            "lr": 0.00001,
+            "lr": 0.0001,
             "ttur": 0.1,
             "lr-decay": "constant-then-linear",
-            "batch": 20,
+            "batch": 4,
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
-            "lambda-l1": 100.,
-            "lambda-ssim": 10.,
-            "lambda-domain": 10.,
-            "lambda-regularization": 0.001,
             "model-name": "collagan-palette-coverage",
-            "experiment": "&lambda-palette,&lambda-histogram",
-            "annealing": "linear",
+            "experiment": "&lambda-palette",
             "generator": "palette",
             "temperature": 0.1,
+            "annealing": "linear",
+            "lambda-l1": 100.,
+            "lambda-ssim": 1.,
+            "lambda-domain": 10.,
+            "lambda-regularization": 0.001,
+            "lambda-histogram": 0.,
             "vram": -1,
         }, {
-            "lambda-histogram": [0., 0.25],
-            "lambda-palette": [1., 0.],
+            "lambda-palette": [1., 0., 0.5],
+        }, {
+            # "tiny": {
+            #     "adhoc": ["no-aug"],
+            # },
+            # "rm2k": {
+            #     "adhoc": ["no-tran"]
+            # },
+            # "rmxp": {
+            #     "adhoc": []
+            # },
+            # "rmvx": {
+            #     "adhoc": ["no-tran"]
+            # },
+            "all": {
+                "adhoc": ["no-tran"],
+            }
+        })
+
+    runner.execute(config)
+
+
+    config = create_general_parser(sys.argv[1:])
+
+    runner = Experimenter(
+        "train" if not config.dummy else "dummy_script",
+        config.python,
+        {
+            "model": "collagan",
+            "adhoc": [
+                "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
+                "save-model"
+            ],
+            "log-folder": config.output if config.output is not None else "output",
+            "steps": 240000,
+            "evaluate-steps": 1000,
+            "capacity": 4,
+            "lr": 0.0001,
+            "ttur": 0.1,
+            "lr-decay": "constant-then-linear",
+            "batch": 4,
+            "input-dropout": "conservative",
+            "cycled-source-replacer": "forward",
+            "model-name": "collagan-palette-coverage",
+            "experiment": "original-generator",
+            "lambda-l1": 100.,
+            "lambda-ssim": 1.,
+            "lambda-domain": 10.,
+            "lambda-regularization": 0.001,
+            "lambda-histogram": 0.,
+            "lambda-palette": 0.,
+            "vram": -1,
+        }, {
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],
