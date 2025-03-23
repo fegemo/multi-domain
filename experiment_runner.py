@@ -403,7 +403,7 @@ def create_general_parser(args):
     parser.add_argument("--delete", "-d", help="Instead of training, deletes the checkpoint and log files"
                                                "for this experiment", action="store_true")
     parser.add_argument("--output", "-o", help="Sets (overrides) the path to the output folder", default=None)
-    parser.add_argument("--python", "-p", help="Path to python with tensorflow", default="venv/Scripts/python")
+    parser.add_argument("--python", "-p", help="Path to python with tensorflow", default="python")
     parser.add_argument("--dummy", "-D", help="Dummy run, does not execute anything", action="store_true")
     parser.add_argument("--interactive", "-i", help="Interactive mode, asks for which combinations of "
                                                     "the search grid should be run", default=False, action="store_true")
