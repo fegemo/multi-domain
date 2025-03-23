@@ -71,8 +71,17 @@ def _compare_datasets(images1, images2, model):
     return fid
 
 
-inception_model = InceptionV3(include_top=False, pooling="avg", input_shape=(299, 299, 3))
+inception_model = None
 
 
 def compare(dataset1_or_path, dataset2_or_path):
+    global inception_model
+    if inception_model is None:
+        inception_model = InceptionV3(include_top=False, pooling="avg", input_shape=(299, 299, 3))
     return _compare_datasets(dataset1_or_path, dataset2_or_path, inception_model)
+
+#
+# def __getattr__(name):
+#
+#     if name == "inception_model":
+#         return _long_function()
