@@ -12,7 +12,7 @@ if __name__ == "__main__":
         {
             "model": "collagan",
             "adhoc": [
-                "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
+                "callback-evaluate-fid", "callback-evaluate-l1", #"callback-debug-discriminator",
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
@@ -67,7 +67,7 @@ if __name__ == "__main__":
         {
             "model": "collagan",
             "adhoc": [
-                "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
+                "callback-evaluate-fid", "callback-evaluate-l1", #"callback-debug-discriminator",
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",

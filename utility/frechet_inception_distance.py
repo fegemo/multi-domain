@@ -80,8 +80,3 @@ def compare(dataset1_or_path, dataset2_or_path):
         inception_model = InceptionV3(include_top=False, pooling="avg", input_shape=(299, 299, 3))
     return _compare_datasets(dataset1_or_path, dataset2_or_path, inception_model)
 
-#
-# def __getattr__(name):
-#
-#     if name == "inception_model":
-#         return _long_function()

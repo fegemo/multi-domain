@@ -57,7 +57,7 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
     init = tf.random_normal_initializer(0., 0.02)
 
     source_image_input = layers.Input(shape=[image_size, image_size, output_channels], name="source_image")
-    target_domain_input = layers.Input(shape=[1], name="target_domain")
+    target_domain_input = layers.Input(shape=[1], dtype=tf.int32, name="target_domain")
     target_domain = layers.CategoryEncoding(num_tokens=number_of_domains, output_mode="one_hot")(target_domain_input)
     target_domain = keras_utils.TileLayer(image_size)(target_domain)
     target_domain = keras_utils.TileLayer(image_size)(target_domain)
@@ -66,7 +66,7 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
     if not receive_source_domain:
         x = layers.Concatenate(axis=-1)([source_image_input, target_domain])
     else:
-        source_domain_input = layers.Input(shape=[1], name="source_domain")
+        source_domain_input = layers.Input(shape=[1], dtype=tf.int32, name="source_domain")
         inputs += [source_domain_input]
 
         source_domain = layers.CategoryEncoding(num_tokens=number_of_domains,
@@ -138,7 +138,7 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels, 
 
     source_images_input = layers.Input(shape=[number_of_domains, image_size, image_size, output_channels],
                                        name="source_images")
-    target_domain_input = layers.Input(shape=[1], name="target_domain")
+    target_domain_input = layers.Input(shape=[1], dtype=tf.int32, name="target_domain")
     inputs = [source_images_input, target_domain_input]
 
     target_domain = layers.CategoryEncoding(num_tokens=number_of_domains, output_mode="one_hot")(target_domain_input)
@@ -285,7 +285,7 @@ def collagan_palette_affluent_generator(number_of_domains, image_size, output_ch
 
     source_images_input = layers.Input(shape=[number_of_domains, image_size, image_size, output_channels],
                                        name="source_images")
-    target_domain_input = layers.Input(shape=[1], name="target_domain")
+    target_domain_input = layers.Input(shape=[1], dtype=tf.int32, name="target_domain")
     inputs = [source_images_input, target_domain_input]
 
     target_domain = layers.CategoryEncoding(num_tokens=number_of_domains, output_mode="one_hot")(target_domain_input)
