@@ -372,10 +372,9 @@ class Experimenter:
         combinations = [{name: values[i] for i, name in enumerate(param_names)} for values in combined_values]
         return combinations
 
-    def show_interactive_menu(self):
+    def show_interactive_menu(self, all_combinations):
         stringify_shallow_list = lambda ls: " ".join([str(x) for x in ls]) if isinstance(ls, list) else str(ls)
         stringify_shallow_dict = lambda d: " ".join([f"{k}-{stringify_shallow_list(v)}" for k, v in d.items()])
-        all_combinations = self.explode_combinations()
         print("Choose which configurations to run:")
         selected_combinations = select_multiple(all_combinations, preprocessor=lambda x: stringify_shallow_dict(x))
         return selected_combinations
@@ -392,7 +391,10 @@ class Experimenter:
 
         if config.interactive:
             print("Staring interactive mode...")
-            selected = self.show_interactive_menu()
+            all_combinations = self.explode_combinations()
+            selected = self.show_interactive_menu(all_combinations)
+            print("Selected configurations:")
+            print("\n".join([f"[{all_combinations.index(c)}] " + get_human_readable_combination(c) for c in selected]))
             self.run(selected_combinations=selected)
         else:
             self.run()
