@@ -18,7 +18,7 @@ if __name__ == "__main__":
             "log-folder": config.output if config.output is not None else "output",
             "steps": 480000,
             "evaluate-steps": 1000,
-            "capacity": 20,
+            "capacity": 4,
             "lr": 0.00001,
             "ttur": 0.1,
             "lr-decay": "constant-then-linear",
