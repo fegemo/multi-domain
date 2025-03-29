@@ -25,9 +25,10 @@ LAMBDA_TV = 0.
 LAMBDA_LATENT_RECONSTRUCTION = 1.
 LAMBDA_CYCLIC_RECONSTRUCTION = 0  # 10 for munit on summer<>>winter and cityscapes<>synthia datasets (MUNIT)
 LAMBDA_HISTOGRAM = 1.
+LAMBDA_ADVERSARIAL = 1.
 DISCRIMINATOR_STEPS = 5
 EPOCHS = 160
-PRETRAIN_EPOCHS = 0  # 30 in colla's code
+PRETRAIN_EPOCHS = 0  # 30 in colla's original code
 LR_DECAY = "constant-then-linear"
 LR = 0.0001
 TRAINING_SAMPLER = "multi-target"
@@ -117,6 +118,8 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--lambda-regularization", type=float, help="value for λregularization "
                                                                              "used in collagan's generator",
                                  default=0.001)
+        self.parser.add_argument("--lambda-adversarial", type=float, help="value for λadversarial used "
+                                                                          "in CollaGAN", default=LAMBDA_ADVERSARIAL)
         self.parser.add_argument("--d-steps", type=int,
                                  help="number of discriminator updates for each generator in stargan",
                                  default=DISCRIMINATOR_STEPS)

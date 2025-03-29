@@ -22,6 +22,7 @@ class CollaGANModel(S2SModel):
         self.lambda_palette = config.lambda_palette
         self.lambda_histogram = config.lambda_histogram
         self.lambda_regularization = config.lambda_regularization
+        self.lambda_adversarial = config.lambda_adversarial
 
         if config.input_dropout == "none":
             self.sampler = SimpleSampler(config)
@@ -158,7 +159,7 @@ class CollaGANModel(S2SModel):
         regularization_loss = tf.reduce_sum(self.generator.losses)
 
         # observation: ssim loss uses only the backward (cycled) images... that's on the colla's code and paper
-        total_loss = adversarial_loss + \
+        total_loss = self.lambda_adversarial * adversarial_loss + \
             self.lambda_l1 * l1_forward__loss + self.lambda_l1_backward * l1_backward_loss + \
             self.lambda_ssim * ssim_backward_loss + \
             self.lambda_domain * classification_loss + \
