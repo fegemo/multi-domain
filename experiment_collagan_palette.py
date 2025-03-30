@@ -19,14 +19,14 @@ if __name__ == "__main__":
             "steps": 240000,
             "evaluate-steps": 1000,
             "capacity": 4,
-            "lr": 0.00005,
-            "ttur": 0.5,
+            "lr": 0.0001,
+            "ttur": 0.25,
             "lr-decay": "constant-then-linear",
             "batch": 20,
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "model-name": "collagan-palette-coverage",
-            "experiment": "lr-5e-5,batch-20,ttur-0.5,ssim-10,&lambda-palette,&lambda-adversarial,&lambda-l1",
+            "experiment": "lr-1e-4,batch-20,ttur-0.25,ssim-1,&lambda-palette,&lambda-adversarial,&lambda-l1",
             "generator": "palette",
             "temperature": 0.1,
             "annealing": "linear",
@@ -37,8 +37,7 @@ if __name__ == "__main__":
             "lambda-histogram": 0.,
             "vram": -1,
         }, {
-            "lambda-l1": [200.],
-            "lambda-palette": [0.5, 0],
+            "lambda-palette": [0.1, 0],
             "lambda-adversarial": [10.]
         }, {
             # "tiny": {
