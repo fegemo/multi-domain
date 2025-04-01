@@ -13,7 +13,7 @@ from utility.keras_utils import NParamsSupplier
 
 class CollaGANModel(S2SModel):
     def __init__(self, config):
-        super().__init__(config)
+        super().__init__(config, export_additional_training_endpoint=True)
 
         self.lambda_l1 = config.lambda_l1 or config.lambda_l1
         self.lambda_l1_backward = config.lambda_l1_backward or config.lambda_l1

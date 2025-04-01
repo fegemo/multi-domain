@@ -213,10 +213,10 @@ def count_network_parameters(network):
 
 # ------ layer in which each palette can have a different number of colors ------
 # this refrains from using vectorized operations, which make it slower for longer batches
-class DynamicDifferentiablePalette(Layer):
-    def __init__(self, temperature=1.0, **kwargs):
+class DifferentiablePaletteQuantization(Layer):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.temperature = tf.Variable(temperature, trainable=False)
+        self.temperature = self.add_weight(shape=(), name="temperature", trainable=False)
 
     def call(self, inputs, training=None):
         """

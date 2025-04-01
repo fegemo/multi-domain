@@ -363,7 +363,7 @@ def collagan_palette_affluent_generator(number_of_domains, image_size, output_ch
     palette_input = layers.Input(shape=[None, output_channels], name="desired_palette")
     palettes = palette_input
     inputs += [palette_input]
-    quantization_layer = keras_utils.DynamicDifferentiablePalette(1.0)
+    quantization_layer = keras_utils.DifferentiablePaletteQuantization()
     quantized_output = quantization_layer((pre_output, palettes))
 
     model = tf.keras.Model(inputs=inputs, outputs=quantized_output, name="CollaGANPaletteGenerator")

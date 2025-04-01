@@ -41,7 +41,8 @@ class S2SModel(ABC):
     - create_training_only_networks: initializes networks that are used only during training
     - create_inference_networks: initializes networks that are used for inference (e.g., generator)
     """
-    def __init__(self, config):
+    def __init__(self, config, export_additional_training_endpoint=False):
+        self.export_additional_training_endpoint = export_additional_training_endpoint
         self.generator_optimizer = None
         self.discriminator_optimizer = None
 
@@ -390,6 +391,27 @@ class S2SModel(ABC):
         file.write(str(step.numpy()))
 
     def save_generator(self):
+
+        def export_single_model(net, path):
+            """
+            Exports a single model to a specified path. It uses the recent and custom way of exporting models in
+            Keras/TensorFlow. It exports a 'serve' endpoint and an optional 'serve_training' with training=True, if
+            requested by the model (self.export_additional_training_endpoint).
+            :param net: the network to save.
+            :param path: the path where to save it.
+            """
+            export_archive = tf.keras.export.ExportArchive()
+            export_archive.track(net)
+            input_signature = [{kt.name: kt for kt in  net.inputs}]
+            export_archive.add_endpoint(name="serve", fn=net.call, input_signature=input_signature)
+            if self.export_additional_training_endpoint:
+                export_archive.add_endpoint(
+                    name="serve_training",
+                    fn=lambda x: net.call(x, training=True),
+                    input_signature=input_signature
+                )
+            export_archive.write_out(path, verbose=self.config.verbose)
+
         py_model_path = self.get_output_folder(["models"], )
         io_utils.delete_folder(py_model_path)
         io_utils.ensure_folder_structure(py_model_path)
@@ -402,12 +424,12 @@ class S2SModel(ABC):
                 for generator in generators:
                     generator_name = generator.name
                     py_model_path = self.get_output_folder(["models", generator_name])
-                    generator.export(py_model_path, verbose=self.config.verbose)
-                    # tf.saved_model.save(generator, py_model_path)
+                    # generator.export(py_model_path, verbose=self.config.verbose)
+                    export_single_model(generator, py_model_path)
             else:
                 py_model_path = self.get_output_folder(["models"])
-                generators.export(py_model_path, verbose=self.config.verbose)
-                # tf.saved_model.save(generators, py_model_path)
+                # generators.export(py_model_path, verbose=self.config.verbose)
+                export_single_model(generators, py_model_path)
         else:
             # there are multiple groups of networks (e.g., "style_encoders" and "content_encoders")
             for group, networks in self.inference_networks.items():
