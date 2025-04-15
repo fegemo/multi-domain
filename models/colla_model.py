@@ -278,7 +278,7 @@ class CollaGANModel(S2SModel):
         return self.gen_supplier(bw_source_images, bw_target_domain,
                                  bw_target_palette)
 
-    # @tf.function
+    @tf.function
     def train_step(self, batch, step, evaluate_steps, t):
         # [d, b, s, s, c] = domain, batch, size, size, channels
         batch_shape = tf.shape(batch)
