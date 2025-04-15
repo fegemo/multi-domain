@@ -25,7 +25,6 @@ class CollaGANModel(S2SModel):
         self.lambda_regularization = config.lambda_regularization
         self.lambda_adversarial = config.lambda_adversarial
 
-        print("config.input_dropout", config.input_dropout)
         if config.input_dropout == "none":
             self.sampler = SimpleSampler(config)
         elif config.input_dropout == "original":
