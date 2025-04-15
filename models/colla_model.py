@@ -6,7 +6,8 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from utility import palette_utils, dataset_utils, io_utils, histogram_utils
-from .networks import collagan_affluent_generator, collagan_original_discriminator, collagan_palette_affluent_generator
+from .networks import (collagan_affluent_generator, collagan_original_discriminator,
+                       collagan_palette_affluent_generator, collagan_palette_conditioned_with_transformer_generator)
 from .side2side_model import S2SModel
 from utility.keras_utils import NParamsSupplier
 
@@ -24,6 +25,7 @@ class CollaGANModel(S2SModel):
         self.lambda_regularization = config.lambda_regularization
         self.lambda_adversarial = config.lambda_adversarial
 
+        print("config.input_dropout", config.input_dropout)
         if config.input_dropout == "none":
             self.sampler = SimpleSampler(config)
         elif config.input_dropout == "original":
@@ -45,7 +47,7 @@ class CollaGANModel(S2SModel):
             self.cycled_source_replacer = ForwardOnlyCycledSourceReplacer(config)
 
         self.cce = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
-        self.gen_supplier = NParamsSupplier(3 if config.generator == "palette" else 2)
+        self.gen_supplier = NParamsSupplier(3 if "palette" in config.generator else 2)
         self.generator = self.inference_networks["generator"]
         self.discriminator = self.training_only_networks["discriminator"]
 
@@ -68,6 +70,13 @@ class CollaGANModel(S2SModel):
                                                                  config.output_channels,
                                                                  config.capacity)
             }
+        elif config.generator in ["palette-transformer"]:
+            return {
+                "generator": collagan_palette_conditioned_with_transformer_generator(
+                    config.number_of_domains, config.image_size,
+                    config.output_channels,
+                    config.capacity)
+            }
         else:
             raise ValueError(f"The provided {config.generator} type for generator has not been implemented.")
 
@@ -84,15 +93,26 @@ class CollaGANModel(S2SModel):
     def generator_loss(self, fake_predicted_patches, cycled_predicted_patches, fake_image, real_image,
                        cycled_images, source_images_5d,
                        fake_predicted_domain, cycle_predicted_domain, target_domain,
-                       input_dropout_mask, batch_shape, palettes, temperature):
+                       input_dropout_mask, batch_shape, fw_target_palette, bw_target_palette, temperature):
         # cycled_images (shape=[b*d, s, s, c])
         # input_dropout_mask (shape=[b, d])
         number_of_domains = batch_shape[0]
         batch_size, image_size, channels = batch_shape[1], batch_shape[2], batch_shape[4]
         number_of_domains_float = tf.cast(number_of_domains, tf.float32)
-        source_images = tf.reshape(source_images_5d, [batch_size * number_of_domains, image_size, image_size, channels])
-        cycled_images_5d = tf.reshape(cycled_images, [batch_size, number_of_domains, image_size, image_size, channels])
-        input_dropout_mask_1d = tf.reshape(input_dropout_mask, [batch_size * number_of_domains])
+
+        # the source_images need to have the forward target images excluded so it can be properly compared
+        # against the cycled_images
+        bw_target_domain = tf.tile(tf.range(number_of_domains)[tf.newaxis, ...], [batch_size, 1])
+        eliminate_fw_target_mask = tf.not_equal(bw_target_domain, target_domain[..., tf.newaxis])
+        bw_target_domain = tf.reshape(tf.boolean_mask(bw_target_domain, eliminate_fw_target_mask),
+                                      [batch_size, number_of_domains - 1])
+
+        source_images_5d = tf.gather(source_images_5d, bw_target_domain, batch_dims=1)
+        source_images = tf.reshape(source_images_5d, [batch_size * (number_of_domains - 1), image_size, image_size, channels])
+        cycled_images_5d = tf.reshape(cycled_images, [batch_size, number_of_domains - 1, image_size, image_size, channels])
+
+        input_dropout_mask = tf.gather(input_dropout_mask, bw_target_domain, batch_dims=1)
+        input_dropout_mask_1d = tf.reshape(input_dropout_mask, [batch_size * (number_of_domains - 1)])
         # source_images (shape=[b, d, s, s, c])
         # cycle_images_5d (shape=[b, d, s, s, c])
         # input_dropout_mask_1d (shape=[b*d])
@@ -100,18 +120,21 @@ class CollaGANModel(S2SModel):
         # adversarial (lsgan) loss
         adversarial_forward__loss = tf.reduce_mean(tf.math.squared_difference(fake_predicted_patches, 1.))
         adversarial_backward_loss = tf.reduce_mean(tf.math.squared_difference(cycled_predicted_patches, 1.)) * \
-            number_of_domains_float
-        adversarial_loss = (adversarial_forward__loss + adversarial_backward_loss) / \
-                           (number_of_domains_float + 1.)
+                                    (number_of_domains_float - 1.)
+        adversarial_loss = (adversarial_forward__loss + adversarial_backward_loss) / number_of_domains_float
 
         # l1 (forward, backward)
         l1_forward__loss = tf.reduce_mean(tf.abs(real_image - fake_image))
-        l1_backward_loss = tf.reduce_mean(
-            tf.reduce_sum(
-                # mean of pixel l1s per image, but 0 for dropped out input images
-                tf.reduce_mean(tf.abs(source_images_5d - cycled_images_5d), axis=[2, 3, 4]) * input_dropout_mask,
-                axis=1),
-            axis=0)
+        # l1_backward_loss = tf.reduce_mean(
+        #     tf.reduce_sum(
+        #         # mean of pixel l1s per image, but 0 for dropped out input images
+        #         tf.reduce_mean(tf.abs(source_images_5d - cycled_images_5d), axis=[2, 3, 4]) * input_dropout_mask,
+        #         axis=1) * tf.reduce_sum(input_dropout_mask, axis=1),
+        #     axis=0)
+        source_images_5d_kept = tf.boolean_mask(source_images_5d, tf.cast(input_dropout_mask, tf.int32))
+        cycled_images_5d_kept = tf.boolean_mask(cycled_images_5d, tf.cast(input_dropout_mask, tf.int32))
+        l1_backward_loss = tf.reduce_mean(tf.abs(source_images_5d_kept - cycled_images_5d_kept)) * \
+                           tf.reduce_sum(input_dropout_mask)
 
         # ssim loss (forward, backward)
         ssim_forward_ = tf.image.ssim(fake_image + 1., real_image + 1., 2)
@@ -122,33 +145,28 @@ class CollaGANModel(S2SModel):
         # ssim_forward_loss (shape=[b,])
         ssim_backward_loss = tf.reduce_mean(-tf.math.log((1. + ssim_backward) / 2.))
         # ssim_backward_loss (shape=[b,])
-        ssim_loss = (ssim_forward__loss + ssim_backward_loss * number_of_domains_float) / (number_of_domains_float + 1.)
+        ssim_loss = (ssim_forward__loss + ssim_backward_loss * (number_of_domains_float - 1)) / number_of_domains_float
 
         # domain classification loss (forward, backward)
         forward__domain = tf.one_hot(target_domain, number_of_domains)
-        backward_domain = tf.tile(tf.one_hot(tf.range(number_of_domains), number_of_domains), [batch_size, 1])
+        backward_domain = tf.reshape(tf.one_hot(bw_target_domain, number_of_domains),
+                                     [batch_size * (number_of_domains - 1), number_of_domains])
         backward_predicted_domain = cycle_predicted_domain
         # forward__domain (shape=[b, d])
         # backward_domain (shape=[b*d, d])
 
         classification_forward__loss = self.cce(forward__domain, fake_predicted_domain)
-        classification_backward_loss = self.cce(backward_domain, backward_predicted_domain) * number_of_domains_float
-        classification_loss = (classification_forward__loss + classification_backward_loss) / \
-                              (number_of_domains_float + 1.)
+        classification_backward_loss = self.cce(backward_domain, backward_predicted_domain) * \
+                                       (number_of_domains_float - 1.)
+        classification_loss = (classification_forward__loss + classification_backward_loss) / number_of_domains_float
 
         # palette loss (forward, backward)
-        # palette_forward = palette_utils.calculate_palette_loss(fake_image, palettes)
-        # palette_backward = palette_utils.calculate_palette_loss(cycled_images,
-        #                                                         tf.tile(palettes, [number_of_domains, 1, 1]))
-        # ommitting palette loss calculation, as it turned out unnecessary with the temperature annealing
-        # palette_forward = 0.
-        # palette_backward = 0.
-        palette_forward = palette_utils.calculate_palette_coverage_loss(fake_image, palettes, temperature=temperature)
+        palette_forward_ = palette_utils.calculate_palette_coverage_loss(fake_image, fw_target_palette, temperature)
         palette_backward = palette_utils.calculate_palette_coverage_loss(cycled_images,
-                                                                         tf.tile(palettes,
-                                                                                 [number_of_domains, 1, 1]),
-                                                                         temperature=temperature)
-        palette_loss = palette_forward + palette_backward
+                                                                         tf.tile(bw_target_palette,
+                                                                                 [number_of_domains - 1, 1, 1]),
+                                                                         temperature)
+        palette_loss = palette_forward_ + palette_backward
 
         # histogram loss (forward)
         real_histogram = histogram_utils.calculate_rgbuv_histogram(real_image)
@@ -193,131 +211,152 @@ class CollaGANModel(S2SModel):
         total_loss = adversarial_loss + domain_loss
         return {"total": total_loss, "real": adversarial_real, "fake": adversarial_fake, "domain": domain_loss}
 
-    def get_cycled_images_input(self, domain_images, forward_target_domain, input_dropout_mask, fake_image,
-                                batch_shape, palettes):
+    def get_cycled_images_input(self, bw_source_images, fw_target_domain, input_dropout_mask, fw_genned_image,
+                                bw_target_palette, batch_shape):
         """
         Returns a list of tensors that represent the input for the generator to create the cycle images
-        :param domain_images: batch images for all domains (shape=[b, d, s, s, c])
-        :param forward_target_domain: batched target domain index (shape=[b])
+        :param bw_source_images: batch of source images for the backwards pass (shape=[b, d, s, s, c]). They may have
+            a different palette than the fw_source_images if the palette perturbation is enabled
+        :param fw_target_domain: batch of target domain indices (shape=[b])
         :param input_dropout_mask: mask for which domain images have been dropped out (due to input dropout and being
-        the target domain) (shape=[b, d], with 0s for dropped out images)
-        :param fake_image: batched generated image (shape=[b, s, s, c])
+            the target domain) (shape=[b, d], with 0s for dropped out images)
+        :param fw_genned_image: batch of generated images (shape=[b, s, s, c])
+        :param bw_target_palette: batch of target palettes (shape=[b, (nc), c]) as a ragged tensor
         :param batch_shape: tuple representing the shape of the batch
-        :param palettes: batch of palettes (shape=[b, (c), 4]) as a ragged tensor
-        :return: a list of tensors that can be used as input to the generator so cycle images get created
+        :return: a list of tensors that can be used as input to the generator so cycle images get created. They contain:
+            1. the backwards source images, a batch with size [b*d_target] of images [d, s, s, c]
+            2. the backwards target domain (shape=[b*d_target]). It is a range(0, d) repeated for each image in the batch
+            3. the backwards target palette, which is the original palette of the source batches in the forward pass
+                (i.e. fw_source_palette) (shape=[b*d_target, (nc), c]). It is repeated to match the batch size
         """
         number_of_domains, batch_size, image_size, channels = batch_shape[0], batch_shape[1], batch_shape[2], \
             batch_shape[4]
-        backward_target_domain = tf.range(number_of_domains)
-        backward_target_domain = tf.tile(backward_target_domain[tf.newaxis, ...], [batch_size, 1])
-        # backward_target_domain (shape=[b, d]) with an index per image and domain in the batch
+        bw_target_domain = tf.range(number_of_domains)
+        bw_target_domain = tf.tile(bw_target_domain[tf.newaxis, ...], [batch_size, 1])
+        # bw_target_domain (shape=[b, d]) with an index per image and domain in the batch
 
-        backward_target_domain_mask = tf.one_hot(backward_target_domain, number_of_domains, on_value=0., off_value=1.)
-        backward_target_domain_mask = backward_target_domain_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
-        # backward_target_domain_mask (shape=[b, d_target, d, 1, 1, 1]) with 0s for images that must be suppressed
+        eliminate_fw_target_mask = tf.not_equal(bw_target_domain, fw_target_domain[..., tf.newaxis])
+        bw_target_domain = tf.reshape(tf.boolean_mask(bw_target_domain, eliminate_fw_target_mask),
+                                      [batch_size, number_of_domains - 1])
+        # bw_target_domain (shape=[b, d_target=d-1]) -- eliminates the redundant (and incorrect) bw_target == fw_target
+
+        bw_target_domain_mask = tf.one_hot(bw_target_domain, number_of_domains, on_value=0., off_value=1.)
+        bw_target_domain_mask = bw_target_domain_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
+        # bw_target_domain_mask (shape=[b, d_target, d, 1, 1, 1]) with 0s for images that must be suppressed
         # (as they are the target)
 
-        # a. repeat the domain images once for each domain, so we can later have an input set with a
+        # a. repeat the source images once for each domain, so we can later have an input set with a
         # zeroed backward target for each domain
-        repeated_domain_images = tf.tile(tf.expand_dims(domain_images, 1), [1, number_of_domains, 1, 1, 1, 1])
-        # repeated_domain_images (shape=[b, d_target, d, s, s, c]
-
-        # b. replace the original forward target image with the generated fake image
-        # forward_target_domain_mask = tf.one_hot(forward_target_domain, number_of_domains,
-        #                                         dtype=tf.bool, on_value=True, off_value=False)
-        # forward_target_domain_mask = forward_target_domain_mask[:, tf.newaxis, :, tf.newaxis, tf.newaxis, tf.newaxis]
-        # the mask becomes of shape [b, 1, d, 1, 1, 1], which can be broadcast to the repeated_domain_images' shape
+        repeated_bw_source_images = tf.tile(bw_source_images[:, tf.newaxis, ...],
+                                            [1, number_of_domains - 1, 1, 1, 1, 1])
+        # repeated_bw_source_images (shape=[b, d_target, d, s, s, c]
 
         # b. replace the original forward target image with the generated fake image, plus the ones that have
         # been dropped out. it can be only the forward target (--cycled-source-replacer == "forward") or all the
         # source images that have been dropped out due to input dropout (--cycled-source-replacer == "dropout")
         # the Colla's paper does not specify what it does, but the source code¹ uses the "dropout" option
         # ¹ https://github.com/jongcye/CollaGAN_CVPR/blob/master/model/CollaGAN_fExp8.py#L99
-        cycled_source_replacement_mask = self.cycled_source_replacer.replace(forward_target_domain, input_dropout_mask)
-        fake_image = fake_image[:, tf.newaxis, tf.newaxis, ...]
-        # fake_image becomes shape=[b, 1, 1, s, s, c], so it can be broadcast together with repeated_domain_images
+        cycled_source_replacement_mask = self.cycled_source_replacer.replace(fw_target_domain, input_dropout_mask)
+        fw_genned_image = fw_genned_image[:, tf.newaxis, tf.newaxis, ...]
+        # fw_genned_image becomes shape=[b, 1, 1, s, s, c], so it can be broadcast together with repeated_bw_source_images
 
-        fake_replaced_target_domain_images = tf.where(cycled_source_replacement_mask, fake_image,
-                                                      repeated_domain_images)
-        # fake_replaced_target_domain_images (shape=[b, d, d, s, s, c])
+        bw_source_images = tf.where(cycled_source_replacement_mask, fw_genned_image, repeated_bw_source_images)
+        # bw_source_images (shape=[b, d_target, d, s, s, c])
 
         # c. zero out the images that are the backwards cyclical target
-        zeroed_retarget_domain_images = fake_replaced_target_domain_images * backward_target_domain_mask
+        bw_source_images = bw_source_images * bw_target_domain_mask
 
-        # list of:
-        # - input images with shape [b, d, d, s, s, c]
-        # - input target domain with shape [b, d]
-
-        zeroed_retarget_domain_images = tf.reshape(zeroed_retarget_domain_images, [
-            batch_size * number_of_domains, number_of_domains, image_size, image_size, channels
+        # d. merge the batch and target-domain dimensions to have 4D tensors as expected by the generator
+        bw_source_images = tf.reshape(bw_source_images, [
+            batch_size * (number_of_domains - 1), number_of_domains, image_size, image_size, channels
         ])
-        backward_target_domain = tf.reshape(backward_target_domain, [batch_size * number_of_domains])
+        bw_target_domain = tf.reshape(bw_target_domain, [batch_size * (number_of_domains - 1)])
 
-        # repeats the palette so it becomes a batch_size * number_of_domains, 4 tensor
-        palettes = tf.tile(palettes, [number_of_domains, 1, 1])
+        bw_target_palette = tf.tile(bw_target_palette, [number_of_domains - 1, 1, 1])
+        # bw_target_palette (shape=[b*d_target, (nc), c])
 
-        return self.gen_supplier(zeroed_retarget_domain_images, backward_target_domain,
-                                 palettes)
+        return self.gen_supplier(bw_source_images, bw_target_domain,
+                                 bw_target_palette)
 
-    @tf.function
+    # @tf.function
     def train_step(self, batch, step, evaluate_steps, t):
         # [d, b, s, s, c] = domain, batch, size, size, channels
         batch_shape = tf.shape(batch)
-        number_of_domains, batch_size, image_size, channels = batch_shape[0], batch_shape[1], \
-            batch_shape[2], batch_shape[4]
+        number_of_domains, batch_size, image_size, channels = batch_shape[0], batch_shape[1], batch_shape[2], \
+            batch_shape[4]
 
         temperature = self.annealing_scheduler.update(t)
-        palettes = palette_utils.batch_extract_palette_ragged(tf.transpose(batch, [1, 0, 2, 3, 4]))
 
         # 1. select a random target domain with a subset of the images as input
-        domain_images, target_domain, input_dropout_mask = self.sampler.sample(batch, t)
-        # domain_images (shape=[b, d, s, s, c])
-        # target_domain (shape=[b,])
+        fw_source_images, fw_target_domain, input_dropout_mask = self.sampler.sample(batch, t)
+        # fw_source_images (shape=[b, d, s, s, c])
+        # fw_target_domain (shape=[b,])
         # input_dropout_mask (shape=[b, d]), with 0s for images that should be dropped out
+        fw_source_palette = palette_utils.batch_extract_palette_ragged(fw_source_images)
+        # fw_source_palette (shape=[b, (n), c]) as a ragged tensor
 
-        # dropped_input_images contains, for each domain, an image or zeros with same shape (dropped out)
-        dropped_input_image = domain_images * input_dropout_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
-        # dropped_input_image (shape=[b, d, s, s, c], but with all 0s for dropped images)
+        # 1.5. perturb the palette a bit if inside the probability:
+        palette_perturbation_prob = self.config.perturb_palette
+        should_perturb_palette = tf.random.uniform(shape=()) < palette_perturbation_prob
+        if should_perturb_palette:
+            source_images_palette_perturbed, perturbed_palette = palette_utils.batch_perturb_palette(fw_source_images)
+            bw_source_images = source_images_palette_perturbed
+            fw_target_palette = perturbed_palette
+        else:
+            bw_source_images = fw_source_images
+            fw_target_palette = fw_source_palette
 
-        # real_image is the target for each example in the batch
-        real_image = tf.gather(domain_images, target_domain, batch_dims=1)
+        fw_target_image = tf.gather(bw_source_images, fw_target_domain, batch_dims=1)
+        bw_target_palette = fw_source_palette
+        # fw_target_image (shape=[b, s, s, c]) is the target for each example in the batch
+        # bw_target_images (shape=[b, d, s, s, c]) are the original source images that need to be reconstructed
+        # in the backwards pass
+        # bw_target_palette (shape=[b, (n), c]) is the original palette used as target palette for the backwards pass
+
+
+        # fw_source_images_dropped contains, for each domain, an image or zeros with same shape (dropped out)
+        fw_source_images_dropped = fw_source_images * input_dropout_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
+        # fw_source_images_dropped (shape=[b, d, s, s, c], but with all 0s for dropped images)
+
 
         with tf.GradientTape(persistent=True) as tape:
+            # FORWARD PASS:
             # 1. generate a batch of fake images
-            # shape=[b, d, s, s, c]
-            generator_input = self.gen_supplier(dropped_input_image, target_domain, palettes)
-            # shape=[b, s, s, c]
-            fake_image = self.generator(generator_input, training=True)
+            fw_generator_input = self.gen_supplier(fw_source_images_dropped, fw_target_domain, fw_target_palette)
+            # fw_generator_input (shape=[b, d, s, s, c])
+            fw_genned_image = self.generator(fw_generator_input, training=True)
+            # fw_genned_image (shape=[b, s, s, c])
 
+            # BACKWARD PASS:
             # 2. generate a batch of cycled images (back to their source domain)
-            cycled_generator_input = self.get_cycled_images_input(domain_images, target_domain, input_dropout_mask,
-                                                                  fake_image, batch_shape, palettes)
-            # cycled_generator_input (list of [shape=[b*d, d, s, s, c], shape=[b*d]])
-            cycled_images = self.generator(cycled_generator_input, training=True)
-            # cycled_images (shape=[b*d, s, s, c])
+            bw_generator_input = self.get_cycled_images_input(bw_source_images, fw_target_domain, input_dropout_mask,
+                                                                  fw_genned_image, bw_target_palette, batch_shape)
+            # bw_generator_input (list of [shape=[b*d_target, d, s, s, c], shape=[b*d]])
+            bw_genned_images = self.generator(bw_generator_input, training=True)
+            # bw_genned_images (shape=[b*d_target, s, s, c])
 
             # 3. discriminate the real (target) and fake images, then the cycled ones and the source (to train the disc)
-            real_predicted_patches, real_predicted_domain = self.discriminator(real_image, training=True)
-            fake_predicted_patches, fake_predicted_domain = self.discriminator(fake_image, training=True)
+            real_predicted_patches, real_predicted_domain = self.discriminator(fw_target_image, training=True)
+            fake_predicted_patches, fake_predicted_domain = self.discriminator(fw_genned_image, training=True)
             # xxxx_predicted_patches (shape=[b, 1, 1, 1])
             # xxxx_predicted_domain  (shape=[b, d] -> logits)
 
-            cycled_predicted_patches, cycled_predicted_domain = self.discriminator(cycled_images, training=True)
-            # cycled_predicted_patches (shape=[b*d, 1, 1, 1])
-            # cycled_predicted_domain  (shape=[b*d, d] -> logits)
+            cycled_predicted_patches, cycled_predicted_domain = self.discriminator(bw_genned_images, training=True)
+            # cycled_predicted_patches (shape=[b*d_target, 1, 1, 1])
+            # cycled_predicted_domain  (shape=[b*d_target, d] -> logits)
 
             source_predicted_patches, source_predicted_domain = self.discriminator(
-                tf.reshape(domain_images, [-1, image_size, image_size, channels]),
+                tf.reshape(fw_source_images, [-1, image_size, image_size, channels]),
                 training=True)
             # source_predicted_patches (shape=[b*d, 1, 1, 1])
             # source_predicted_domain  (shape=[b*d, d] -> logits)
 
             # 4. calculate loss terms for the generator
-            g_loss = self.generator_loss(fake_predicted_patches, cycled_predicted_patches, fake_image, real_image,
-                                         cycled_images, domain_images, fake_predicted_domain,
+            g_loss = self.generator_loss(fake_predicted_patches, cycled_predicted_patches, fw_genned_image,
+                                         fw_target_image, bw_genned_images, fw_source_images, fake_predicted_domain,
                                          cycled_predicted_domain,
-                                         target_domain, input_dropout_mask, batch_shape,
-                                         palettes, temperature)
+                                         fw_target_domain, input_dropout_mask, batch_shape,
+                                         fw_target_palette, bw_target_palette, temperature)
 
             # 5. calculate loss terms for the discriminator
             d_loss = self.discriminator_loss(source_predicted_patches, cycled_predicted_patches,
@@ -711,9 +750,9 @@ class InputDropoutSampler(ExampleSampler):
         self.null_list = tf.ragged.constant(dropout_null_list, ragged_rank=2, dtype="bool")
 
     def select_number_of_inputs_to_drop(self, batch_size, dropout_null_list_for_target, t):
-        return tf.random.uniform(shape=[batch_size],
-                                 maxval=tf.shape(dropout_null_list_for_target[0])[0],
-                                 dtype="int32")
+        random_values = tf.random.uniform(shape=[batch_size])
+        max_values = tf.cast(dropout_null_list_for_target.row_lengths(axis=1), tf.float32)
+        return tf.cast(tf.floor(random_values * max_values), tf.int32) + 1
 
     def sample(self, batch, t):
         """
@@ -745,12 +784,12 @@ class InputDropoutSampler(ExampleSampler):
         random_number_of_inputs_to_drop = self.select_number_of_inputs_to_drop(batch_size, dropout_null_list_for_target,
                                                                                t)
         dropout_null_list_for_target_and_number_of_inputs = tf.gather(dropout_null_list_for_target,
-                                                                      random_number_of_inputs_to_drop,
+                                                                      random_number_of_inputs_to_drop - 1,
                                                                       batch_dims=1)
         # dropout_null_list_for_target_and_number_of_inputs (shape=[b, ?, d])
-        random_permutation_index = tf.random.uniform(shape=[batch_size],
-                                                     maxval=tf.shape(dropout_null_list_for_target_and_number_of_inputs)[
-                                                         0], dtype="int32")
+        random_permutation_index = tf.random.uniform(shape=[batch_size])
+        max_values = tf.cast(dropout_null_list_for_target_and_number_of_inputs.row_lengths(axis=1), tf.float32)
+        random_permutation_index = tf.cast(tf.floor(random_permutation_index * max_values), tf.int32)
         input_dropout_mask = tf.gather(dropout_null_list_for_target_and_number_of_inputs,
                                        random_permutation_index,
                                        batch_dims=1)
@@ -766,7 +805,7 @@ class AggressiveInputDropoutSampler(InputDropoutSampler):
         # 30% of the time, drop 2 inputs
         # 60% of the time, drop 3 inputs
         u = tf.random.uniform(shape=[batch_size])
-        return tf.where(u < 0.1, 1, tf.where(u < 0.4, 2, 3)) - 1
+        return tf.where(u < 0.1, 1, tf.where(u < 0.4, 2, 3))
 
 
 class BalancedInputDropoutSampler(InputDropoutSampler):
@@ -775,7 +814,7 @@ class BalancedInputDropoutSampler(InputDropoutSampler):
         # 43% of the time, drop 2 inputs
         # 14% of the time, drop 1 inputs
         u = tf.random.uniform(shape=[batch_size])
-        return tf.where(u < 0.43, 3, tf.where(u < 0.86, 2, 1)) - 1
+        return tf.where(u < 0.43, 3, tf.where(u < 0.86, 2, 1))
 
 
 class ConservativeInputDropoutSampler(InputDropoutSampler):
@@ -784,7 +823,7 @@ class ConservativeInputDropoutSampler(InputDropoutSampler):
         # 30% of the time, drop 2 inputs
         # 60% of the time, drop 1 inputs
         u = tf.random.uniform(shape=[batch_size])
-        return tf.where(u < 0.1, 3, tf.where(u < 0.4, 2, 1)) - 1
+        return tf.where(u < 0.1, 3, tf.where(u < 0.4, 2, 1))
 
 
 class CurriculumLearningSampler(InputDropoutSampler):
@@ -799,7 +838,7 @@ class CurriculumLearningSampler(InputDropoutSampler):
         # until 50% of the training, drop 3 inputs
         # remainder 50% of the training, drop randomly
         n = self.balanced_sampler.select_number_of_inputs_to_drop(batch_size, dropout_null_list_for_target, t) + 1
-        return tf.where(t < 0.166667, 1, tf.where(t < 0.33333, 2, tf.where(t < 0.5, 3, n))) - 1
+        return tf.where(t < 0.166667, 1, tf.where(t < 0.33333, 2, tf.where(t < 0.5, 3, n)))
 
 
 class SimpleSampler(ExampleSampler):
@@ -836,13 +875,13 @@ class ForwardOnlyCycledSourceReplacer(CycledSourceReplacer):
     def __init__(self, config):
         super().__init__(config)
 
-    def replace(self, forward_target_domain, input_dropout_mask):
+    def replace(self, fw_target_domain, input_dropout_mask):
         number_of_domains = self.config.number_of_domains
-        forward_target_domain_mask = tf.one_hot(forward_target_domain, number_of_domains,
+        fw_target_domain_mask = tf.one_hot(fw_target_domain, number_of_domains,
                                                 dtype=tf.bool, on_value=True, off_value=False)
-        forward_target_domain_mask = forward_target_domain_mask[:, tf.newaxis, :, tf.newaxis, tf.newaxis, tf.newaxis]
+        fw_target_domain_mask = fw_target_domain_mask[:, tf.newaxis, :, tf.newaxis, tf.newaxis, tf.newaxis]
         # the mask becomes of shape [b, 1, d, 1, 1, 1], which can be broadcast to the repeated_domain_images' shape
-        return forward_target_domain_mask
+        return fw_target_domain_mask
 
 
 class DroppedOutCycledSourceReplacer(CycledSourceReplacer):
@@ -884,3 +923,7 @@ class LinearAnnealingScheduler(AnnealingScheduler):
 class NoopAnnealingScheduler(AnnealingScheduler):
     def get_value(self, t):
         return 1.0
+
+
+# Sanity checking collagan's palette conditioning:
+# python train.py collagan --generator palette-transformer --rm2k --steps 200 --evaluate-steps 100 --vram 4096 --perturb-palette 0.5 --cycled-source-replacer forward --temperature 0.1 --annealing linear

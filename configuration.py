@@ -67,7 +67,7 @@ class OptionParser(metaclass=SingletonMeta):
             "model", help="one from { stargan-unpaired, stargan-paired, collagan, munit, remic, yamatagan }"
                           "- the model to train")
         self.parser.add_argument("--generator", help="network from { resnet } for stargan or "
-                                                     "{ affluent, palette } for collagan", default="")
+                                                     "{ affluent, palette, palette-transformer } for collagan", default="")
         self.parser.add_argument("--discriminator", help="different network topology, currently an "
                                                          "unused option", default="")
         self.parser.add_argument("--conditional-discriminator", help="Makes the discriminator receive"
@@ -133,6 +133,8 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--no-hue", action="store_true", help="Disables hue augmentation", default=False)
         self.parser.add_argument("--no-tran", action="store_true", help="Disables translation augmentation",
                                  default=False)
+        self.parser.add_argument("--perturb-palette", type=float, default=0.0,
+                                 help="The probability with which to perturb the target palette when training CollaGAN")
         self.parser.add_argument("--sampler", help="one from {multi-target, single-target} indicating whether "
                                                    "batches are trained with the same target (single) or with "
                                                    "each sample having its own (multi)", default=TRAINING_SAMPLER)

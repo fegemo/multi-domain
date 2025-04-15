@@ -218,7 +218,7 @@ def load_multi_domain_ds(config):
 
 def create_input_dropout_index_list(inputs_to_drop, number_of_domains):
     """
-    Creates a list shape=(DOMAINS, TO_DROP, ? DOMAINS) that is, per possible target pose index (first dimension),
+    Creates a list shape=(DOMAINS, TO_DROP, ?, DOMAINS) that is, per possible target pose index (first dimension),
     for each possible number of dropped inputs (second dimension): all permutations of a boolean array that
     (a) nullifies the target index and (b) nullifies a number of additional inputs equal to 0, 1 or 2 (determined
     by inputs_to_drop).

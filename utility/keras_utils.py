@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow import keras, RaggedTensorSpec
 from tensorflow.keras.layers import Layer
+from tensorflow.keras import layers
 
 class ConstantThenLinearDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
     def get_config(self):
@@ -136,81 +137,6 @@ def count_network_parameters(network):
     return tf.reduce_sum([tf.reduce_prod(v.shape) for v in network.trainable_weights])
 
 
-# class DifferentiablePalettePerImage(Layer):
-#     def __init__(self, temperature=1.0, **kwargs):
-#         super().__init__(**kwargs)
-#         self.temperature = temperature
-#
-#     def call(self, inputs):
-#         """
-#         Args:
-#             inputs: Tuple of (images, palettes)
-#             - images: Tensor of shape [B, H, W, C] (channels_last)
-#             - palettes: Tensor of shape [B, K, C] (different K per batch allowed)
-#         Returns:
-#             Quantized images: Tensor of shape [B, H, W, C]
-#         """
-#         images, palettes = inputs
-#
-#         # Add extra dimensions for broadcasting
-#         images_expanded = tf.expand_dims(images, axis=-2)  # [B, H, W, 1, C]
-#         palettes_expanded = tf.expand_dims(palettes, axis=1)  # [B, 1, 1, K, C]
-#         palettes_expanded = tf.expand_dims(palettes_expanded, axis=1)
-#
-#         # Compute squared distances between pixels and palette colors
-#         distances = tf.reduce_sum(
-#             (images_expanded - palettes_expanded) ** 2,
-#             axis=-1
-#         )  # [B, H, W, K]
-#
-#         # Convert distances to weights using softmax with temperature
-#         weights = tf.nn.softmax(-distances / self.temperature, axis=-1)
-#
-#         # Weighted sum of palette colors
-#         quantized = tf.einsum("bhwk,bkc->bhwc", weights, palettes)
-#
-#         return quantized
-#
-#     def get_config(self):
-#         config = super().get_config()
-#         config.update({"temperature": self.temperature})
-#         return config
-#
-#
-# # Usage example:
-# if __name__ == "__main__":
-#     # Create layer
-#     palette_layer = DifferentiablePalettePerImage(temperature=1.0)
-#
-#     # Create dummy input (2 images in batch)
-#     batch_size = 2
-#     img_size = 1
-#     channels = 4
-#
-#     # Random images [B, H, W, C]
-#     generated_images = tf.random.uniform((batch_size, img_size, img_size, channels))
-#
-#     # Different palette per image [B, K, C]
-#     palettes = tf.ragged.constant([
-#         # First image's palette (3 colors)
-#         [[0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 1.0]],# [0.5, 0.5, 0.5, 1.0]],
-#         # Second image's palette (3 different colors)
-#         [[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0]]
-#     ], dtype=tf.float32)
-#
-#     # Process images
-#     quantized_images = palette_layer((generated_images, palettes))
-#
-#     print("Input images shape:", generated_images.shape)
-#     print("Palettes shape:", palettes.shape)
-#     print("Output shape:", quantized_images.shape)
-#     print("Output 1 max:", tf.reduce_max(quantized_images[0]).numpy())
-#     print("Output 2 max:", tf.reduce_max(quantized_images[1]).numpy())
-#     print("generated_images[0]:", generated_images[0])
-#     print("quantized[0]:", quantized_images[0])
-#     print("generated_images[1]:", generated_images[1])
-#     print("quantized[1]:", quantized_images[1])
-
 # ------ layer in which each palette can have a different number of colors ------
 # this refrains from using vectorized operations, which make it slower for longer batches
 class DifferentiablePaletteQuantization(Layer):
@@ -268,138 +194,6 @@ class DifferentiablePaletteQuantization(Layer):
         return input_shape[0]
 
 
-# # Usage example:
-# if __name__ == "__main__":
-#     # Create layer
-#     palette_layer = DynamicDifferentiablePalette(temperature=0.01)
-#
-#     # Batch of 3 images with different palette sizes
-#     batch_size = 3
-#     img_size = 2
-#     channels = 3
-#
-#     # Random images [B, H, W, C]
-#     generated_images = tf.random.uniform((batch_size, img_size, img_size, channels))
-#
-#     # Ragged palettes (different K per image)
-#     palettes = tf.ragged.constant([
-#         # Image 1: 2 colors
-#         [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0]],
-#         # Image 2: 3 colors
-#         [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-#         # Image 3: 4 colors
-#         [[1.0, 1.0, 0.0], [0.0, 1.0, 1.0], [1.0, 0.0, 1.0], [0.5, 0.5, 0.5]]
-#     ], dtype=tf.float32)
-#
-#     # Process images
-#     quantized_images = palette_layer((generated_images, palettes))
-#
-#     print("Input shape:", generated_images.shape)
-#     print("Palettes:", palettes)
-#     print("Output shape:", quantized_images.shape)
-#     print("Output 0 max:", tf.reduce_max(quantized_images[0]).numpy())
-#     print("Output 1 max:", tf.reduce_max(quantized_images[1]).numpy())
-#     print("Output 2 max:", tf.reduce_max(quantized_images[2]).numpy())
-#     print("generated_images[0]:", generated_images[1])
-#     print("quantized_images[0]:", quantized_images[1])
-
-
-# ---- layer that quantizes to same-size palettes that are padded with an invalid value ----
-# it uses a mask to indicate which colors are valid
-# uses vectorized operations, but might use much more memory than necessary
-# class MaskedDifferentiablePalette(Layer):
-#     def __init__(self, max_colors=64, temperature=1.0, invalid_value=-1.0, **kwargs):
-#         super().__init__(**kwargs)
-#         self.max_colors = max_colors
-#         self.temperature = temperature
-#         self.invalid_value = invalid_value
-#
-#     def call(self, inputs):
-#         """
-#         Args:
-#             inputs: Tuple of (images, palettes)
-#             - images: Tensor of shape [B, H, W, C]
-#             - palettes: Tensor of shape [B, max_colors, C] (padded with invalid_value)
-#         Returns:
-#             Quantized images: Tensor of shape [B, H, W, C]
-#         """
-#         images, palettes = inputs
-#
-#         # Create validity mask [B, max_colors]
-#         validity_mask = tf.reduce_any(
-#             tf.not_equal(palettes, self.invalid_value),
-#             axis=-1
-#         )  # True for valid colors
-#
-#         # Replace invalid colors with zeros (won't affect distance calculation)
-#         sanitized_palettes = tf.where(
-#             tf.expand_dims(validity_mask, -1),
-#             palettes,
-#             tf.zeros_like(palettes)
-#         )
-#
-#         # Calculate distances [B, H, W, max_colors]
-#         images_exp = tf.expand_dims(images, 3)  # [B, H, W, 1, C]
-#         palettes_exp = tf.expand_dims(sanitized_palettes, [1, 2])  # [B, 1, 1, K, C]
-#         distances = tf.reduce_sum((images_exp - palettes_exp) ** 2, axis=-1)
-#
-#         # Apply large distance to invalid colors
-#         large_distance = 1e9
-#         adjusted_distances = tf.where(
-#             tf.expand_dims(validity_mask, [1, 2]),  # [B, 1, 1, K]
-#             distances,
-#             large_distance * tf.ones_like(distances)
-#         )
-#
-#         # Compute weights [B, H, W, max_colors]
-#         weights = tf.nn.softmax(-adjusted_distances / self.temperature, axis=-1)
-#
-#         # Zero out weights for invalid colors
-#         masked_weights = weights * tf.cast(tf.expand_dims(validity_mask, [1, 2]), tf.float32)
-#
-#         # Normalize weights (handle cases with some invalid colors)
-#         sum_weights = tf.reduce_sum(masked_weights, axis=-1, keepdims=True) + 1e-8
-#         normalized_weights = masked_weights / sum_weights
-#
-#         # Compute quantized values
-#         quantized = tf.einsum('bhwk,bkc->bhwc', normalized_weights, palettes)
-#
-#         return quantized
-#
-#     def get_config(self):
-#         config = super().get_config()
-#         config.update({
-#             "max_colors": self.max_colors,
-#             "temperature": self.temperature,
-#             "invalid_value": self.invalid_value
-#         })
-#         return config
-#
-#
-# # Usage example:
-# if __name__ == "__main__":
-#     B, H, W, C = 2, 32, 32, 3
-#     max_colors = 5
-#     invalid = -1.0
-#
-#     # Example palettes (batch_size=2, max_colors=5, channels=3)
-#     palettes = tf.constant([
-#         # First image palette: 3 valid colors + 2 invalid
-#         [[1, 0, 0], [0, 1, 0], [0, 0, 1], [invalid] * 3, [invalid] * 3],
-#         # Second image palette: 2 valid colors + 3 invalid
-#         [[1, 1, 0], [0, 1, 1], [invalid] * 3, [invalid] * 3, [invalid] * 3]
-#     ], dtype=tf.float32)
-#
-#     images = tf.random.uniform((B, H, W, C))
-#     layer = MaskedDifferentiablePalette(max_colors=5, temperature=0.1)
-#     quantized = layer((images, palettes))
-#
-#     print("Input shape:", images.shape)
-#     print("Quantized shape:", quantized.shape)
-#     print("First image max values:", tf.reduce_max(quantized[0], axis=[0, 1]))
-#     print("Second image max values:", tf.reduce_max(quantized[1], axis=[0, 1]))
-
-
 class PaletteExtractor(Layer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -447,3 +241,127 @@ class PaletteExtractor(Layer):
     def get_config(self):
         config = super().get_config()
         return config
+
+
+class PaletteTransformerEncoder(layers.Layer):
+    def __init__(self, embed_dim, num_layers=2, **kwargs):
+        super().__init__(**kwargs)
+        self.embed_dim = embed_dim
+        self.num_layers = num_layers
+        self.num_heads = 4
+        self.head_dim = embed_dim // self.num_heads
+
+    def build(self, input_shape):
+        self.proj = layers.Dense(self.embed_dim)
+        self.enc_layers = [
+            layers.MultiHeadAttention(
+                num_heads=self.num_heads,
+                key_dim=self.head_dim
+            ) for _ in range(self.num_layers)
+        ]
+        self.layer_norms = [layers.LayerNormalization() for _ in range(self.num_layers)]
+
+    def call(self, inputs):
+        # print(f"inputs.shape: {inputs.shape}")
+        # tf.print(f"inputs.shape: {inputs.shape}")
+        if isinstance(inputs, tf.RaggedTensor):
+            colors = inputs.to_tensor()  # [batch, max_colors, channels]
+            mask = tf.sequence_mask(inputs.row_lengths(), tf.shape(colors)[1])
+        else:
+            colors = inputs
+            mask = tf.ones((tf.shape(colors)[0], tf.shape(colors)[1]), dtype=tf.bool)
+
+        num_colors = tf.shape(colors)[1]
+
+        # Project to embedding space
+        x = self.proj(colors)  # [batch, num_colors, embed_dim]
+
+        # Prepare 3D attention mask [batch, num_heads, num_colors]
+        attention_mask = tf.repeat(mask[:, tf.newaxis, ...], repeats=num_colors, axis=1)
+        # [batch, num_heads, num_colors]
+
+        # Transformer layers
+        for attn, ln in zip(self.enc_layers, self.layer_norms):
+            # MultiHeadAttention expects [batch, seq_len, embed_dim]
+            x_attn = attn(x, x, x, attention_mask=attention_mask)
+            x = ln(x + x_attn)
+
+        # Masked mean pooling
+        mask_expanded = tf.expand_dims(tf.cast(mask, x.dtype), -1)  # [batch, num_colors, 1]
+        # tf.print(f"mask_expanded.shape: {mask_expanded.shape}")
+        masked_count = tf.reduce_sum(mask_expanded, axis=1)
+        # tf.print(f"masked_count.shape: {masked_count.shape}")
+        masked_x = tf.reduce_sum(x * mask_expanded, axis=1)  # [batch, embed_dim]
+        # tf.print(f"masked_x.shape: {masked_x.shape}")
+        return masked_x / masked_count
+
+    def compute_output_spec(self, inputs):
+        return keras.KerasTensor(shape=(inputs.shape[0], self.embed_dim), dtype="float32")
+
+
+class PaletteConditioner(layers.Layer):
+    def __init__(self, embed_dim, num_heads=4, **kwargs):
+        super().__init__(**kwargs)
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+
+    def build(self, input_shapes):
+        # input_shapes: [(batch, H, W, C), (batch, embed_dim)]
+        image_shape, palette_shape = input_shapes
+
+        # Projections
+        self.query_proj = layers.Dense(self.embed_dim)
+        self.key_proj = layers.Dense(self.embed_dim)
+        self.value_proj = layers.Dense(self.embed_dim)
+
+        self.attention = layers.MultiHeadAttention(
+            num_heads=self.num_heads,
+            key_dim=self.head_dim
+        )
+        self.output_proj = layers.Dense(image_shape[-1])  # Match input channels
+        self.built = True
+
+    def call(self, inputs):
+        image_features, palette_embed = inputs
+
+        # Project queries (image features)
+        queries = self.query_proj(image_features)  # [B, H, W, embed_dim]
+        batch_size = tf.shape(queries)[0]
+        h, w = tf.shape(queries)[1], tf.shape(queries)[2]
+
+        # Reshape queries to [B, seq_len, num_heads, head_dim]
+        queries_flat = tf.reshape(queries, [batch_size, h * w, self.embed_dim])
+        queries_4d = tf.reshape(
+            queries_flat,
+            [batch_size, h * w, self.num_heads, self.head_dim]
+        )
+
+        # Project keys/values (palette)
+        keys = self.key_proj(palette_embed)  # [B, embed_dim]
+        values = self.value_proj(palette_embed)
+
+        # Expand palette to match attention dims
+        keys = tf.reshape(
+            keys,
+            [batch_size, 1, self.num_heads, self.head_dim]
+        )
+        values = tf.reshape(
+            values,
+            [batch_size, 1, self.num_heads, self.head_dim]
+        )
+
+        # Cross-attention
+        attended = self.attention(
+            query=queries_4d,
+            key=keys,
+            value=values,
+            return_attention_scores=False
+        )  # [B, h*w, num_heads, head_dim]
+
+        # Reshape back to spatial
+        attended = tf.reshape(
+            attended,
+            [batch_size, h, w, self.embed_dim]
+        )
+        return self.output_proj(attended)

@@ -50,9 +50,10 @@ def batch_extract_palette(images):
 
 def extract_palette_ragged(image):
     """
-    Extracts the unique colors from an image (3D tensor) -- returns a ragged tensor with shape [1, (colors), c]
-    :params: image: a 3D tensor with shape (height, width, channels). Values should be inside [0, 255].
-    :returns: a ragged tensor with shape [1, (num_colors), channels] with the palette colors as uint8 inside [0, 255]
+    Extracts the unique colors from an image (3D+ tensor) -- returns a ragged tensor with shape [1, (nc), c]
+    :params: image: a tensor with shape (s, s, c). Values should be inside [0, 255]. It can have more than 3 dimensions,
+        such as [d, s, s, c]: the code flattens all but the last dimension and finds the unique colors.
+    :returns: a ragged tensor with shape [1, (nc), c] with the palette colors as uint8 inside [0, 255]
     """
     channels = tf.shape(image)[-1]
 
@@ -74,7 +75,9 @@ def extract_palette_ragged(image):
 def batch_extract_palette_ragged(images):
     """
     Extracts the palette of each image in the batch, returning a ragged tensor of shape [b, (colors), c]
-    :param images: batch of images: [b, s, s, c] with values inside [-1, 1]
+    :param images: batch of images: [b, s, s, c] with values inside [-1, 1]. Can also be [b, d, s, s, c], in which
+        case it extracts a single palette for each example in the batch (i.e. the palette is the union of the colors
+        from all domains: character in the 4 poses).
     :return: a ragged tensor with shape [b, (colors), c] with the palette colors as float32 inside [-1, 1]
     """
     images = dataset_utils.denormalize(images)
@@ -223,3 +226,45 @@ def count_unused_palette_colors(images, palettes, threshold=1e-3):
     unused_count = tf.reduce_sum(tf.cast(unused_colors, tf.int32), axis=-1)  # Count unused colors for each image
 
     return unused_count
+
+
+@tf.function
+def batch_perturb_palette(images_5d):
+    """
+    Applies random hue, saturation and brightness perturbations to a 5D batch of images with shape [b, d, s, s, c].
+    Each collection of d images in the batch uses the same color transformations, as they represent the same character
+    but in different oses. It also returns the resulting palette. Images from all domains are concatenated together to find the palette that is
+    the union of their colors.
+    :param images_5d: A 5D tensor with shape [b, d, s, s, c] in the range [-1, 1].
+    :return: a tuple with the perturbed images ([b, d, s, s, c]) and the resulting palettes ([b, (nc), c]).
+    """
+    # Get the batch size and number of domains
+    batch_size = tf.shape(images_5d)[0]
+    domains = tf.shape(images_5d)[1]
+
+    # 1. converts images to HSV
+    images_alpha = images_5d[..., 3:]
+    images_hsv = tf.image.rgb_to_hsv(images_5d[..., :3] * 0.5 + 0.5)
+    # converts to [0, 1] range, then to HSV
+
+    # 2. applies random perturbations to hue, saturation and brightness that is the same for each example in the batch,
+    # but different across different examples in the batch
+    hue_delta = tf.random.uniform([batch_size, 1, 1, 1], minval=-0.40, maxval=0.40)
+    saturation_delta = tf.random.uniform([batch_size, 1, 1, 1], minval=-0.1, maxval=0.1)
+    value_delta = tf.random.uniform([batch_size, 1, 1, 1], minval=-0.15, maxval=0.15)
+    new_hue = images_hsv[..., 0] + hue_delta
+    new_sat = images_hsv[..., 1] + saturation_delta
+    new_val = images_hsv[..., 2] + value_delta
+    images_hsv = tf.stack([new_hue, new_sat, new_val], axis=-1)
+    images_hsv = tf.clip_by_value(images_hsv, 0.0, 1.0)
+
+    # 3. converts images back to RGB and concatenates back with the alpha channel
+    perturbed_images_rgb = tf.image.hsv_to_rgb(images_hsv) * 2.0 - 1.0
+    perturbed_images = tf.concat([perturbed_images_rgb, images_alpha], axis=-1)
+    # perturbed_images (shape=[b, d, s, s, c]), in the range [-1, 1]
+
+    # 4. extracts the palette of the concatenated domain images (each example in the batch has d domains)
+    perturbed_palettes = batch_extract_palette_ragged(perturbed_images)
+
+    # 5. returns the perturbed images and the palettes
+    return perturbed_images, perturbed_palettes
