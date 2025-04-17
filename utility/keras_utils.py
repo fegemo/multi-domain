@@ -194,6 +194,74 @@ class DifferentiablePaletteQuantization(Layer):
         return input_shape[0]
 
 
+class GumbelSoftmaxPaletteQuantization(Layer):
+    def __init__(self, max_palette_size, **kwargs):
+        super().__init__(**kwargs)
+        self.temperature = self.add_weight(shape=(), name="temperature", trainable=False)
+        self.max_palette_size = max_palette_size
+        self.invalid_color = tf.constant([-1., -1., -1., -1.], dtype=tf.float32)
+
+    def call(self, inputs, training=None):
+        """
+        Returns the image with its colors quantized to the palette. During training, it is done with
+        a soft assignment using the softmax function with a temperature. During inference, it is done
+        with a hard assignment, using the palette clor with the closest logit (hence, losing differentiability).
+
+        :param inputs: Tuple of (images, palettes), with shapes [b, h, w, c] and [b, (k), c] respectively
+        :param training: True if training (uses soft assignment through softmax with temperature)
+            or False otherwise (uses hard assignment, losing differentiability)
+        :return: Quantized images: Tensor of shape [b, h, w, c]
+        """
+        images, palettes = inputs
+        channels = palettes.shape[-1]
+
+        # Process each (image, palette) pair independently
+        def quantize_single_image(args):
+            # img: [s, s, c]
+            # palette: [nc, c] (variable nc)
+            img, palette = args
+            if training:
+                eps = 1e-20
+                uniform_noise = tf.random.uniform(tf.shape(img), 0, 1)
+                gumbel_noise = -tf.math.log(-tf.math.log(uniform_noise + eps) + eps)
+                palette_probs = tf.nn.softmax((img + gumbel_noise) / self.temperature)
+            else:
+                palette_probs = tf.one_hot(tf.argmax(img, axis=-1), self.max_palette_size)
+            palette_expanded = palette[tf.newaxis, tf.newaxis, ...]
+            # palette_expanded (shape=[1, 1, nc, c])
+            palette_probs_expanded = palette_probs[..., tf.newaxis]
+            # palette_probs_expanded (shape=[s, s, nc, 1])
+            quantized_image = tf.reduce_sum(palette_probs_expanded * palette_expanded, axis=-2)
+            # quantized_image (shape=[s, s, c])
+            return quantized_image
+
+        # there is no easy way to vectorize this operation, so we use map_fn to
+        # process each <image,palette> pair independently
+        images_shape = images.shape
+        image_size = images_shape[1]
+        # tf.print("palettes.shape", palettes.shape)
+        # tf.print("tf.shape(palettes)", tf.shape(palettes))
+        if isinstance(palettes, tf.RaggedTensor):
+            palettes = palettes.to_tensor(default_value=self.invalid_color, shape=[images_shape[0], self.max_palette_size, channels])
+        elif palettes.shape[1] < self.max_palette_size:
+            number_of_colors = palettes.shape[1]
+            palettes = tf.pad(palettes, [[0, 0], [0, self.max_palette_size - number_of_colors], [0, 0]], constant_values=-1.)
+        return tf.map_fn(
+            fn=quantize_single_image,
+            elems=(images, palettes),
+            fn_output_signature=tf.TensorSpec([image_size, image_size, channels], tf.float32),
+            infer_shape=False
+        )
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"temperature": self.temperature})
+        return config
+
+    def compute_output_shape(self, input_shape):
+        return input_shape[0]
+
+
 class PaletteExtractor(Layer):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

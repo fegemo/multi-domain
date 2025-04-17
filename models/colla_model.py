@@ -63,11 +63,13 @@ class CollaGANModel(S2SModel):
                                                          config.output_channels,
                                                          config.capacity)
             }
-        elif config.generator in ["palette"]:
+        elif config.generator in ["palette", "palette-gumbel"]:
+            should_use_gumbel_softmax = config.generator == "palette-gumbel"
             return {
                 "generator": collagan_palette_affluent_generator(config.number_of_domains, config.image_size,
                                                                  config.output_channels,
-                                                                 config.capacity)
+                                                                 config.capacity,
+                                                                 gumbel_softmax=should_use_gumbel_softmax)
             }
         elif config.generator in ["palette-transformer"]:
             return {

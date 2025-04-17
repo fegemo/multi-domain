@@ -254,7 +254,8 @@ def collagan_original_discriminator(number_of_domains, image_size, output_channe
 
 # most of this code was copied from the collagan_affluent_generator function
 # we just added functionality in the end to quantize to the palette
-def collagan_palette_affluent_generator(number_of_domains, image_size, output_channels, capacity=1):
+def collagan_palette_affluent_generator(number_of_domains, image_size, output_channels, capacity=1,
+                                        gumbel_softmax=False):
     # UnetINDiv4 extracted from:
     # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L941
     def conv_block(block_input, filters, regularizer="l2"):
@@ -353,18 +354,22 @@ def collagan_palette_affluent_generator(number_of_domains, image_size, output_ch
     up_conv_0_1____ = conv_block(concat_skip_0__, filters_per_domain * 1)
     up_conv_0_2____ = conv_block(up_conv_0_1____, filters_per_domain * 1)
 
-    # output = conv_1x1__(up_conv_0_2____, output_channels)
-    # return tf.keras.Model(inputs=inputs, outputs=[pre_output, quantized_output], name="CollaGANPaletteGenerator")
-    # ...
-    # ...
-    # added beyond CollaGAN to make pixel values between [-1,1]
-    pre_output = conv_1x1__(up_conv_0_2____, output_channels)
+    if not gumbel_softmax:
+        # added beyond CollaGAN to make pixel values between [-1,1]
+        pre_output = conv_1x1__(up_conv_0_2____, output_channels)
+    else:
+        MAX_PALETTE_SIZE = 64
+        pre_output = layers.Conv2D(MAX_PALETTE_SIZE, kernel_size=1, strides=1, padding="same", kernel_regularizer="l2")(up_conv_0_2____)
+        # pre_output = layers.Lambda(lambda x: tf.clip_by_value(x, -10., 10.))(pre_output)
+        # pre_output = conv_block(up_conv_0_2____, MAX_PALETTE_SIZE)
 
     # quantize to the palette
     palette_input = layers.Input(shape=[None, output_channels], name="desired_palette")
     palettes = palette_input
     inputs += [palette_input]
-    quantization_layer = keras_utils.DifferentiablePaletteQuantization()
+
+    quantization_layer = keras_utils.DifferentiablePaletteQuantization() if not gumbel_softmax \
+        else keras_utils.GumbelSoftmaxPaletteQuantization(MAX_PALETTE_SIZE)
     quantized_output = quantization_layer((pre_output, palettes))
 
     model = tf.keras.Model(inputs=inputs, outputs=quantized_output, name="CollaGANPaletteGenerator")
