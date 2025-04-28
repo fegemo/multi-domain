@@ -27,7 +27,7 @@ if __name__ == "__main__":
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "model-name": "collagan-palette-transformer",
-            "experiment": "&generator,&adhoc",
+            "experiment": "&generator,&perturb-palette",
             "annealing": "linear",
             "temperature": 0.1,
             "lambda-adversarial": 1.,
