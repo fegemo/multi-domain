@@ -31,7 +31,7 @@ if gpus:
 
 import setup
 from utility.dataset_utils import load_multi_domain_ds
-from models.colla_model import CollaGANModel
+from models.colla_model import CollaGANModel, CollaGANModelShuffledBatches
 from models.munit_model import MunitModel
 from models.remic_model import RemicModel
 from models.yamata_model import YamataModel
@@ -65,7 +65,10 @@ if config.model == "stargan-unpaired":
 elif config.model == "stargan-paired":
     class_name = PairedStarGANModel
 elif config.model == "collagan":
-    class_name = CollaGANModel
+    if not config.shuffled_batches:
+        class_name = CollaGANModel
+    else:
+        class_name = CollaGANModelShuffledBatches
 elif config.model == "munit":
     class_name = MunitModel
 elif config.model == "remic":

@@ -134,3 +134,32 @@ def seconds_to_human_readable(time):
     time_string += f"{minutes:02.0f}m:{seconds:02.0f}s"
 
     return time_string
+
+
+def show_image_matrix(image_tensor, in_ndc_range=True):
+    """
+    Uses matplotlib to show the image_tensor using a number of rows equals to the first dimension and columns as the
+    second dimension.
+    :param image_tensor: a tensor of images with shape [rows, height, width, channels] or
+        [rows, columns, height, width, channels]
+    :param in_ndc_range: whether the image is in the [-1, 1] range and needs to be converted to [0, 1]
+    :return:
+    """
+    if in_ndc_range:
+        image_tensor = (image_tensor * 0.5) + 0.5
+
+    shape = tf.shape(image_tensor)#.numpy()
+    if len(shape) == 4:
+        image_tensor = tf.reshape(image_tensor, [shape[0], 1, shape[1], shape[2], shape[3]])
+        shape = tf.shape(image_tensor)#.numpy()
+    num_rows, num_cols = int(shape[0]), int(shape[1])
+
+    fig = plt.figure(figsize=(num_cols, num_rows))
+    for i in range(num_rows):
+        for j in range(num_cols):
+            ax = fig.add_subplot(num_rows, num_cols, i * num_cols + j + 1)
+            ax.axis("off")
+            image = image_tensor[i, j]
+            plt.imshow(image)
+    fig.tight_layout()
+    plt.show()

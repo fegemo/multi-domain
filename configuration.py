@@ -74,6 +74,9 @@ class OptionParser(metaclass=SingletonMeta):
                                                                      " the source image just like in Pix2Pix (only"
                                                                      " for stargan-paired and collagan).",
                                  action="store_true", default=False)
+        self.parser.add_argument("--shuffled-batches", help="Shuffles the real and fake images batches "
+                                                            "before showing them to the discriminator in collagan. ",
+                                 default=False, action="store_true")
         self.parser.add_argument("--source-domain-aware-generator", help="Makes the generator receive the source domain"
                                                                          " besides the target and source image"
                                                                          " (only for stargan-paired)",

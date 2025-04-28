@@ -728,6 +728,279 @@ class CollaGANModel(S2SModel):
         plt.close(fig)
 
 
+class CollaGANModelShuffledBatches(CollaGANModel):
+    def __init__(self, config):
+        super(CollaGANModelShuffledBatches, self).__init__(config)
+
+    def generator_loss(self, fake_predicted_patches, cycled_predicted_patches, fake_image, real_image,
+                       cycled_images, source_images_5d,
+                       fake_predicted_domain, cycle_predicted_domain, target_domain,
+                       input_dropout_mask, batch_shape, fw_target_palette, bw_target_palette, temperature):
+        # cycled_images (shape=[b*d, s, s, c])
+        # input_dropout_mask (shape=[b, d])
+        number_of_domains = batch_shape[0]
+        batch_size, image_size, channels = batch_shape[1], batch_shape[2], batch_shape[4]
+        number_of_domains_float = tf.cast(number_of_domains, tf.float32)
+
+        # the source_images need to have the forward target images excluded so it can be properly compared
+        # against the cycled_images
+        bw_target_domain = tf.tile(tf.range(number_of_domains)[tf.newaxis, ...], [batch_size, 1])
+        eliminate_fw_target_mask = tf.not_equal(bw_target_domain, target_domain[..., tf.newaxis])
+        bw_target_domain = tf.reshape(tf.boolean_mask(bw_target_domain, eliminate_fw_target_mask),
+                                      [batch_size, number_of_domains - 1])
+
+        source_images_5d = tf.gather(source_images_5d, bw_target_domain, batch_dims=1)
+        source_images = tf.reshape(source_images_5d, [batch_size * (number_of_domains - 1), image_size, image_size, channels])
+        cycled_images_5d = tf.reshape(cycled_images, [batch_size, number_of_domains - 1, image_size, image_size, channels])
+
+        input_dropout_mask = tf.gather(input_dropout_mask, bw_target_domain, batch_dims=1)
+        input_dropout_mask_1d = tf.reshape(input_dropout_mask, [batch_size * (number_of_domains - 1)])
+        # source_images (shape=[b, d, s, s, c])
+        # cycle_images_5d (shape=[b, d, s, s, c])
+        # input_dropout_mask_1d (shape=[b*d])
+
+        # adversarial (lsgan) loss
+        adversarial_forward__loss = tf.reduce_mean(tf.math.squared_difference(fake_predicted_patches, 1.))
+        adversarial_backward_loss = tf.reduce_mean(tf.math.squared_difference(cycled_predicted_patches, 1.)) * \
+                                    (number_of_domains_float - 1.)
+        adversarial_loss = (adversarial_forward__loss + adversarial_backward_loss) / number_of_domains_float
+
+        # l1 (forward, backward)
+        l1_forward__loss = tf.reduce_mean(tf.abs(real_image - fake_image))
+        # l1_backward_loss = tf.reduce_mean(
+        #     tf.reduce_sum(
+        #         # mean of pixel l1s per image, but 0 for dropped out input images
+        #         tf.reduce_mean(tf.abs(source_images_5d - cycled_images_5d), axis=[2, 3, 4]) * input_dropout_mask,
+        #         axis=1) * tf.reduce_sum(input_dropout_mask, axis=1),
+        #     axis=0)
+        source_images_5d_kept = tf.boolean_mask(source_images_5d, tf.cast(input_dropout_mask, tf.int32))
+        cycled_images_5d_kept = tf.boolean_mask(cycled_images_5d, tf.cast(input_dropout_mask, tf.int32))
+        l1_backward_loss = tf.reduce_mean(tf.abs(source_images_5d_kept - cycled_images_5d_kept)) * \
+                           tf.reduce_sum(input_dropout_mask)
+
+        # ssim loss (forward, backward)
+        ssim_forward_ = tf.image.ssim(fake_image + 1., real_image + 1., 2)
+        ssim_backward = tf.image.ssim(cycled_images + 1., source_images + 1., 2) * input_dropout_mask_1d
+        # ssim_forward_ (shape=[b,])
+        # ssim_backward (shape=[b*d,])
+        ssim_forward__loss = tf.reduce_mean(-tf.math.log((1. + ssim_forward_) / 2.))
+        # ssim_forward_loss (shape=[b,])
+        ssim_backward_loss = tf.reduce_mean(-tf.math.log((1. + ssim_backward) / 2.))
+        # ssim_backward_loss (shape=[b,])
+        ssim_loss = (ssim_forward__loss + ssim_backward_loss * (number_of_domains_float - 1)) / number_of_domains_float
+
+        # domain classification loss (forward, backward)
+        forward__domain = tf.one_hot(target_domain, number_of_domains)
+        backward_domain = tf.reshape(tf.one_hot(bw_target_domain, number_of_domains),
+                                     [batch_size * (number_of_domains - 1), number_of_domains])
+        backward_predicted_domain = cycle_predicted_domain
+        # forward__domain (shape=[b, d])
+        # backward_domain (shape=[b*d, d])
+
+        classification_forward__loss = self.cce(forward__domain, fake_predicted_domain)
+        classification_backward_loss = self.cce(backward_domain, backward_predicted_domain) * \
+                                       (number_of_domains_float - 1.)
+        classification_loss = (classification_forward__loss + classification_backward_loss) / number_of_domains_float
+
+        # palette loss (forward, backward)
+        # palette_forward_ = palette_utils.calculate_palette_coverage_loss(fake_image, fw_target_palette, temperature)
+        # palette_backward = palette_utils.calculate_palette_coverage_loss(cycled_images,
+        #                                                                  tf.tile(bw_target_palette,
+        #                                                                          [number_of_domains - 1, 1, 1]),
+        #                                                                  temperature)
+        palette_forward_ = 0.
+        palette_backward = 0.
+        palette_loss = palette_forward_ + palette_backward
+
+        # histogram loss (forward)
+        # real_histogram = histogram_utils.calculate_rgbuv_histogram(real_image)
+        # fake_histogram = histogram_utils.calculate_rgbuv_histogram(fake_image)
+        # histogram_loss = histogram_utils.hellinger_loss(real_histogram, fake_histogram)
+        histogram_loss = 0.
+
+        # regularization loss (l2 - weight decay)
+        regularization_loss = tf.reduce_sum(self.generator.losses)
+
+        # observation: ssim loss uses only the backward (cycled) images... that's on the colla's code and paper
+        total_loss = self.lambda_adversarial * adversarial_loss + \
+            self.lambda_l1 * l1_forward__loss + self.lambda_l1_backward * l1_backward_loss + \
+            self.lambda_ssim * ssim_backward_loss + \
+            self.lambda_domain * classification_loss + \
+            self.lambda_palette * palette_loss + \
+            self.lambda_histogram * histogram_loss + \
+            self.lambda_regularization * regularization_loss
+
+        return {"total": total_loss, "adversarial": adversarial_loss, "l1_forward": l1_forward__loss,
+                "l1_backward": l1_backward_loss, "ssim": ssim_loss, "domain": classification_loss,
+                "palette": palette_loss, "histogram": histogram_loss, "weight_decay": regularization_loss}
+
+    def discriminator_loss(self, source_predicted_patches, cycled_predicted_patches, source_predicted_domain,
+                           source_label_domain, real_predicted_patches, fake_predicted_patches, batch_shape):
+        number_of_domains, batch_size = batch_shape[0], batch_shape[1]
+
+        adversarial_real = tf.reduce_mean(tf.math.squared_difference(real_predicted_patches, 1.))
+        adversarial_fake = tf.reduce_mean(tf.math.square(fake_predicted_patches))
+        adversarial_forward_loss = adversarial_real + adversarial_fake
+
+        adversarial_backward_loss = tf.reduce_mean(tf.math.squared_difference(source_predicted_patches, 1.)) + \
+            tf.reduce_mean(tf.math.square(cycled_predicted_patches))
+        adversarial_backward_loss *= tf.cast(number_of_domains, tf.float32)
+
+        adversarial_loss = (adversarial_forward_loss + adversarial_backward_loss) / \
+                           (tf.cast(number_of_domains, tf.float32) + 1.)
+
+        source_label_domain = tf.one_hot(source_label_domain, number_of_domains)
+        # source_label_domain (shape=[b*d, d])
+        domain_loss = self.cce(source_label_domain, source_predicted_domain)
+
+        total_loss = adversarial_loss + domain_loss
+        return {"total": total_loss, "real": adversarial_real, "fake": adversarial_fake, "domain": domain_loss}
+
+    @tf.function
+    def train_step(self, batch, step, evaluate_steps, t):
+        # [d, b, s, s, c] = domain, batch, size, size, channels
+        batch_shape = tf.shape(batch)
+        number_of_domains, batch_size, image_size, channels = batch_shape[0], batch_shape[1], batch_shape[2], \
+            batch_shape[4]
+
+        temperature = self.annealing_scheduler.update(t)
+
+        # 1. select a random target domain with a subset of the images as input
+        fw_source_images, fw_target_domain, input_dropout_mask = self.sampler.sample(batch, t)
+        # fw_source_images (shape=[b, d, s, s, c])
+        # fw_target_domain (shape=[b,])
+        # input_dropout_mask (shape=[b, d]), with 0s for images that should be dropped out
+        fw_source_palette = palette_utils.batch_extract_palette_ragged(fw_source_images)
+        # fw_source_palette (shape=[b, (n), c]) as a ragged tensor
+
+        # 1.5. perturb the palette a bit if inside the probability:
+        palette_perturbation_prob = self.config.perturb_palette
+        should_perturb_palette = tf.random.uniform(shape=()) < palette_perturbation_prob
+        if should_perturb_palette:
+            source_images_palette_perturbed, perturbed_palette = palette_utils.batch_perturb_palette(fw_source_images)
+            bw_source_images = source_images_palette_perturbed
+            fw_target_palette = perturbed_palette
+        else:
+            bw_source_images = fw_source_images
+            fw_target_palette = fw_source_palette
+
+        fw_target_image = tf.gather(bw_source_images, fw_target_domain, batch_dims=1)
+        bw_target_palette = fw_source_palette
+        # fw_target_image (shape=[b, s, s, c]) is the target for each example in the batch
+        # bw_target_images (shape=[b, d, s, s, c]) are the original source images that need to be reconstructed
+        # in the backwards pass
+        # bw_target_palette (shape=[b, (n), c]) is the original palette used as target palette for the backwards pass
+
+        # fw_source_images_dropped contains, for each domain, an image or zeros with same shape (dropped out)
+        fw_source_images_dropped = fw_source_images * input_dropout_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
+        # fw_source_images_dropped (shape=[b, d, s, s, c], but with all 0s for dropped images)
+
+        with tf.GradientTape(persistent=True) as tape:
+            # FORWARD PASS:
+            # 1. generate a batch of fake images
+            fw_generator_input = self.gen_supplier(fw_source_images_dropped, fw_target_domain, fw_target_palette)
+            # fw_generator_input (shape=[b, d, s, s, c])
+            fw_genned_image = self.generator(fw_generator_input, training=True)
+            # fw_genned_image (shape=[b, s, s, c])
+
+            # BACKWARD PASS:
+            # 2. generate a batch of cycled images (back to their source domain)
+            bw_generator_input = self.get_cycled_images_input(bw_source_images, fw_target_domain, input_dropout_mask,
+                                                                  fw_genned_image, bw_target_palette, batch_shape)
+            # bw_generator_input (list of [shape=[b*d_target, d, s, s, c], shape=[b*d]])
+            bw_genned_images = self.generator(bw_generator_input, training=True)
+            # bw_genned_images (shape=[b*d_target, s, s, c])
+
+            # 3. discriminate the real (target) and fake images, then the cycled ones and the source (to train the disc)
+            real_predicted, fake_predicted = self.mix_and_discriminate(fw_target_image, fw_genned_image, batch_size)
+            real_predicted_patches, real_predicted_domain = real_predicted
+            fake_predicted_patches, fake_predicted_domain = fake_predicted
+            # xxxx_predicted_patches (shape=[b, 1, 1, 1])
+            # xxxx_predicted_domain  (shape=[b, d] -> logits)
+
+            bw_batch_size = batch_size * (number_of_domains - 1)
+            # fw_source_images (shape=[b, d, s, s, c]), and we need to make it shuffled and [b*d_target, s, s, c]
+            fw_source_images_flattended = tf.reshape(fw_source_images, [-1, image_size, image_size, channels])
+            fw_source_images_shuffle_indices = tf.random.shuffle(tf.range(batch_size * number_of_domains))
+            # fw_source_images_shuffle_indices contains shuffled indices from [0, b*d[
+            fw_source_images_sampled = tf.gather(fw_source_images_flattended, fw_source_images_shuffle_indices)[:bw_batch_size]
+            fw_source_domain_label = tf.gather(tf.tile(tf.range(number_of_domains), [batch_size]), fw_source_images_shuffle_indices)[:bw_batch_size]
+            # if t >= 0.5:
+            #     tf.print("fw_source_domain_label", fw_source_domain_label)
+            #     io_utils.show_image_matrix(fw_source_images_sampled)
+
+            source_predicted, cycle_predicted = self.mix_and_discriminate(fw_source_images_sampled, bw_genned_images,
+                                                                          bw_batch_size)
+            cycle_predicted_patches, cycle_predicted_domain = cycle_predicted
+            source_predicted_patches, source_predicted_domain = source_predicted
+            # source_predicted_patches (shape=[b*d_target, 1, 1, 1])
+            # source_predicted_domain  (shape=[b*d_target, d] -> logits)
+
+            # 4. calculate loss terms for the generator
+            g_loss = self.generator_loss(fake_predicted_patches, cycle_predicted_patches, fw_genned_image,
+                                         fw_target_image, bw_genned_images, fw_source_images, fake_predicted_domain,
+                                         cycle_predicted_domain,
+                                         fw_target_domain, input_dropout_mask, batch_shape,
+                                         fw_target_palette, bw_target_palette, temperature)
+
+            # 5. calculate loss terms for the discriminator
+            d_loss = self.discriminator_loss(source_predicted_patches, cycle_predicted_patches,
+                                             source_predicted_domain, fw_source_domain_label,
+                                             real_predicted_patches, fake_predicted_patches,
+                                             batch_shape)
+
+        generator_gradients = tape.gradient(g_loss["total"], self.generator.trainable_variables)
+        self.generator_optimizer.apply_gradients(zip(generator_gradients, self.generator.trainable_variables))
+
+        discriminator_gradients = tape.gradient(d_loss["total"], self.discriminator.trainable_variables)
+        self.discriminator_optimizer.apply_gradients(
+            zip(discriminator_gradients, self.discriminator.trainable_variables))
+
+        summary_step = step // evaluate_steps
+        with tf.name_scope("generator"):
+            with self.summary_writer.as_default():
+                tf.summary.scalar("total_loss", g_loss["total"], step=summary_step)
+                tf.summary.scalar("adversarial_loss", g_loss["adversarial"], step=summary_step)
+                tf.summary.scalar("domain_loss", g_loss["domain"], step=summary_step)
+                tf.summary.scalar("ssim_loss", g_loss["ssim"], step=summary_step)
+                tf.summary.scalar("l1_forward_loss", g_loss["l1_forward"], step=summary_step)
+                tf.summary.scalar("l1_backward_loss", g_loss["l1_backward"], step=summary_step)
+                tf.summary.scalar("palette_loss", g_loss["palette"], step=summary_step)
+                tf.summary.scalar("histogram_loss", g_loss["histogram"], step=summary_step)
+                tf.summary.scalar("weight_decay", g_loss["weight_decay"], step=summary_step)
+
+        with tf.name_scope("discriminator"):
+            with self.summary_writer.as_default():
+                tf.summary.scalar("total_loss", d_loss["total"], step=summary_step)
+                tf.summary.scalar("real_loss", d_loss["real"], step=summary_step)
+                tf.summary.scalar("fake_loss", d_loss["fake"], step=summary_step)
+                tf.summary.scalar("domain_loss", d_loss["domain"], step=summary_step)
+
+    def mix_and_discriminate(self, real_image, fake_image, half_batch_size):
+        batch_size = half_batch_size * 2
+        discriminator_input = tf.concat([real_image, fake_image], axis=0)
+
+        # create shuffled indices and remember the original positions (through tf.argsort(shuffled))
+        shuffled_indices = tf.random.shuffle(tf.range(batch_size))
+        discriminator_input = tf.gather(discriminator_input, shuffled_indices)
+        inverse_indices = tf.argsort(shuffled_indices)
+
+        # discriminate the shuffled combined half batches
+        predicted_patches, predicted_domain = self.discriminator(discriminator_input, training=True)
+
+        # Get the predictions in the original order
+        patches_ordered = tf.gather(predicted_patches, inverse_indices)
+        domain_ordered = tf.gather(predicted_domain, inverse_indices)
+
+        # split in real and fake predictions
+        real_predicted_patches = patches_ordered[:half_batch_size]
+        real_predicted_domain = domain_ordered[:half_batch_size]
+        fake_predicted_patches = patches_ordered[half_batch_size:]
+        fake_predicted_domain = domain_ordered[half_batch_size:]
+
+        return (real_predicted_patches, real_predicted_domain), (fake_predicted_patches, fake_predicted_domain)
+
+
 class ExampleSampler(ABC):
     def __init__(self, config):
         self.config = config
