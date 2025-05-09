@@ -20,14 +20,14 @@ if __name__ == "__main__":
             "steps": 300000,
             "evaluate-steps": 1000,
             "capacity": 4,
-            "lr": 0.0001,
+            "lr": 0.00001,
             "ttur": 0.2,
-            "lr-decay": "constant-then-linear",
+            "lr-decay": "none",
             "batch": 4,
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "model-name": "collagan-palette-transformer",
-            "experiment": "&generator,&perturb-palette",
+            "experiment": "&generator,&lr,&lr-decay,&perturb-palette",
             "annealing": "linear",
             "temperature": 0.1,
             "lambda-adversarial": 1.,
@@ -39,8 +39,8 @@ if __name__ == "__main__":
             "lambda-palette": 1.0,
             "vram": -1,
         }, {
-            "generator": ["palette", "palette-transformer"],
-            "perturb-palette": [0, 0.2, 0.5, 1.0],
+            "generator": ["palette-transformer"],
+            "perturb-palette": [0, 0.25, 0.5, 0.75, 1.0],
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],
