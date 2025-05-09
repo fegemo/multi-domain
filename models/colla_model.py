@@ -803,20 +803,20 @@ class CollaGANModelShuffledBatches(CollaGANModel):
         classification_loss = (classification_forward__loss + classification_backward_loss) / number_of_domains_float
 
         # palette loss (forward, backward)
-        # palette_forward_ = palette_utils.calculate_palette_coverage_loss(fake_image, fw_target_palette, temperature)
-        # palette_backward = palette_utils.calculate_palette_coverage_loss(cycled_images,
-        #                                                                  tf.tile(bw_target_palette,
-        #                                                                          [number_of_domains - 1, 1, 1]),
-        #                                                                  temperature)
-        palette_forward_ = 0.
-        palette_backward = 0.
+        palette_forward_ = palette_utils.calculate_palette_coverage_loss(fake_image, fw_target_palette, temperature)
+        palette_backward = palette_utils.calculate_palette_coverage_loss(cycled_images,
+                                                                         tf.tile(bw_target_palette,
+                                                                                 [number_of_domains - 1, 1, 1]),
+                                                                         temperature)
+        # palette_forward_ = 0.
+        # palette_backward = 0.
         palette_loss = palette_forward_ + palette_backward
 
         # histogram loss (forward)
-        # real_histogram = histogram_utils.calculate_rgbuv_histogram(real_image)
-        # fake_histogram = histogram_utils.calculate_rgbuv_histogram(fake_image)
-        # histogram_loss = histogram_utils.hellinger_loss(real_histogram, fake_histogram)
-        histogram_loss = 0.
+        real_histogram = histogram_utils.calculate_rgbuv_histogram(real_image)
+        fake_histogram = histogram_utils.calculate_rgbuv_histogram(fake_image)
+        histogram_loss = histogram_utils.hellinger_loss(real_histogram, fake_histogram)
+        # histogram_loss = 0.
 
         # regularization loss (l2 - weight decay)
         regularization_loss = tf.reduce_sum(self.generator.losses)
