@@ -155,6 +155,9 @@ class OptionParser(metaclass=SingletonMeta):
                                  help="every few update steps, evaluate with the L1 metric the performance "
                                       "on the train and test sets",
                                  default=False, action="store_true")
+        self.parser.add_argument("--callback-early-stop", help="halts training if the evaluation metric "
+                                                               "stops improving or degrades after some time",
+                                 default=True, action="store_true")
         self.parser.add_argument("--save-model", help="saves the model at the end", default=False,
                                  action="store_true")
         self.parser.add_argument("--model-name", help="architecture name", default="some-architecture")

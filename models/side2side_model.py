@@ -9,6 +9,8 @@ from utility import io_utils, frechet_inception_distance as fid
 from utility.functional_utils import listify
 from utility.keras_utils import ConstantThenLinearDecay, count_network_parameters
 
+INITIAL_PATIENCE = 5
+
 def show_eta(training_start_time, step_start_time, current_step, training_starting_step, total_steps,
              update_steps):
     now = time.time()
@@ -21,6 +23,7 @@ def show_eta(training_start_time, step_start_time, current_step, training_starti
     logging.info(f"Time since start: {io_utils.seconds_to_human_readable(elapsed)}")
     logging.info(f"Estimated time to finish: {io_utils.seconds_to_human_readable(eta.numpy())}")
     logging.info(f"Last {update_steps} steps took: {now - step_start_time:.2f}s\n")
+    return eta
 
 
 class S2SModel(ABC):
@@ -50,6 +53,7 @@ class S2SModel(ABC):
         self.checkpoint_manager = None
         self.summary_writer = None
         self.training_metrics = None
+        self.early_stop_patience = INITIAL_PATIENCE
 
         self.config = config
         self.model_name = config.model_name
@@ -267,7 +271,7 @@ class S2SModel(ABC):
             if it_is_time_to_evaluate:
                 if step != 0:
                     print("\n")
-                    show_eta(training_start_time, step_start_time, step, starting_step, steps, evaluate_steps)
+                    remaining_time = show_eta(training_start_time, step_start_time, step, starting_step, steps, evaluate_steps)
 
                 step_start_time = time.time()
 
@@ -294,13 +298,14 @@ class S2SModel(ABC):
                     self.show_discriminated_images(train_ds.unbatch(), "train", step + 1, 4)
                     self.show_discriminated_images(test_ds.unbatch().shuffle(self.config.test_size), "test",
                                                    step + 1, 4)
+                improved_metric = dict()
                 if "evaluate_l1" in callbacks:
                     logging.StreamHandler().terminator = ""
                     logging.info(f"Comparing L1 between generated images from train and test...")
                     logging.StreamHandler().terminator = "\n"
                     l1_train, l1_test = self.report_l1(examples_for_evaluation, step=(step + 1) // evaluate_steps)
                     logging.info(f"L1: {l1_train:.5f} / {l1_test:.5f} (train/test)")
-                    self.update_training_metrics("l1", l1_test, step + 1, True)
+                    improved_metric["l1"] = self.update_training_metrics("l1", l1_test, step + 1, True)
 
                 if "evaluate_fid" in callbacks:
                     logging.info(
@@ -308,7 +313,23 @@ class S2SModel(ABC):
                         f"examples...")
                     fid_train, fid_test = self.report_fid(examples_for_evaluation, step=(step + 1) // evaluate_steps)
                     logging.info(f"FID: {fid_train:.3f} / {fid_test:.3f} (train/test)")
-                    self.update_training_metrics("fid", fid_test, step + 1, "evaluate_l1" not in callbacks)
+                    improved_metric["fid"] = self.update_training_metrics("fid", fid_test, step + 1, "evaluate_l1" not in callbacks)
+
+                if "early_stop" in callbacks:
+                    # check for the chosen metric and stop if it is not improving
+                    if self.training_metrics is not None:
+                        chosen_metric = "l1" if "l1" in self.training_metrics else "fid"
+                        if improved_metric[chosen_metric]:
+                            self.early_stop_patience = INITIAL_PATIENCE
+                        else:
+                            if self.early_stop_patience > 0:
+                                self.early_stop_patience -= 1
+                                logging.debug(f"Patience reduced, now: {self.early_stop_patience}")
+                            else:
+                                time_saved = io_utils.seconds_to_human_readable(remaining_time.numpy())
+                                logging.info(f"EARLY STOPPING... patience reached 0 at step {step}/{steps} "
+                                             f"({float(step)/steps:.2f}%), saving {time_saved} of computation.")
+                                break
 
                 logging.info(f"Step: {(step + 1) / 1000}k")
                 if step - starting_step < steps - 1:
@@ -330,11 +351,14 @@ class S2SModel(ABC):
 
     def update_training_metrics(self, metric_name, value, step, should_save_checkpoint=False):
         metric = self.training_metrics[metric_name]
+        improved = False
         if value < metric["best_value"]:
+            improved = True
             metric["best_value"].assign(value)
             metric["step"].assign(step)
             if should_save_checkpoint:
                 self.save_generator_checkpoint(step)
+        return improved
 
     def evaluate_l1(self, real_image, fake_image):
         return tf.reduce_mean(tf.abs(fake_image - real_image))

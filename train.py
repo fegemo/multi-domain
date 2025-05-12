@@ -99,7 +99,7 @@ logging.info(
 
 # starting training
 callbacks = [c[len("callback_"):] for c in ["callback_debug_discriminator", "callback_evaluate_fid",
-                                            "callback_evaluate_l1"] if
+                                            "callback_evaluate_l1", "callback_early_stop"] if
              getattr(config, c)]
 
 
