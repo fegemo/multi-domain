@@ -9,7 +9,7 @@ from utility import io_utils, frechet_inception_distance as fid
 from utility.functional_utils import listify
 from utility.keras_utils import ConstantThenLinearDecay, count_network_parameters
 
-INITIAL_PATIENCE = 5
+INITIAL_PATIENCE = 30
 
 def show_eta(training_start_time, step_start_time, current_step, training_starting_step, total_steps,
              update_steps):
