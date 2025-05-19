@@ -16,7 +16,7 @@ class ConstantThenLinearDecay(tf.keras.optimizers.schedules.LearningRateSchedule
 
     def __call__(self, step):
         t = tf.divide(step, self.total_steps)
-        down_slope_value = self.initial_learning_rate * (-t + 1.) * 2.
+        down_slope_value = tf.cast(self.initial_learning_rate * (-t + 1.) * 2., tf.float32)
         return tf.maximum(0.0, tf.minimum(self.initial_learning_rate, down_slope_value))
 
 
