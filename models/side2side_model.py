@@ -11,6 +11,7 @@ from utility.keras_utils import ConstantThenLinearDecay, count_network_parameter
 
 INITIAL_PATIENCE = 30
 
+
 def show_eta(training_start_time, step_start_time, current_step, training_starting_step, total_steps,
              update_steps):
     now = time.time()
@@ -44,6 +45,7 @@ class S2SModel(ABC):
     - create_training_only_networks: initializes networks that are used only during training
     - create_inference_networks: initializes networks that are used for inference (e.g., generator)
     """
+
     def __init__(self, config, export_additional_training_endpoint=False):
         self.export_additional_training_endpoint = export_additional_training_endpoint
         self.generator_optimizer = None
@@ -164,6 +166,7 @@ class S2SModel(ABC):
             A matplotlib figure containing the preview images.
         """
         pass
+
     @abstractmethod
     def initialize_random_examples_for_evaluation(self, train_ds, test_ds, num_images):
         """
@@ -205,23 +208,24 @@ class S2SModel(ABC):
     def fit(self, train_ds, test_ds, steps, update_steps, callbacks=[], starting_step=0):
         if starting_step == 0:
             # initialize generator and discriminator optimizers
+            lr = tf.cast(self.config.lr, tf.float64)
             if self.config.lr_decay == "constant-then-linear":
                 # configuration as used by stargan
-                lr_generator = ConstantThenLinearDecay(self.config.lr, steps // self.config.d_steps)
-                lr_discriminator = ConstantThenLinearDecay(self.config.lr * self.config.ttur, steps)
+                lr_generator = ConstantThenLinearDecay(lr, steps // self.config.d_steps)
+                lr_discriminator = ConstantThenLinearDecay(lr * self.config.ttur, steps)
             elif self.config.lr_decay == "exponential":
                 # configuration as used by collagan
-                lr_generator = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr, 400, 0.99, True)
-                lr_discriminator = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr * self.config.ttur,
+                lr_generator = tf.keras.optimizers.schedules.ExponentialDecay(lr, 400, 0.99, True)
+                lr_discriminator = tf.keras.optimizers.schedules.ExponentialDecay(lr * self.config.ttur,
                                                                                   400, 0.99, True)
             elif self.config.lr_decay == "step":
                 # configuration as used by munit
-                lr_generator = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr, 30000, 0.5, True)
-                lr_discriminator = tf.keras.optimizers.schedules.ExponentialDecay(self.config.lr * self.config.ttur,
+                lr_generator = tf.keras.optimizers.schedules.ExponentialDecay(lr, 30000, 0.5, True)
+                lr_discriminator = tf.keras.optimizers.schedules.ExponentialDecay(lr * self.config.ttur,
                                                                                   30000, 0.5, True)
             else:
-                lr_generator = self.config.lr
-                lr_discriminator = self.config.lr * self.config.ttur
+                lr_generator = lr
+                lr_discriminator = lr * self.config.ttur
             self.generator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_generator, beta_1=0.5, beta_2=0.999)
             self.discriminator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_discriminator, beta_1=0.5,
                                                                     beta_2=0.999)
@@ -271,7 +275,8 @@ class S2SModel(ABC):
             if it_is_time_to_evaluate:
                 if step != 0:
                     print("\n")
-                    remaining_time = show_eta(training_start_time, step_start_time, step, starting_step, steps, evaluate_steps)
+                    remaining_time = show_eta(training_start_time, step_start_time, step, starting_step, steps,
+                                              evaluate_steps)
 
                 step_start_time = time.time()
 
@@ -313,12 +318,13 @@ class S2SModel(ABC):
                         f"examples...")
                     fid_train, fid_test = self.report_fid(examples_for_evaluation, step=(step + 1) // evaluate_steps)
                     logging.info(f"FID: {fid_train:.3f} / {fid_test:.3f} (train/test)")
-                    improved_metric["fid"] = self.update_training_metrics("fid", fid_test, step + 1, "evaluate_l1" not in callbacks)
+                    improved_metric["fid"] = self.update_training_metrics("fid", fid_test, step + 1,
+                                                                          "evaluate_l1" not in callbacks)
 
                 if "early_stop" in callbacks:
                     # check for the chosen metric and stop if it is not improving
                     if self.training_metrics is not None:
-                        chosen_metric = "l1" if "l1" in self.training_metrics else "fid"
+                        chosen_metric = "l1" if self.training_metrics is not None and "l1" in self.training_metrics else "fid"
                         if improved_metric[chosen_metric]:
                             self.early_stop_patience = INITIAL_PATIENCE
                         else:
@@ -328,7 +334,7 @@ class S2SModel(ABC):
                             else:
                                 time_saved = io_utils.seconds_to_human_readable(remaining_time.numpy())
                                 logging.info(f"EARLY STOPPING... patience reached 0 at step {step}/{steps} "
-                                             f"({float(step)/steps:.2f}%), saving {time_saved} of computation.")
+                                             f"({float(step*100) / steps:.2f}%), saving {time_saved} of computation.")
                                 break
 
                 logging.info(f"Step: {(step + 1) / 1000}k")
@@ -415,7 +421,6 @@ class S2SModel(ABC):
         file.write(str(step.numpy()))
 
     def save_generator(self):
-
         def export_single_model(net, path):
             """
             Exports a single model to a specified path. It uses the recent and custom way of exporting models in
@@ -426,7 +431,13 @@ class S2SModel(ABC):
             """
             export_archive = tf.keras.export.ExportArchive()
             export_archive.track(net)
-            input_signature = [{kt.name: kt for kt in  net.inputs}]
+            input_signature = [{kt.name: kt for kt in net.inputs}]
+            # This check of version is necessary if we're in an older keras<3 environment such as the one needed in
+            # some Verlab machines (those that have Compute Capability<6) TODO terrible way of depending on lib
+            #  version. Plus, using string comparison rather than integer. Remove this check entirely when we can use
+            #  only machines with Compute Capability>=6
+            if tf.__version__ < "2.18.0":
+                input_signature = [{kt.name: kt.type_spec for kt in net.inputs}]
             export_archive.add_endpoint(name="serve", fn=net.call, input_signature=input_signature)
             if self.export_additional_training_endpoint:
                 export_archive.add_endpoint(
@@ -573,4 +584,3 @@ class S2SModel(ABC):
                 ]
             )
         )
-
