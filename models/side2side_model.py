@@ -325,7 +325,7 @@ class S2SModel(ABC):
                     # check for the chosen metric and stop if it is not improving
                     if self.training_metrics is not None:
                         chosen_metric = "l1" if self.training_metrics is not None and "l1" in self.training_metrics else "fid"
-                        if improved_metric[chosen_metric]:
+                        if chosen_metric in improved_metric and improved_metric[chosen_metric]:
                             self.early_stop_patience = INITIAL_PATIENCE
                         else:
                             if self.early_stop_patience > 0:
