@@ -208,7 +208,7 @@ class S2SModel(ABC):
     def fit(self, train_ds, test_ds, steps, update_steps, callbacks=[], starting_step=0):
         if starting_step == 0:
             # initialize generator and discriminator optimizers
-            lr = tf.cast(self.config.lr, tf.float32)
+            lr = self.config.lr
             if self.config.lr_decay == "constant-then-linear":
                 # configuration as used by stargan
                 lr_generator = ConstantThenLinearDecay(lr, steps // self.config.d_steps)
