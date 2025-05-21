@@ -446,7 +446,11 @@ class S2SModel(ABC):
                     fn=lambda x: net.call(x, training=True),
                     input_signature=input_signature
                 )
-            export_archive.write_out(path, verbose=self.config.verbose)
+            # another version sniffing in place because of the 2.16 vs 2.18 needed to run in different environments
+            if tf.__version__ < "2.18.0":
+                export_archive.write_out(path)
+            else:
+                export_archive.write_out(path, verbose=self.config.verbose)
 
         py_model_path = self.get_output_folder(["models"], )
         io_utils.delete_folder(py_model_path)
