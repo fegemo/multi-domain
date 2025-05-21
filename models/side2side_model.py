@@ -437,8 +437,8 @@ class S2SModel(ABC):
             #  version. Plus, using string comparison rather than integer. Remove this check entirely when we can use
             #  only machines with Compute Capability>=6
             if tf.__version__ < "2.18.0":
-                input_signature = [{kt.name: tf.TensorSpec(shape=kt.shape, dtype=kt.dtype, name=kt.name)
-                                    for kt in net.inputs}]
+                input_signature = [[tf.TensorSpec(shape=kt.shape, dtype=kt.dtype, name=kt.name)
+                                    for kt in net.inputs]]
             export_archive.add_endpoint(name="serve", fn=net.call, input_signature=input_signature)
             if self.export_additional_training_endpoint:
                 export_archive.add_endpoint(
