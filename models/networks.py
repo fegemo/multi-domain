@@ -535,7 +535,7 @@ def munit_content_encoder(domain_letter, image_size, channels, number_of_input_i
         return y
 
     if number_of_input_images > 1:
-        # the single content encoder in ReMIC receives multiple images as input (first dimension0. Then, we permute
+        # the single content encoder in ReMIC receives multiple images as input (first dimension). Then, we permute
         # the images to the last dimension and reshape the tensor to have the images concatenated in the last dimension
         input_layer = layers.Input(shape=(number_of_input_images, image_size, image_size, channels))
         x = layers.Permute((2, 3, 4, 1))(input_layer)

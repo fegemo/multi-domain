@@ -1,7 +1,10 @@
+from abc import abstractmethod, ABC
+
 import tensorflow as tf
 from tensorflow import keras, RaggedTensorSpec
 from tensorflow.keras.layers import Layer
 from tensorflow.keras import layers
+
 
 class ConstantThenLinearDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
     def get_config(self):
@@ -433,3 +436,34 @@ class PaletteConditioner(layers.Layer):
             [batch_size, h, w, self.embed_dim]
         )
         return self.output_proj(attended)
+
+
+class AnnealingScheduler(ABC):
+    def __init__(self, annealing_layers=None):
+        if annealing_layers is None:
+            annealing_layers = []
+        self.annealing_layers = annealing_layers
+
+    def update(self, t):
+        new_temperature = self.get_value(t)
+        for l in self.annealing_layers:
+            l.temperature.assign(new_temperature)
+        return new_temperature
+
+    @abstractmethod
+    def get_value(self, t):
+        pass
+
+
+class LinearAnnealingScheduler(AnnealingScheduler):
+    def __init__(self, initial_temperature, layers):
+        super().__init__(layers)
+        self.initial_temperature = initial_temperature
+
+    def get_value(self, t):
+        return tf.maximum(0.0, (1.0 - t) * self.initial_temperature)
+
+
+class NoopAnnealingScheduler(AnnealingScheduler):
+    def get_value(self, t):
+        return 1.0

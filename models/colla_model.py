@@ -9,7 +9,7 @@ from utility import palette_utils, dataset_utils, io_utils, histogram_utils
 from .networks import (collagan_affluent_generator, collagan_original_discriminator,
                        collagan_palette_affluent_generator, collagan_palette_conditioned_with_transformer_generator)
 from .side2side_model import S2SModel
-from utility.keras_utils import NParamsSupplier
+from utility.keras_utils import NParamsSupplier, LinearAnnealingScheduler, NoopAnnealingScheduler
 
 
 class CollaGANModel(S2SModel):
@@ -1169,34 +1169,6 @@ class DroppedOutCycledSourceReplacer(CycledSourceReplacer):
 
         return inverted_input_dropout_mask
 
-
-class AnnealingScheduler(ABC):
-    def __init__(self, annealing_layers=None):
-        if annealing_layers is None:
-            annealing_layers = []
-        self.annealing_layers = annealing_layers
-
-    def update(self, t):
-        new_temperature = self.get_value(t)
-        for l in self.annealing_layers:
-            l.temperature.assign(new_temperature)
-        return new_temperature
-
-    @abstractmethod
-    def get_value(self, t):
-        pass
-
-class LinearAnnealingScheduler(AnnealingScheduler):
-    def __init__(self, initial_temperature, layers):
-        super().__init__(layers)
-        self.initial_temperature = initial_temperature
-
-    def get_value(self, t):
-        return tf.maximum(0.0, (1.0 - t) * self.initial_temperature)
-
-class NoopAnnealingScheduler(AnnealingScheduler):
-    def get_value(self, t):
-        return 1.0
 
 
 # Sanity checking collagan's palette conditioning:
