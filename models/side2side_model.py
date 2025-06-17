@@ -321,7 +321,7 @@ class S2SModel(ABC):
                     improved_metric["fid"] = self.update_training_metrics("fid", fid_test, step + 1,
                                                                           "evaluate_l1" not in callbacks)
 
-                if "early_stop" in callbacks:
+                if "early_stop" in callbacks and S2SModel.should_evaluate(callbacks):
                     # check for the chosen metric and stop if it is not improving
                     if self.training_metrics is not None:
                         chosen_metric = "l1" if self.training_metrics is not None and "l1" in self.training_metrics else "fid"
