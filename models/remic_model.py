@@ -18,13 +18,13 @@ class RemicModel(MunitModel):
     share it.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, export_additional_training_endpoint=False):
         self.unified_content_encoder = None
         self.style_encoders = None
         self.decoders = None
         self.generators = None
         self.discriminators = None
-        super().__init__(config)
+        super().__init__(config, export_additional_training_endpoint)
         self.lambda_image_consistency = config.lambda_l1
         self.lambda_latent_consistency = config.lambda_latent_reconstruction
         self.lambda_image_reconstruction = config.lambda_cyclic_reconstruction
@@ -81,7 +81,7 @@ class RemicModel(MunitModel):
         inner_channels = config.inner_channels
         scales = config.discriminator_scales
         domain_letters = [name[0].upper() for name in config.domains]
-        if config.generator in ["remic", ""]:
+        if config.discriminator in ["remic", ""]:
             discriminators = [remic_discriminator(s, image_size, inner_channels, scales)
                               for s in domain_letters]
             self.discriminators = discriminators

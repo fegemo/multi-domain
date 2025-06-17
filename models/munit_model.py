@@ -12,13 +12,13 @@ from .networks import munit_content_encoder, munit_style_encoder, munit_decoder,
 
 
 class MunitModel(S2SModel):
-    def __init__(self, config):
+    def __init__(self, config, export_additional_training_endpoint=False):
         self.discriminators = None
         self.generators = None
         self.decoders = None
         self.style_encoders = None
         self.content_encoders = None
-        super().__init__(config)
+        super().__init__(config, export_additional_training_endpoint)
         self.lambda_reconstruction = config.lambda_l1
         self.lambda_latent_reconstruction = config.lambda_latent_reconstruction
         self.lambda_cyclic_reconstruction = config.lambda_cyclic_reconstruction

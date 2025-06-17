@@ -26,6 +26,9 @@ LAMBDA_LATENT_RECONSTRUCTION = 1.
 LAMBDA_CYCLIC_RECONSTRUCTION = 0  # 10 for munit on summer<>>winter and cityscapes<>synthia datasets (MUNIT)
 LAMBDA_HISTOGRAM = 1.
 LAMBDA_ADVERSARIAL = 1.
+LAMBDA_KL = 0.01
+NOISE_LENGTH = 8
+FILM_LENGTH = 32
 DISCRIMINATOR_STEPS = 5
 EPOCHS = 160
 PRETRAIN_EPOCHS = 0  # 30 in colla's original code
@@ -67,7 +70,8 @@ class OptionParser(metaclass=SingletonMeta):
             "model", help="one from { stargan-unpaired, stargan-paired, collagan, munit, remic, yamatagan }"
                           "- the model to train")
         self.parser.add_argument("--generator", help="network from { resnet } for stargan or "
-                                                     "{ affluent, palette, palette-transformer } for collagan", default="")
+                                                     "{ affluent, palette, palette-transformer } for collagan",
+                                 default="")
         self.parser.add_argument("--discriminator", help="different network topology, currently an "
                                                          "unused option", default="")
         self.parser.add_argument("--conditional-discriminator", help="Makes the discriminator receive"
@@ -122,7 +126,15 @@ class OptionParser(metaclass=SingletonMeta):
                                                                              "used in collagan's generator",
                                  default=0.001)
         self.parser.add_argument("--lambda-adversarial", type=float, help="value for λadversarial used "
-                                                                          "in CollaGAN", default=LAMBDA_ADVERSARIAL)
+                                                                          "in CollaGAN and SpriteGAN",
+                                 default=LAMBDA_ADVERSARIAL)
+        self.parser.add_argument("--lambda-kl", type=float, help="value for λkl used in SpriteGAN's "
+                                                                 "encoder", default=LAMBDA_KL)
+        self.parser.add_argument("--noise", type=int, help="the length of the noise to add to the "
+                                                           "input images in SpriteGAN", default=NOISE_LENGTH)
+        self.parser.add_argument("--film", type=int, help="the length of the FiLM layers that condition "
+                                                          "the generation on noise and on the domain in SpriteGAN",
+                                 default=FILM_LENGTH)
         self.parser.add_argument("--d-steps", type=int,
                                  help="number of discriminator updates for each generator in stargan",
                                  default=DISCRIMINATOR_STEPS)
@@ -179,14 +191,17 @@ class OptionParser(metaclass=SingletonMeta):
                                       "specify this, but its code shows that it replaces all that have been "
                                       "dropped out", default="dropout")
         self.parser.add_argument("--annealing", help="one from {none, linear}, used"
-                                                              " to control how the temperature decreases when using"
-                                                              " palette quantization", default="none")
+                                                     " to control how the temperature decreases when using"
+                                                     " palette quantization", default="none")
         self.parser.add_argument("--temperature", type=float, help="initial temperature for"
-                                                                             " the annealing strategy", default=0.1)
+                                                                   " the annealing strategy", default=0.1)
 
-        # --- munit and remic: specific options
+        # --- munit, remic, and spritegan: specific options
         self.parser.add_argument("--discriminator-scales", help="Number of scales for the multi-scale "
-                                                                "discriminator used in MUNIT and ReMIC", default=3,
+                                                                "discriminator used in MUNIT, ReMIC, and SpriteGAN",
+                                 default=3, type=int)
+        self.parser.add_argument("--generator-scales", help="Number of scales for the multi-scale "
+                                                            "generator used in SpriteGAN", default=3,
                                  type=int)
 
         # --- all: regarding the datasets to use for training and evaluation

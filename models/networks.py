@@ -665,12 +665,12 @@ def munit_decoder(domain_letter, channels):
         y = layers.Add()([y, input_tensor])
         return y
 
-    input_style = layers.Input(shape=(8,))
+    input_style = layers.Input(shape=(8,), name="input_style")
     style_code = input_style
     mlp = mlp_munit()
     adain_params = mlp(style_code)
 
-    input_content = layers.Input(shape=(16, 16, 256))
+    input_content = layers.Input(shape=(16, 16, 256), name="input_content")
     w = content_code = input_content
 
     # 4x resblocks
@@ -686,8 +686,13 @@ def munit_decoder(domain_letter, channels):
     output_image = layers.Conv2D(channels, 7, strides=1, padding="valid",
                                  kernel_initializer="he_normal", kernel_regularizer=tf.keras.regularizers.l2(1e-4),
                                  activation="tanh")(x)
-    return tf.keras.Model(inputs=(input_style, input_content), outputs=(output_image, style_code, content_code),
-                          name=f"Decoder{domain_letter.upper()}")
+
+    outputs = dict({
+        "output_image": output_image,
+        "style_code": style_code,
+        "content_code": content_code
+    })
+    return tf.keras.Model(inputs=(input_style, input_content), outputs=outputs, name=f"Decoder{domain_letter.upper()}")
 
 
 def munit_conv_block(input_tensor, filters, kernel_size=3, strides=2, use_norm=False):
