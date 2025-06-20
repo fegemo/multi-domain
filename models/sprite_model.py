@@ -7,9 +7,6 @@ from .networks import resblock, munit_discriminator_multi_scale
 from .remic_model import RemicModel
 
 
-# from .side2side_model import S2SModel
-
-
 class SpriteEditorModel(RemicModel):
     def __init__(self, config):
         self.generator = None
@@ -24,7 +21,10 @@ class SpriteEditorModel(RemicModel):
         self.discriminators = self.training_only_networks["discriminators"]
         self.diversity_encoder = self.inference_networks["diversity-encoder"]
 
-        if config.generator == "palette" and config.annealing != "none":
+        # the third param is the target palette, so we skip it if we're not using palette quantization
+        self.gen_supplier = keras_utils.SkipParamsSupplier([2] if not config.palette_quantization else None)
+
+        if config.palette_quantization and config.annealing != "none":
             self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, [self.generator.quantization])
         else:
             self.annealing_scheduler = NoopAnnealingScheduler()
@@ -84,9 +84,6 @@ class SpriteEditorModel(RemicModel):
     def generator_loss(self, fake_predicted_patches, generated_images, target_images, input_dropout_mask,
                        ec_mean, ec_log_var, random_codes, recovered_codes_mean, target_palettes, temperature,
                        batch_shape):
-        # print("len(fake_predicted_patches):", len(fake_predicted_patches))
-        # print("len(fake_predicted_patches[0]):", len(fake_predicted_patches[0]))
-        # print("fake_predicted_patches[0][0].shape:", fake_predicted_patches[0][0].shape)
         """
         Calculates the generator loss for the Sprite Editor model.
         :param fake_predicted_patches: discriminator outputs for the generated images. The shape depends on the number
@@ -253,8 +250,9 @@ class SpriteEditorModel(RemicModel):
             # extracted_codes (shape=[hb, noise_length])
 
             # A.2-3. generates images using the extracted codes, then with random codes
-            generated_images = self.generator([masked_source_images, inpaint_mask, source_palette, input_keep_mask,
-                                               tf.concat([extracted_codes, random_codes], axis=0)], training=True)
+            generated_images = self.generator(
+                self.gen_supplier(masked_source_images, inpaint_mask, source_palette, input_keep_mask,
+                                   tf.concat([extracted_codes, random_codes], axis=0)), training=True)
             # generated_images ([generator_scales x shape=[b, d, ?, ?, c]])
 
             generated_images_with_extracted_codes, generated_images_with_random_codes = keras_utils.scales_output_to_two_halves(
@@ -304,8 +302,9 @@ class SpriteEditorModel(RemicModel):
 
         # B. now we train the discriminators
         # B.1. generates the images from the generator
-        generated_images = self.generator([masked_source_images, inpaint_mask, source_palette, input_keep_mask,
-                                           tf.concat([extracted_codes, random_codes], axis=0)], training=True)
+        generated_images = self.generator(
+            self.gen_supplier(masked_source_images, inpaint_mask, source_palette, input_keep_mask,
+                               tf.concat([extracted_codes, random_codes], axis=0)), training=True)
         # generated_images ([generator_scales x shape=[b, d, ?, ?, c]])
         # gets only the last output of the generator, excluding the intermediate ones
         generated_images = generated_images[0]
@@ -336,12 +335,9 @@ class SpriteEditorModel(RemicModel):
         discriminator_gradients = [g for grad in discriminator_gradients for g in grad]
         all_discriminator_trainable_variables = [v for d in range(number_of_domains)
                                                  for v in self.discriminators[d].trainable_variables]
-        self.discriminator_optimizer.apply_gradients(zip(discriminator_gradients, all_discriminator_trainable_variables))
+        self.discriminator_optimizer.apply_gradients(
+            zip(discriminator_gradients, all_discriminator_trainable_variables))
 
-        # for i, disc in enumerate(self.discriminators):
-        #     discriminator_gradients = disc_tape.gradient(d_loss["total"][i], disc.trainable_variables)
-        #     discriminator_gradients = [g for grad in discriminator_gradients for g in grad]
-        #     self.discriminator_optimizer.apply_gradients(zip(discriminator_gradients, disc.trainable_variables))
         del disc_tape
 
         summary_step = step // evaluate_steps
@@ -428,11 +424,6 @@ class SpriteEditorModel(RemicModel):
         example_masks = [create_random_inpaint_mask(tf.stack(examples[ex][0])[tf.newaxis, ...], holes) for ex, holes in
                          enumerate(number_of_holes * 2)]
         # example_masks (list of tuples with: masked source images, inpaint mask)
-        # print("len(example_masks):", len(example_masks))
-        # print("example_masks[0]:", example_masks[0])
-        # print("example_masks[2]:", example_masks[2])
-        # print("example_masks[0][1].shape:", example_masks[0][1].shape)
-        # print("example_masks[2][1].shape:", example_masks[2][1].shape)
 
         # extract the source palettes and make them the target palettes
         source_palettes = [palette_utils.batch_extract_palette_ragged(tf.stack(ex[0])[tf.newaxis, ...])[0]
@@ -466,41 +457,26 @@ class SpriteEditorModel(RemicModel):
         source_images = tf.stack(source_images, axis=0)
         masked_images = tf.concat(masked_images, axis=0)
         keep_mask = tf.stack(keep_mask, axis=0)
-        # print("len(inpaint_mask)", len(inpaint_mask))
-        # print("inpaint_mask[0].shape:", inpaint_mask[0].shape)
-        # print("inpaint_mask[1].shape:", inpaint_mask[1].shape)
-        # print("inpaint_mask[2].shape:", inpaint_mask[2].shape)
-        # print("inpaint_mask[3].shape:", inpaint_mask[3].shape)
-        # print("inpaint_mask[4].shape:", inpaint_mask[4].shape)
-        # print("inpaint_mask[5].shape:", inpaint_mask[5].shape)
         inpaint_mask = tf.concat(inpaint_mask, axis=0)
-        # source_palettes = tf.ragged.stack(source_palettes, axis=0)
         source_palettes = keras_utils.list_of_palettes_to_ragged_tensor(source_palettes)
-        # print("source_images.shape:", source_images.shape)
-        # print("masked_images.shape:", masked_images.shape)
-        # print("keep_mask.shape:", keep_mask.shape)
-        # print("inpaint_mask.shape:", inpaint_mask.shape)
-        # print("source_palettes.shape:", source_palettes.shape)
-        # print("source_palettes.ragged_rank:", source_palettes.ragged_rank)
 
         visible_masked_images = masked_images * keep_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
         extracted_codes, _, _ = self.encode(source_images, keep_mask, training=True)
         random_codes = tf.random.normal([num_rows, self.config.noise])
 
-        generated_images_with_extracted_codes = self.generator([
+        generated_images_with_extracted_codes = self.generator(self.gen_supplier(
             visible_masked_images,
             inpaint_mask,
             source_palettes,
             keep_mask,
-            extracted_codes], training=True)[0]
-        # print("generated_images_with_extracted_codes.shape:",
-        #       generated_images_with_extracted_codes.shape)
-        generated_images_with_random_codes = self.generator([
+            extracted_codes), training=True)[0]
+
+        generated_images_with_random_codes = self.generator(self.gen_supplier(
             visible_masked_images,
             inpaint_mask,
             source_palettes,
             keep_mask,
-            random_codes], training=True)[0]
+            random_codes), training=True)[0]
 
         column_contents = [visible_masked_images, inpaint_mask, source_images,
                            generated_images_with_extracted_codes, generated_images_with_random_codes]
@@ -594,6 +570,7 @@ def build_monolith_generator(config):
     noise_length = config.noise
     film_length = config.film
     generator_scales = config.generator_scales
+    quantize_to_palette = config.palette_quantization
 
     # define the inputs
     masked_images_input = layers.Input(shape=(domains, image_size, image_size, channels), name="source_images")
@@ -664,24 +641,33 @@ def build_monolith_generator(config):
 
     pre_output = layers.Conv2D(domains * channels, kernel_size=4, padding="same", kernel_initializer=init)(x)
     pre_output = layers.Activation("tanh")(pre_output)
-    # change the dimensions so the domains come first, then height, width and channels
-    pre_output = layers.Reshape((domains, image_size, image_size, channels),
-                                name=f"pre-quantization-{image_size}x{image_size}")(pre_output)
 
-    # quantize to the palette
-    quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized-images")
-    final_output = quantization_layer([pre_output, target_palette_input])
+    if quantize_to_palette:
+        # quantize to the palette
+        # change the dimensions so the domains come first, then height, width and channels
+        pre_output = layers.Reshape((domains, image_size, image_size, channels),
+                                    name=f"pre-quantization-{image_size}x{image_size}")(pre_output)
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized-images")
+        final_output = quantization_layer([pre_output, target_palette_input])
+        inputs = [masked_images_input, inpaint_mask_input, target_palette_input, domain_availability_input, noise_input]
+    else:
+        # change the dimensions so the domains come first, then height, width and channels
+        final_output = layers.Reshape((domains, image_size, image_size, channels),
+                                      name=f"output-images")(pre_output)
+        inputs = [masked_images_input, inpaint_mask_input, domain_availability_input, noise_input]
 
     outputs.append(final_output)
     outputs.reverse()
 
     model = models.Model(
-        inputs=[masked_images_input, inpaint_mask_input, target_palette_input,
-                domain_availability_input, noise_input],
+        inputs=inputs,
         outputs=outputs,
-        name="sprite_monolith_generator"
+        name=f"SpriteMonolithGenerator{'_Quantized' if quantize_to_palette else ''}"
     )
-    model.quantization = quantization_layer
+
+    if quantize_to_palette:
+        model.quantization = quantization_layer
+
     return model
 
 

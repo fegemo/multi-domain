@@ -54,6 +54,17 @@ class NParamsSupplier:
         return [*args[:self.n]]
 
 
+class SkipParamsSupplier:
+    def __init__(self, skip_params_with_index=None):
+        if skip_params_with_index is None:
+            skip_params_with_index = []
+        self.indices_to_skip = skip_params_with_index
+
+    def __call__(self, *args, **kwargs):
+        params = [args[i] for i in range(len(args)) if i not in self.indices_to_skip]
+        return params
+
+
 class ReflectPadding(keras.layers.Layer):
     def __init__(self, padding, **kwargs):
         super(ReflectPadding, self).__init__(**kwargs)

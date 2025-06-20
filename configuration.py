@@ -70,7 +70,7 @@ class OptionParser(metaclass=SingletonMeta):
             "model", help="one from { stargan-unpaired, stargan-paired, collagan, munit, remic, yamatagan }"
                           "- the model to train")
         self.parser.add_argument("--generator", help="network from { resnet } for stargan or "
-                                                     "{ affluent, palette, palette-transformer } for collagan",
+                                                     "{ affluent, palette-transformer } for collagan",
                                  default="")
         self.parser.add_argument("--discriminator", help="different network topology, currently an "
                                                          "unused option", default="")
@@ -155,6 +155,10 @@ class OptionParser(metaclass=SingletonMeta):
                                                    "each sample having its own (multi)", default=TRAINING_SAMPLER)
         self.parser.add_argument("--capacity", type=int, help="capacity multiplier of CollaGAN's and "
                                                               "StarGAN's generator", default=1)
+        self.parser.add_argument("--palette-quantization", help="whether to use palette "
+                                                                "quantization in the generators of CollaGAN "
+                                                                "and SpriteGAN",
+                                 action="store_true", default=False)
         self.parser.add_argument("--callback-debug-discriminator",
                                  help="every few update steps, show the discriminator output with some images from "
                                       "the train and test sets",
@@ -192,7 +196,7 @@ class OptionParser(metaclass=SingletonMeta):
                                       "dropped out", default="dropout")
         self.parser.add_argument("--annealing", help="one from {none, linear}, used"
                                                      " to control how the temperature decreases when using"
-                                                     " palette quantization", default="none")
+                                                     " palette quantization", default="linear")
         self.parser.add_argument("--temperature", type=float, help="initial temperature for"
                                                                    " the annealing strategy", default=0.1)
 

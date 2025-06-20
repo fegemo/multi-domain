@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from utility import palette_utils, dataset_utils, io_utils, histogram_utils
 from .networks import (collagan_affluent_generator, collagan_original_discriminator,
-                       collagan_palette_affluent_generator, collagan_palette_conditioned_with_transformer_generator)
+                       collagan_palette_conditioned_with_transformer_generator)
 from .side2side_model import S2SModel
 from utility.keras_utils import NParamsSupplier, LinearAnnealingScheduler, NoopAnnealingScheduler
 
@@ -46,11 +46,11 @@ class CollaGANModel(S2SModel):
             self.cycled_source_replacer = ForwardOnlyCycledSourceReplacer(config)
 
         self.cce = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
-        self.gen_supplier = NParamsSupplier(3 if "palette" in config.generator else 2)
+        self.gen_supplier = NParamsSupplier(3 if config.palette_quantization else 2)
         self.generator = self.inference_networks["generator"]
         self.discriminator = self.training_only_networks["discriminator"]
 
-        if config.generator == "palette" and config.annealing != "none":
+        if config.palette_quantization and config.annealing != "none":
             self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, [self.generator.quantization])
         else:
             self.annealing_scheduler = NoopAnnealingScheduler()
@@ -61,15 +61,8 @@ class CollaGANModel(S2SModel):
             return {
                 "generator": collagan_affluent_generator(config.number_of_domains, config.image_size,
                                                          config.output_channels,
-                                                         config.capacity)
-            }
-        elif config.generator in ["palette", "palette-gumbel"]:
-            should_use_gumbel_softmax = config.generator == "palette-gumbel"
-            return {
-                "generator": collagan_palette_affluent_generator(config.number_of_domains, config.image_size,
-                                                                 config.output_channels,
-                                                                 config.capacity,
-                                                                 gumbel_softmax=should_use_gumbel_softmax)
+                                                         config.capacity,
+                                                         config.palette_quantization)
             }
         elif config.generator in ["palette-transformer"]:
             return {
