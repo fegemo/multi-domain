@@ -573,20 +573,16 @@ def create_random_inpaint_mask(batch, n_holes=4):
 
     masks_list = tf.map_fn(generate_mask_for_character, batch)
 
-    # Stack masks and expand dimensions
+    # stack masks and expand dimensions
     masks = tf.stack(masks_list, axis=0)  # Shape: [batch_size, 64, 64]
     masks = tf.expand_dims(masks, axis=1)  # Add domain dimension: [batch_size, 1, 64, 64]
     masks = tf.expand_dims(masks, axis=-1)  # Add channel dimension: [batch_size, 1, 64, 64, 1]
 
-    # Replicate mask across all 4 directions
+    # replicate mask across all 4 directions
     masks = tf.tile(masks, [1, number_of_domains, 1, 1, 1])  # Shape: [batch_size, 4, 64, 64, 1]
 
-    # Apply mask to RGB channels
-    mask_rgb = tf.tile(masks, [1, 1, 1, 1, 3])  # Shape: [batch_size, 4, 64, 64, 3]
-    rgb = batch[..., :3]
-    a = batch[..., 3:]
-    masked_rgb = rgb * (1 - mask_rgb)  # zero out masked pixels
-    masked_batch = tf.concat([masked_rgb, a], axis=-1)
+    # replace the RGBA values of the batch where the mask is 1 with -1
+    masked_batch = tf.where(masks == 1.0, -1.0, batch)  # Shape: [batch_size, 4, 64, 64, 4]
 
     return masked_batch, masks[:, 0, ...]  # return only one domain mask (e.g., first domain), as they are the same
 
