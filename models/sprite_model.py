@@ -222,7 +222,8 @@ class SpriteEditorModel(RemicModel):
 
         # 1. extracts the palette from the source images
         source_palette = palette_utils.batch_extract_palette_ragged(source_images)
-        # source_palette (shape=[b, (n), c]) as a ragged tensor
+        source_palette = source_palette.to_tensor(default_value=(-1., -1., -1., -1.))
+        # source_palette (shape=[b, n, c]) as an ex-ragged, dense tensor
 
         # 5. prepares the ground truth for the generator
         # for each generator_scale, the target images are the source images downsampled by 1/2
@@ -252,7 +253,7 @@ class SpriteEditorModel(RemicModel):
             # A.2-3. generates images using the extracted codes, then with random codes
             generated_images = self.generator(
                 self.gen_supplier(masked_source_images, inpaint_mask, source_palette, input_keep_mask,
-                                   tf.concat([extracted_codes, random_codes], axis=0)), training=True)
+                                  tf.concat([extracted_codes, random_codes], axis=0)), training=True)
             # generated_images ([generator_scales x shape=[b, d, ?, ?, c]])
 
             generated_images_with_extracted_codes, generated_images_with_random_codes = keras_utils.scales_output_to_two_halves(
@@ -268,11 +269,8 @@ class SpriteEditorModel(RemicModel):
             generated_images_full_size = tf.concat([generated_images_with_extracted_codes[0],
                                                     generated_images_with_random_codes[0]], axis=0)
             # generated_images_full_size (shape=[b, d, s, s, c])
-            # print("generated_images.shape:", generated_images_full_size.shape)
 
             generated_images_per_domain = tf.unstack(generated_images_full_size, axis=1)
-            # print("len(generated_images_per_domain):", len(generated_images_per_domain))
-            # print("generated_images_per_domain[0].shape:", generated_images_per_domain[0].shape)
             # generated_images_per_domain (d x [b, s, s, c])
 
             fake_predicted = [self.discriminators[d](generated_images_per_domain[d], training=True)
@@ -304,7 +302,7 @@ class SpriteEditorModel(RemicModel):
         # B.1. generates the images from the generator
         generated_images = self.generator(
             self.gen_supplier(masked_source_images, inpaint_mask, source_palette, input_keep_mask,
-                               tf.concat([extracted_codes, random_codes], axis=0)), training=True)
+                              tf.concat([extracted_codes, random_codes], axis=0)), training=True)
         # generated_images ([generator_scales x shape=[b, d, ?, ?, c]])
         # gets only the last output of the generator, excluding the intermediate ones
         generated_images = generated_images[0]
@@ -459,6 +457,7 @@ class SpriteEditorModel(RemicModel):
         keep_mask = tf.stack(keep_mask, axis=0)
         inpaint_mask = tf.concat(inpaint_mask, axis=0)
         source_palettes = keras_utils.list_of_palettes_to_ragged_tensor(source_palettes)
+        source_palettes = source_palettes.to_tensor(default_value=(-1., -1., -1., -1.))
 
         visible_masked_images = masked_images * keep_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
         extracted_codes, _, _ = self.encode(source_images, keep_mask, training=True)
@@ -517,13 +516,51 @@ class SpriteEditorModel(RemicModel):
             plt.savefig(save_name, transparent=True)
 
         return figure
+
     #
     # def initialize_random_examples_for_evaluation(self, train_ds, test_ds, num_images):
     #     pass
     #
-    # def generate_images_for_evaluation(self, example_indices_for_evaluation):
-    #     pass
-    #
+
+    def generate_images_for_evaluation(self, example_indices_for_evaluation):
+        batch_size = self.config.batch
+
+        def generate_images_from_example_indices(example_indices):
+            domain_images, keep_mask, possible_target_domain = example_indices
+            # domain_images (b, d, s, s, c)
+            # keep_mask (b, d, 1, 1, 1)
+            images_shape = tf.shape(domain_images)
+            num_examples, number_of_domains, image_size = images_shape[0], images_shape[1], images_shape[2]
+
+            visible_source_images = domain_images * keep_mask
+            # visible_source_images (b, d, s, s, c)
+            source_palettes = palette_utils.batch_extract_palette_ragged(domain_images)
+            source_palettes = source_palettes.to_tensor(default_value=(-1., -1., -1., -1.))
+
+            keep_mask_oh = tf.reshape(keep_mask, [num_examples, number_of_domains])
+            extracted_codes_mean, _ = self.diversity_encoder.predict([visible_source_images, keep_mask_oh],
+                                                                     verbose=0,
+                                                                     batch_size=batch_size)
+            generated_images = self.generator.predict(self.gen_supplier(
+                visible_source_images,
+                tf.zeros((num_examples, image_size, image_size, 1)),
+                source_palettes,
+                keep_mask_oh,
+                extracted_codes_mean),
+                verbose=0,
+                batch_size=batch_size
+            )[0]
+
+            # return decoded_images
+            fake_images = tf.gather(generated_images, possible_target_domain, batch_dims=1)
+            real_images = tf.gather(domain_images, possible_target_domain, batch_dims=1)
+            return real_images, fake_images
+
+        return {
+            "train": generate_images_from_example_indices(example_indices_for_evaluation["train"]),
+            "test": generate_images_from_example_indices(example_indices_for_evaluation["test"])
+        }
+
     # def generate_images_from_dataset(self, dataset, step, num_images=None):
     #     pass
 
@@ -726,7 +763,7 @@ def build_diversity_encoder(config):
 
     return models.Model(inputs=[source_images_input, domain_availability_input],
                         outputs=[mean_output, variance_output],
-                        name="diversity_encoder"
+                        name="DiversityEncoder"
                         )
 
 # started to implement with separate encoders, but did not finish it

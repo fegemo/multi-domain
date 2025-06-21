@@ -102,8 +102,10 @@ class CollaGANModel(S2SModel):
                                       [batch_size, number_of_domains - 1])
 
         source_images_5d = tf.gather(source_images_5d, bw_target_domain, batch_dims=1)
-        source_images = tf.reshape(source_images_5d, [batch_size * (number_of_domains - 1), image_size, image_size, channels])
-        cycled_images_5d = tf.reshape(cycled_images, [batch_size, number_of_domains - 1, image_size, image_size, channels])
+        source_images = tf.reshape(source_images_5d,
+                                   [batch_size * (number_of_domains - 1), image_size, image_size, channels])
+        cycled_images_5d = tf.reshape(cycled_images,
+                                      [batch_size, number_of_domains - 1, image_size, image_size, channels])
 
         input_dropout_mask = tf.gather(input_dropout_mask, bw_target_domain, batch_dims=1)
         input_dropout_mask_1d = tf.reshape(input_dropout_mask, [batch_size * (number_of_domains - 1)])
@@ -155,11 +157,12 @@ class CollaGANModel(S2SModel):
         classification_loss = (classification_forward__loss + classification_backward_loss) / number_of_domains_float
 
         # palette loss (forward, backward)
-        palette_forward_ = palette_utils.calculate_palette_coverage_loss(fake_image, fw_target_palette, temperature)
-        palette_backward = palette_utils.calculate_palette_coverage_loss(cycled_images,
-                                                                         tf.tile(bw_target_palette,
-                                                                                 [number_of_domains - 1, 1, 1]),
-                                                                         temperature)
+        palette_forward_ = palette_utils.calculate_palette_coverage_loss_ragged(fake_image, fw_target_palette,
+                                                                                temperature)
+        palette_backward = palette_utils.calculate_palette_coverage_loss_ragged(cycled_images,
+                                                                                tf.tile(bw_target_palette,
+                                                                                        [number_of_domains - 1, 1, 1]),
+                                                                                temperature)
         palette_loss = palette_forward_ + palette_backward
 
         # histogram loss (forward)
@@ -172,12 +175,12 @@ class CollaGANModel(S2SModel):
 
         # observation: ssim loss uses only the backward (cycled) images... that's on the colla's code and paper
         total_loss = self.lambda_adversarial * adversarial_loss + \
-            self.lambda_l1 * l1_forward__loss + self.lambda_l1_backward * l1_backward_loss + \
-            self.lambda_ssim * ssim_backward_loss + \
-            self.lambda_domain * classification_loss + \
-            self.lambda_palette * palette_loss + \
-            self.lambda_histogram * histogram_loss + \
-            self.lambda_regularization * regularization_loss
+                     self.lambda_l1 * l1_forward__loss + self.lambda_l1_backward * l1_backward_loss + \
+                     self.lambda_ssim * ssim_backward_loss + \
+                     self.lambda_domain * classification_loss + \
+                     self.lambda_palette * palette_loss + \
+                     self.lambda_histogram * histogram_loss + \
+                     self.lambda_regularization * regularization_loss
 
         return {"total": total_loss, "adversarial": adversarial_loss, "l1_forward": l1_forward__loss,
                 "l1_backward": l1_backward_loss, "ssim": ssim_loss, "domain": classification_loss,
@@ -192,7 +195,7 @@ class CollaGANModel(S2SModel):
         adversarial_forward_loss = adversarial_real + adversarial_fake
 
         adversarial_backward_loss = tf.reduce_mean(tf.math.squared_difference(source_predicted_patches, 1.)) + \
-            tf.reduce_mean(tf.math.square(cycled_predicted_patches))
+                                    tf.reduce_mean(tf.math.square(cycled_predicted_patches))
         adversarial_backward_loss *= tf.cast(number_of_domains, tf.float32)
 
         adversarial_loss = (adversarial_forward_loss + adversarial_backward_loss) / \
@@ -307,11 +310,9 @@ class CollaGANModel(S2SModel):
         # in the backwards pass
         # bw_target_palette (shape=[b, (n), c]) is the original palette used as target palette for the backwards pass
 
-
         # fw_source_images_dropped contains, for each domain, an image or zeros with same shape (dropped out)
         fw_source_images_dropped = fw_source_images * input_dropout_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
         # fw_source_images_dropped (shape=[b, d, s, s, c], but with all 0s for dropped images)
-
 
         with tf.GradientTape(persistent=True) as tape:
             # FORWARD PASS:
@@ -324,7 +325,7 @@ class CollaGANModel(S2SModel):
             # BACKWARD PASS:
             # 2. generate a batch of cycled images (back to their source domain)
             bw_generator_input = self.get_cycled_images_input(bw_source_images, fw_target_domain, input_dropout_mask,
-                                                                  fw_genned_image, bw_target_palette, batch_shape)
+                                                              fw_genned_image, bw_target_palette, batch_shape)
             # bw_generator_input (list of [shape=[b*d_target, d, s, s, c], shape=[b*d]])
             bw_genned_images = self.generator(bw_generator_input, training=True)
             # bw_genned_images (shape=[b*d_target, s, s, c])
@@ -424,7 +425,8 @@ class CollaGANModel(S2SModel):
         for i, example in enumerate(examples):
             domain_images, target_domain = example
             image_size, channels = domain_images[0].shape[0], domain_images[0].shape[2]
-            concatenated_images_to_extract_palette = tf.reshape(domain_images, (number_of_domains * image_size, image_size, channels))
+            concatenated_images_to_extract_palette = tf.reshape(domain_images,
+                                                                (number_of_domains * image_size, image_size, channels))
             concatenated_images_to_extract_palette = dataset_utils.denormalize(concatenated_images_to_extract_palette)
             palette = palette_utils.extract_palette(concatenated_images_to_extract_palette)
             palette = dataset_utils.normalize(tf.cast(palette, tf.float32))
@@ -503,7 +505,8 @@ class CollaGANModel(S2SModel):
                 batch_domain_images = domain_images[i * batch_size:(i + 1) * batch_size]
                 batch_target_domain = target_domain[i * batch_size:(i + 1) * batch_size]
                 batch_palette = palette_utils.batch_extract_palette_ragged(batch_domain_images)
-                fake_image_batch = generator(self.gen_supplier(batch_domain_images, batch_target_domain, batch_palette), training=False)
+                fake_image_batch = generator(self.gen_supplier(batch_domain_images, batch_target_domain, batch_palette),
+                                             training=False)
                 fake_images.append(fake_image_batch)
 
             fake_images = tf.concat(fake_images, axis=0)
@@ -576,9 +579,11 @@ class CollaGANModel(S2SModel):
         batch_transpose = tf.transpose(batch, [1, 0, 2, 3, 4])
         # batch_transpose (shape=(d, b, s, s, c))
         batch_shape = tf.shape(batch_transpose)
-        number_of_domains, batch_size, image_size, channels = batch_shape[0], batch_shape[1], batch_shape[2], batch_shape[4]
+        number_of_domains, batch_size, image_size, channels = batch_shape[0], batch_shape[1], batch_shape[2], \
+            batch_shape[4]
 
-        palettes = palette_utils.batch_extract_palette_ragged(tf.reshape(tf.constant(batch), [batch_size, -1, image_size, channels]))
+        palettes = palette_utils.batch_extract_palette_ragged(
+            tf.reshape(tf.constant(batch), [batch_size, -1, image_size, channels]))
         domain_images, target_domain, _ = self.sampler.sample(batch_transpose, 0.5)
         # domain_images (shape=[b, d, s, s, c])
         # target_domain (shape=[b,])
@@ -743,8 +748,10 @@ class CollaGANModelShuffledBatches(CollaGANModel):
                                       [batch_size, number_of_domains - 1])
 
         source_images_5d = tf.gather(source_images_5d, bw_target_domain, batch_dims=1)
-        source_images = tf.reshape(source_images_5d, [batch_size * (number_of_domains - 1), image_size, image_size, channels])
-        cycled_images_5d = tf.reshape(cycled_images, [batch_size, number_of_domains - 1, image_size, image_size, channels])
+        source_images = tf.reshape(source_images_5d,
+                                   [batch_size * (number_of_domains - 1), image_size, image_size, channels])
+        cycled_images_5d = tf.reshape(cycled_images,
+                                      [batch_size, number_of_domains - 1, image_size, image_size, channels])
 
         input_dropout_mask = tf.gather(input_dropout_mask, bw_target_domain, batch_dims=1)
         input_dropout_mask_1d = tf.reshape(input_dropout_mask, [batch_size * (number_of_domains - 1)])
@@ -796,11 +803,12 @@ class CollaGANModelShuffledBatches(CollaGANModel):
         classification_loss = (classification_forward__loss + classification_backward_loss) / number_of_domains_float
 
         # palette loss (forward, backward)
-        palette_forward_ = palette_utils.calculate_palette_coverage_loss(fake_image, fw_target_palette, temperature)
-        palette_backward = palette_utils.calculate_palette_coverage_loss(cycled_images,
-                                                                         tf.tile(bw_target_palette,
-                                                                                 [number_of_domains - 1, 1, 1]),
-                                                                         temperature)
+        palette_forward_ = palette_utils.calculate_palette_coverage_loss_ragged(fake_image, fw_target_palette,
+                                                                                temperature)
+        palette_backward = palette_utils.calculate_palette_coverage_loss_ragged(cycled_images,
+                                                                                tf.tile(bw_target_palette,
+                                                                                        [number_of_domains - 1, 1, 1]),
+                                                                                temperature)
         # palette_forward_ = 0.
         # palette_backward = 0.
         palette_loss = palette_forward_ + palette_backward
@@ -816,12 +824,12 @@ class CollaGANModelShuffledBatches(CollaGANModel):
 
         # observation: ssim loss uses only the backward (cycled) images... that's on the colla's code and paper
         total_loss = self.lambda_adversarial * adversarial_loss + \
-            self.lambda_l1 * l1_forward__loss + self.lambda_l1_backward * l1_backward_loss + \
-            self.lambda_ssim * ssim_backward_loss + \
-            self.lambda_domain * classification_loss + \
-            self.lambda_palette * palette_loss + \
-            self.lambda_histogram * histogram_loss + \
-            self.lambda_regularization * regularization_loss
+                     self.lambda_l1 * l1_forward__loss + self.lambda_l1_backward * l1_backward_loss + \
+                     self.lambda_ssim * ssim_backward_loss + \
+                     self.lambda_domain * classification_loss + \
+                     self.lambda_palette * palette_loss + \
+                     self.lambda_histogram * histogram_loss + \
+                     self.lambda_regularization * regularization_loss
 
         return {"total": total_loss, "adversarial": adversarial_loss, "l1_forward": l1_forward__loss,
                 "l1_backward": l1_backward_loss, "ssim": ssim_loss, "domain": classification_loss,
@@ -836,7 +844,7 @@ class CollaGANModelShuffledBatches(CollaGANModel):
         adversarial_forward_loss = adversarial_real + adversarial_fake
 
         adversarial_backward_loss = tf.reduce_mean(tf.math.squared_difference(source_predicted_patches, 1.)) + \
-            tf.reduce_mean(tf.math.square(cycled_predicted_patches))
+                                    tf.reduce_mean(tf.math.square(cycled_predicted_patches))
         adversarial_backward_loss *= tf.cast(number_of_domains, tf.float32)
 
         adversarial_loss = (adversarial_forward_loss + adversarial_backward_loss) / \
@@ -899,7 +907,7 @@ class CollaGANModelShuffledBatches(CollaGANModel):
             # BACKWARD PASS:
             # 2. generate a batch of cycled images (back to their source domain)
             bw_generator_input = self.get_cycled_images_input(bw_source_images, fw_target_domain, input_dropout_mask,
-                                                                  fw_genned_image, bw_target_palette, batch_shape)
+                                                              fw_genned_image, bw_target_palette, batch_shape)
             # bw_generator_input (list of [shape=[b*d_target, d, s, s, c], shape=[b*d]])
             bw_genned_images = self.generator(bw_generator_input, training=True)
             # bw_genned_images (shape=[b*d_target, s, s, c])
@@ -916,8 +924,10 @@ class CollaGANModelShuffledBatches(CollaGANModel):
             fw_source_images_flattended = tf.reshape(fw_source_images, [-1, image_size, image_size, channels])
             fw_source_images_shuffle_indices = tf.random.shuffle(tf.range(batch_size * number_of_domains))
             # fw_source_images_shuffle_indices contains shuffled indices from [0, b*d[
-            fw_source_images_sampled = tf.gather(fw_source_images_flattended, fw_source_images_shuffle_indices)[:bw_batch_size]
-            fw_source_domain_label = tf.gather(tf.tile(tf.range(number_of_domains), [batch_size]), fw_source_images_shuffle_indices)[:bw_batch_size]
+            fw_source_images_sampled = tf.gather(fw_source_images_flattended, fw_source_images_shuffle_indices)[
+                                       :bw_batch_size]
+            fw_source_domain_label = tf.gather(tf.tile(tf.range(number_of_domains), [batch_size]),
+                                               fw_source_images_shuffle_indices)[:bw_batch_size]
             # if t >= 0.5:
             #     tf.print("fw_source_domain_label", fw_source_domain_label)
             #     io_utils.show_image_matrix(fw_source_images_sampled)
@@ -1145,7 +1155,7 @@ class ForwardOnlyCycledSourceReplacer(CycledSourceReplacer):
     def replace(self, fw_target_domain, input_dropout_mask):
         number_of_domains = self.config.number_of_domains
         fw_target_domain_mask = tf.one_hot(fw_target_domain, number_of_domains,
-                                                dtype=tf.bool, on_value=True, off_value=False)
+                                           dtype=tf.bool, on_value=True, off_value=False)
         fw_target_domain_mask = fw_target_domain_mask[:, tf.newaxis, :, tf.newaxis, tf.newaxis, tf.newaxis]
         # the mask becomes of shape [b, 1, d, 1, 1, 1], which can be broadcast to the repeated_domain_images' shape
         return fw_target_domain_mask
@@ -1161,8 +1171,6 @@ class DroppedOutCycledSourceReplacer(CycledSourceReplacer):
         # the mask becomes of shape [b, 1, d, 1, 1, 1], which can be broadcast to the repeated_domain_images' shape
 
         return inverted_input_dropout_mask
-
-
 
 # Sanity checking collagan's palette conditioning:
 # python train.py collagan --generator palette-transformer --rm2k --steps 200 --evaluate-steps 100 --vram 4096 --perturb-palette 0.5 --cycled-source-replacer forward --temperature 0.1 --annealing linear

@@ -129,7 +129,7 @@ def calculate_palette_loss(images, palettes):
 
 
 @tf.function
-def calculate_palette_coverage_loss(images, palettes, temperature=0.1):
+def calculate_palette_coverage_loss_ragged(images, palettes, temperature=0.1):
     """
     Calculates the palette coverage loss for a batch of images and their corresponding palettes.
     Colors that are in the palette but that have not been used in the image are penalized.
@@ -147,6 +147,25 @@ def calculate_palette_coverage_loss(images, palettes, temperature=0.1):
     # Convert palettes to a dense tensor for easier processing
     palettes_dense = palettes.to_tensor(default_value=-100.0)  # Use -100 as a placeholder for missing colors
 
+    return calculate_palette_coverage_loss(images, palettes_dense, temperature)
+
+
+@tf.function
+def calculate_palette_coverage_loss(images, palettes_dense, temperature=0.1):
+    """
+    Calculates the palette coverage loss for a batch of images and their corresponding palettes.
+    Colors that are in the palette but that have not been used in the image are penalized.
+
+    Args:
+        images (tf.Tensor): A batch of images with shape [batch_size, height, width, channels] in the [-1, 1] domain.
+        palettes_dense (tf.Tensor): A batch of color palettes with shape [batch_size, num_colors, channels] in the
+            [-1, 1] domain.
+        temperature (float): Controls the sharpness of the soft assignment. Lower values make the assignment sharper.
+
+    Returns:
+        tf.Tensor: A scalar loss value indicating how well the images cover their respective palettes averaged 4
+        over the batch.
+    """
     # Get the shape of the palettes tensor
     batch_size, max_num_colors, channels = palettes_dense.shape
 

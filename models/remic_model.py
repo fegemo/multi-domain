@@ -432,7 +432,7 @@ class RemicModel(MunitModel):
             decoded_images = [self.decoders[d].predict([encoded_styles[d], encoded_contents], batch_size=batch_size,
                                                        verbose=0)[0]
                               for d in range(self.config.number_of_domains)]
-            # return decoded_images
+
             fake_images = tf.gather(tf.transpose(decoded_images, [1, 0, 2, 3, 4]), possible_target_domain, axis=1,
                                     batch_dims=1)
             real_images = tf.gather(domain_images, possible_target_domain, batch_dims=1)

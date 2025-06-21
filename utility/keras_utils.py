@@ -166,7 +166,8 @@ class DifferentiablePaletteQuantization(Layer):
 
         :param inputs: Tuple of (images, palettes), with shapes:
             - Option 1: [b, h, w, c] and [b, (k), c] (original format)
-            - Option 2: [b, num_domains, h, w, c] and [b, (k), c] (new format)
+            - Option 2: [b, num_domains, h, w, c] and [b, k, c] (format with full example, but does not support
+                ragged palettes)
         :param training: True if training (uses soft assignment through softmax with temperature)
             or False otherwise (uses hard assignment, losing differentiability)
         :return: Quantized images: Tensor of shape matching input images shape
@@ -189,7 +190,7 @@ class DifferentiablePaletteQuantization(Layer):
             # Reshape to combine batch and domains dimensions
             images_reshaped = tf.reshape(images, [batch_size * num_domains,
                                                   image_size, image_size, channels])
-            palettes_reshaped = palettes_expanded.merge_dims(0, 1)
+            palettes_reshaped = tf.reshape(palettes_expanded, [batch_size * num_domains, -1, channels])
             # images_reshaped (shape=[b * num_domains, h, w, c])
             # palettes_reshaped (shape=[b * num_domains, k, c])
 
@@ -286,8 +287,6 @@ class GumbelSoftmaxPaletteQuantization(Layer):
         # process each <image,palette> pair independently
         images_shape = images.shape
         image_size = images_shape[1]
-        # tf.print("palettes.shape", palettes.shape)
-        # tf.print("tf.shape(palettes)", tf.shape(palettes))
         if isinstance(palettes, tf.RaggedTensor):
             palettes = palettes.to_tensor(default_value=self.invalid_color,
                                           shape=[images_shape[0], self.max_palette_size, channels])
@@ -378,8 +377,6 @@ class PaletteTransformerEncoder(layers.Layer):
         self.layer_norms = [layers.LayerNormalization() for _ in range(self.num_layers)]
 
     def call(self, inputs):
-        # print(f"inputs.shape: {inputs.shape}")
-        # tf.print(f"inputs.shape: {inputs.shape}")
         if isinstance(inputs, tf.RaggedTensor):
             colors = inputs.to_tensor()  # [batch, max_colors, channels]
             mask = tf.sequence_mask(inputs.row_lengths(), tf.shape(colors)[1])
@@ -404,11 +401,8 @@ class PaletteTransformerEncoder(layers.Layer):
 
         # Masked mean pooling
         mask_expanded = tf.expand_dims(tf.cast(mask, x.dtype), -1)  # [batch, num_colors, 1]
-        # tf.print(f"mask_expanded.shape: {mask_expanded.shape}")
         masked_count = tf.reduce_sum(mask_expanded, axis=1)
-        # tf.print(f"masked_count.shape: {masked_count.shape}")
         masked_x = tf.reduce_sum(x * mask_expanded, axis=1)  # [batch, embed_dim]
-        # tf.print(f"masked_x.shape: {masked_x.shape}")
         return masked_x / masked_count
 
     def compute_output_spec(self, inputs):
