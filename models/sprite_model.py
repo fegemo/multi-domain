@@ -1,7 +1,11 @@
+import os
+from functools import reduce
+
 import tensorflow as tf
 from matplotlib import pyplot as plt
+from tqdm import tqdm
 
-from utility import keras_utils, palette_utils
+from utility import keras_utils, palette_utils, io_utils, dataset_utils
 from utility.keras_utils import LinearAnnealingScheduler, NoopAnnealingScheduler, create_random_inpaint_mask
 from .networks import resblock, munit_discriminator_multi_scale
 from .remic_model import RemicModel
@@ -500,7 +504,7 @@ class SpriteEditorModel(RemicModel):
                     for i_d in range(2):
                         for j_d in range(2):
                             ax = axes[i_d, j_d]
-                            ax.imshow(content[i_d * 2 + j_d] * 0.5 + 0.5)
+                            ax.imshow(tf.clip_by_value(content[i_d * 2 + j_d] * 0.5 + 0.5, 0., 1.))
                             ax.axis("off")
                 elif content.shape.rank == 3:
                     # single image, content (shape=[s, s, c]) or (shape=[s, s, 1])
@@ -508,7 +512,7 @@ class SpriteEditorModel(RemicModel):
                     if content.shape[-1] == 1:
                         ax.imshow(content[:, :, 0], cmap="gray")
                     else:
-                        ax.imshow(content * 0.5 + 0.5)
+                        ax.imshow(tf.clip_by_value(content * 0.5 + 0.5, 0., 1.))
                     ax.axis("off")
 
         # figure.tight_layout()
@@ -516,11 +520,6 @@ class SpriteEditorModel(RemicModel):
             plt.savefig(save_name, transparent=True)
 
         return figure
-
-    #
-    # def initialize_random_examples_for_evaluation(self, train_ds, test_ds, num_images):
-    #     pass
-    #
 
     def generate_images_for_evaluation(self, example_indices_for_evaluation):
         batch_size = self.config.batch
@@ -561,11 +560,314 @@ class SpriteEditorModel(RemicModel):
             "test": generate_images_from_example_indices(example_indices_for_evaluation["test"])
         }
 
-    # def generate_images_from_dataset(self, dataset, step, num_images=None):
-    #     pass
+    def generate_images_from_dataset(self, enumerated_dataset, step, num_images=None):
+        """
+        Generates an images from the dataset for visualization purposes in the end of training.
+        *WARNING*: assumes 4 domains: back, left, right, front when selecting which keep_masks to use.
+        :param enumerated_dataset:
+        :param step:
+        :param num_images:
+        :return:
+        """
+        base_image_path = self.get_output_folder("test-images")
 
-    # def debug_discriminator_output(self, batch, image_path):
-    #     pass
+        io_utils.delete_folder(base_image_path)
+        io_utils.ensure_folder_structure(base_image_path)
+
+        number_of_domains = self.config.number_of_domains
+        image_size = self.config.image_size
+        noise_length = self.config.noise
+        batch_size = self.config.batch
+        channels = self.config.inner_channels
+
+        # WARNING: assumes fixed 4 domains. There would be 15 rows if we wanted to showcase all combinations of inputs
+        # num_cols = 14, num_rows = 6
+        keep_mask = [[1, 1, 1, 1],  # all 4 images
+                     [1, 1, 0, 1],  # missing FRONT
+                     [1, 0, 1, 0],  # BACK + FRONT
+                     [0, 0, 1, 1],  # FRONT + RIGHT
+                     [0, 0, 1, 0],  # FRONT only
+                     [0, 0, 0, 1]  # RIGHT only
+                     ]
+        keep_mask = tf.constant(keep_mask, dtype=tf.float32)
+        # keep_mask (shape=(num_rows, d))
+        num_cols = number_of_domains * 3 + 2
+        num_rows = keep_mask.shape[0]
+
+        # inpaint_mask is blank for the first 2 groups of columns and random for the third
+        blank_inpaint_mask = tf.zeros((num_rows, image_size, image_size, 1))
+
+        # blank_inpaint_mask (shape=[num_rows, s, s, 1])
+
+        # the inputs to the generator are:
+        # - masked source images (shape=[b, d, s, s, c])
+        # - inpaint mask (shape=[b, s, s, 1])
+        # - source palettes (shape=[b, (n), c])
+        # - keep mask (shape=[b, d])
+        # - extracted codes (shape=[b, noise_length])
+
+        # we want to generate an image for each character in the dataset. There are 14 columns and 8 rows:
+        # - columns:  1. source_images, 2-5. images generated without an inpaint mask with the extracted
+        #   style code for each target domain: back, left, right, front, 6-9. images generated without an inpaint mask
+        #   with a random style code for each target domain, 10. inpaint mask, 11-14. images generated with
+        #   the original, extracted style code and using an inpaint mask for all target domains
+        # - rows: each row will have a different permutation of domains to drop, so that 1. all inputs, 2. 3 inputs,
+        #   3-5. 2 inputs, 6-8. 1 input
+
+        # preparing the inputs for the generator:
+        # - the batch size will be 24: 8 rows x 3 groups of columns
+        # - the inpaint mask is an empty one for the first 2 groups of columns and a random for the third, for each row
+        # - the source palettes are extracted from the visible source images
+        # - the keep mask is a multi-hot encoded vector indicating which domains are available for each row
+        # - the codes are extracted from the visible source images and used for the column groups 1 and 3, and a random
+        #   code is used for the column group 2
+
+        def generate_images_for_example(domain_images, idx):
+            """
+            Generates and plots an image for a single example.
+            :param domain_images: the source images for the example, shape=[d, s, s, c]
+            :param idx: the index of the example in the dataset.
+            """
+            # 1. repeat the domain_images to match the number of rows
+            domain_images = tf.repeat(tf.expand_dims(domain_images, 0), num_rows, axis=0)
+            # domain_images (shape=[num_rows, d, s, s, c])
+            visible_source_images = domain_images * keep_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
+            # visible_source_images (shape=[num_rows, d, s, s, c])
+
+            # 2. extracts the source palettes
+            source_palettes = palette_utils.batch_extract_palette_ragged(visible_source_images)
+            source_palettes = source_palettes.to_tensor(default_value=(-1., -1., -1., -1.))
+            # source_palettes (shape=[num_rows, max_colors, c])
+
+            # 3. creates the inpaint mask for the third group of columns
+            masked_source_images, random_inpaint_masks = keras_utils.create_random_inpaint_mask(
+                visible_source_images, 2)
+            # masked_source_images (shape=[num_rows, d, s, s, c])
+            # random_inpaint_masks (shape=[num_rows, s, s, 1])
+
+            # 4. extracts the codes from the visible source images
+            # keep_mask_oh = tf.reshape(keep_mask, [num_rows, number_of_domains])
+            extracted_codes_mean, _ = self.diversity_encoder.predict([visible_source_images, keep_mask], verbose=0)
+            random_codes = tf.random.normal((num_rows, noise_length))
+            # extracted_codes_mean, random_codes (shape=[num_rows, noise_length])
+
+            # 5. generates the images using the generator
+            generated_images = self.generator.predict(self.gen_supplier(
+                # source_images: (num_rows x 3 x shape=[d, s, s, c]))
+                tf.concat([visible_source_images, visible_source_images, masked_source_images], axis=0),
+                # inpaint_mask: (num_rows x 3 x shape=[s, s, 1])
+                tf.concat([blank_inpaint_mask, blank_inpaint_mask, random_inpaint_masks], axis=0),
+                # source_palettes: (num_rows x 3 x shape=[(n), c])
+                tf.repeat(source_palettes, 3, axis=0),
+                # keep_mask: (num_rows x 3 x shape=[d])
+                tf.repeat(keep_mask, 3, axis=0),
+                # codes: (num_rows x 3 x shape=[noise_length])
+                tf.concat([extracted_codes_mean, random_codes, extracted_codes_mean], axis=0)
+            ), verbose=0, batch_size=batch_size)[0]
+            # generated_images (shape=[num_rows x 3, d, s, s, c])
+
+            # 6. reshapes the generated images to have the shape [num_rows, 3, d, s, s, c]
+            generated_images = tf.reshape(generated_images, (num_rows, 3, number_of_domains,
+                                                             image_size, image_size, channels))
+            # generated_images (shape=[num_rows, 3, d, s, s, c])
+
+            # 7. plots the images in a grid format with 14 columns and 6 rows
+            # - the first column is the source images in a 2x2 subgrid
+            # - columns 2-5 are the images generated with the extracted style code for each target domain
+            # - columns 6-9 are the images generated with a random style code for each target domain
+            # - column 10 is the inpaint mask
+            # - columns 11-14 are the images generated with the extracted style code and using an inpaint mask for all
+            #   target domains
+            fig = plt.figure(figsize=(8 * num_cols, 8 * num_rows), layout="constrained")
+            sub_figs = fig.subfigures(num_rows, num_cols)
+            for row in range(num_rows):
+                # 1. source images
+                sub_fig = sub_figs[row, 0]
+                ax = sub_fig.subplots(2, 2)
+                for i_d in range(2):
+                    for j_d in range(2):
+                        ax[i_d, j_d].imshow(
+                            tf.clip_by_value(visible_source_images[row, i_d * 2 + j_d] * 0.5 + 0.5, 0., 1.))
+                        ax[i_d, j_d].axis("off")
+                if row == 0:
+                    sub_fig.suptitle(f"Source", fontsize=36)
+
+                # 2-5. generated images with extracted style code
+                for col in range(1, 5):
+                    sub_fig = sub_figs[row, col]
+                    ax = sub_fig.subplots(1, 1)
+                    ax.imshow(tf.clip_by_value(generated_images[row, 0, col - 1] * 0.5 + 0.5, 0., 1.))
+                    ax.axis("off")
+                    domain_name = self.config.domains_capitalized[col - 1]
+                    if row == 0:
+                        sub_fig.suptitle(f"Gen. Ori. {domain_name}", fontsize=36)
+
+                # 6-9. generated images with random style code
+                for col in range(5, 9):
+                    sub_fig = sub_figs[row, col]
+                    ax = sub_fig.subplots(1, 1)
+                    ax.imshow(tf.clip_by_value(generated_images[row, 1, col - 5] * 0.5 + 0.5, 0., 1.))
+                    ax.axis("off")
+                    domain_name = self.config.domains_capitalized[col - 5]
+                    if row == 0:
+                        sub_fig.suptitle(f"Gen. Rnd. {domain_name}", fontsize=36)
+
+                # 10. inpaint mask
+                sub_fig = sub_figs[row, 9]
+                ax = sub_fig.subplots(1, 1)
+                ax.imshow(random_inpaint_masks[row], cmap="gray")
+                ax.axis("off")
+                if row == 0:
+                    sub_fig.suptitle("Inpaint Mask", fontsize=36)
+
+                # 11-14. generated images with extracted style code and inpaint mask
+                for col in range(10, num_cols):
+                    sub_fig = sub_figs[row, col]
+                    ax = sub_fig.subplots(1, 1)
+                    ax.imshow(tf.clip_by_value(generated_images[row, 2, col - 10] * 0.5 + 0.5, 0., 1.))
+                    ax.axis("off")
+                    domain_name = self.config.domains_capitalized[col - 10]
+                    if row == 0:
+                        sub_fig.suptitle(f"Inpainted Ori. {domain_name}", fontsize=36)
+
+            # fig.tight_layout()
+            image_path = os.sep.join([base_image_path, f"{idx:04d}_at_step_{step}.png"])
+            plt.savefig(image_path, transparent=True)
+            plt.close(fig)
+
+        for idx, domain_images in tqdm(enumerated_dataset, total=num_images):
+            generate_images_for_example(domain_images, idx)
+
+    def debug_discriminator_output(self, batch, image_path):
+        discriminator_scales = self.config.discriminator_scales
+        batch = tf.transpose(batch, [1, 0, 2, 3, 4])
+        # batch (b, d, s, s, c)
+        batch_shape = tf.shape(batch)
+        number_of_domains, batch_size, image_size, channels = batch_shape[1], batch_shape[0], batch_shape[2], \
+            batch_shape[4]
+
+        ensure_inside_range = lambda x: tf.math.floormod(x, number_of_domains)
+        target_domains = [ensure_inside_range(x) for x in range(batch_size)]
+        real_images = tf.gather(batch, target_domains, axis=1, batch_dims=1)
+        fake_images = []
+        for i in range(batch_size):
+            keep_mask = tf.one_hot(target_domains[i], number_of_domains, on_value=0.0, off_value=1.0)
+            visible_source_images = batch[i] * keep_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
+            visible_source_images = tf.expand_dims(visible_source_images, axis=0)
+            # visible_source_images (1, d, s, s, c)
+
+            extracted_code = self.diversity_encoder.predict([visible_source_images, keep_mask[tf.newaxis, ...]],
+                                                            verbose=0)[0]
+
+            masked_source_images, inpaint_mask = keras_utils.create_random_inpaint_mask(visible_source_images, 2)
+            # masked_source_images (shape=[1, d, s, s, c])
+            # inpaint_mask (shape=[1, s, s, 1])
+            source_palette = palette_utils.batch_extract_palette_ragged(visible_source_images)
+            source_palette = source_palette.to_tensor(default_value=(-1., -1., -1., -1.))
+            # source_palette (shape=[1, n, c])
+
+            fake_image = self.generator.predict(
+                self.gen_supplier(
+                    masked_source_images,
+                    inpaint_mask,
+                    source_palette,
+                    keep_mask[tf.newaxis, ...],
+                    extracted_code
+                ), verbose=0)
+            # gets rid of the intermediate outputs of the generator
+            fake_image = fake_image[0]
+            # gets rid of the batch dimension
+            fake_image = fake_image[0]
+            # selects only the generated image that is the target domain
+            fake_image = fake_image[target_domains[i]]
+            fake_images.append(fake_image)
+        fake_images = tf.stack(fake_images, axis=0)
+
+        # gets the result of discriminating the real and fake (translated) images
+        real_patches = [self.discriminators[target_domains[i]](real_images[i][tf.newaxis, ...])
+                        for i in range(batch_size)]
+        fake_patches = [self.discriminators[target_domains[i]](fake_images[i][tf.newaxis, ...])
+                        for i in range(batch_size)]
+        # if discriminator_scales == 1:
+        #     real_patches = [[real_patches[i]] for i in range(batch_size)]
+        #     fake_patches = [[fake_patches[i]] for i in range(batch_size)]
+        # [b] x [ds] x shape=[1, x, x, 1]
+
+        # calculates the mean of the patches for each discriminator scale
+        real_means = [0. for _ in range(discriminator_scales)]
+        fake_means = [0. for _ in range(discriminator_scales)]
+        for ds in range(discriminator_scales):
+            for b in range(batch_size):
+                real_means[ds] += tf.reduce_mean(real_patches[b][ds])
+                fake_means[ds] += tf.reduce_mean(fake_patches[b][ds])
+            real_means[ds] /= tf.cast(batch_size, tf.float32)
+            fake_means[ds] /= tf.cast(batch_size, tf.float32)
+        # real_means = [tf.reduce_mean(real_patches[i][c], axis=[1, 2, 3]) for i in range(batch_size)
+        #               for c in range(discriminator_scales)]
+        # fake_means = [tf.reduce_mean(fake_patches[i][c], axis=[1, 2, 3]) for i in range(batch_size)
+        #               for c in range(discriminator_scales)]
+        # print("len(real_means):", len(real_means))
+        # print("real_means", real_means)
+        # real_means, fake_means (list of means for each discriminator scale, [b] x [ds])
+        # real_means = tf.reduce_mean(real_means, axis=0)
+        # fake_means = tf.reduce_mean(fake_means, axis=0)
+        # real_means (shape=[ds,]), fake_means (shape=[ds,])
+        # print("Real means shape:", real_means.shape)
+        # print("Fake means shape:", fake_means.shape)
+
+        # lsgan yields an unbounded real number, which should be 1 for real images and 0 for fake
+        # but, we need to provide them in the [0, 1] range
+        flattened_real_patches = tf.concat([tf.squeeze(tf.reshape(real_patches[i][c], [-1])) for i in range(batch_size)
+                                            for c in range(discriminator_scales)], axis=0)
+        flattened_fake_patches = tf.concat([tf.squeeze(tf.reshape(fake_patches[i][c], [-1])) for i in range(batch_size)
+                                            for c in range(discriminator_scales)], axis=0)
+        concatenated_predictions = tf.concat([flattened_real_patches, flattened_fake_patches], axis=0)
+        min_value = tf.reduce_min(concatenated_predictions)
+        max_value = tf.reduce_max(concatenated_predictions)
+        amplitude = max_value - min_value
+        real_predicted = [[(real_patches[i][c] - min_value) / amplitude for c in range(discriminator_scales)]
+                          for i in range(batch_size)]
+        fake_predicted = [[(fake_patches[i][c] - min_value) / amplitude for c in range(discriminator_scales)]
+                          for i in range(batch_size)]
+
+        discriminator_titles = [f"Disc. Scale {c}" for c in range(discriminator_scales)]
+        titles = ["Real", *discriminator_titles, "Imputed", *discriminator_titles]
+        num_cols = len(titles)
+        num_rows = batch_size.numpy()
+
+        fig = plt.figure(figsize=(4 * num_cols, 4 * num_rows))
+        for i in range(num_rows):
+            for j in range(num_cols):
+                plt.subplot(num_rows, num_cols, (i * num_cols) + j + 1)
+                subplot_title = ""
+                if i == 0:
+                    if j != 0 and j != discriminator_scales + 1:
+                        # it's a discriminator scale column... append the mean of the patches to the title
+                        means = real_means if j <= discriminator_scales else fake_means
+                        subtractor = 1 if j <= discriminator_scales else discriminator_scales + 2
+                        titles[j] += f" ({means[j - subtractor]:.3f})"
+                    subplot_title = titles[j]
+                plt.title(subplot_title, fontdict={"fontsize": 24})
+
+                imshow_args = {}
+                if j == 0:
+                    image = real_images[i] * 0.5 + 0.5
+                elif 0 < j < discriminator_scales + 1:
+                    image = tf.squeeze(real_predicted[i][j - 1])
+                    imshow_args = {"cmap": "gray", "vmin": 0.0, "vmax": 1.0}
+                elif j == discriminator_scales + 1:
+                    image = fake_images[i] * 0.5 + 0.5
+                elif j > discriminator_scales + 1:
+                    image = tf.squeeze(fake_predicted[i][j - discriminator_scales - 2])
+                    imshow_args = {"cmap": "gray", "vmin": 0.0, "vmax": 1.0}
+                else:
+                    raise ValueError(f"Invalid column index {j}")
+                plt.axis("off")
+                plt.imshow(image, **imshow_args)
+
+        fig.tight_layout()
+        plt.savefig(image_path, transparent=True)
+        plt.close(fig)
 
 
 from tensorflow.keras import layers, models
