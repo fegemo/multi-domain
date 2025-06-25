@@ -523,7 +523,7 @@ class RemicModel(MunitModel):
         real_images = tf.gather(batch, target_domains, axis=1, batch_dims=1)
         fake_images = []
         for i in range(batch_size):
-            keep_mask = tf.one_hot(target_domains[i], number_of_domains)
+            keep_mask = tf.one_hot(target_domains[i], number_of_domains, on_value=0.0, off_value=1.0)
             keep_mask = keep_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
             visible_source_images = batch[i] * keep_mask
             # visible_source_images (d, s, s, c)
