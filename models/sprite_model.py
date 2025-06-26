@@ -515,7 +515,7 @@ class SpriteEditorModel(RemicModel):
                         ax.imshow(tf.clip_by_value(content * 0.5 + 0.5, 0., 1.))
                     ax.axis("off")
 
-        # figure.tight_layout()
+        figure.tight_layout()
         if save_name is not None:
             plt.savefig(save_name, transparent=True)
 
@@ -739,7 +739,8 @@ class SpriteEditorModel(RemicModel):
             generate_images_for_example(domain_images, idx)
 
     def debug_discriminator_output(self, batch, image_path):
-        discriminator_scales = self.config.discriminator_scales
+        d_scales = self.config.discriminator_scales
+        g_scales = self.config.generator_scales
         batch = tf.transpose(batch, [1, 0, 2, 3, 4])
         # batch (b, d, s, s, c)
         batch_shape = tf.shape(batch)
@@ -774,91 +775,81 @@ class SpriteEditorModel(RemicModel):
                     keep_mask[tf.newaxis, ...],
                     extracted_code
                 ), verbose=0)
-            # gets rid of the intermediate outputs of the generator
-            fake_image = fake_image[0]
-            # gets rid of the batch dimension
-            fake_image = fake_image[0]
-            # selects only the generated image that is the target domain
-            fake_image = fake_image[target_domains[i]]
             fake_images.append(fake_image)
-        fake_images = tf.stack(fake_images, axis=0)
+        # fake_images (list of [generator_scales x shape=[1, d, ?, ?, c]])
 
         # gets the result of discriminating the real and fake (translated) images
         real_patches = [self.discriminators[target_domains[i]](real_images[i][tf.newaxis, ...])
                         for i in range(batch_size)]
-        fake_patches = [self.discriminators[target_domains[i]](fake_images[i][tf.newaxis, ...])
+        fake_patches = [self.discriminators[target_domains[i]](fake_images[i][0][0][target_domains[i]][tf.newaxis, ...])
                         for i in range(batch_size)]
-        # if discriminator_scales == 1:
+        # if d_scales == 1:
         #     real_patches = [[real_patches[i]] for i in range(batch_size)]
         #     fake_patches = [[fake_patches[i]] for i in range(batch_size)]
         # [b] x [ds] x shape=[1, x, x, 1]
 
         # calculates the mean of the patches for each discriminator scale
-        real_means = [0. for _ in range(discriminator_scales)]
-        fake_means = [0. for _ in range(discriminator_scales)]
-        for ds in range(discriminator_scales):
+        real_means = [0. for _ in range(d_scales)]
+        fake_means = [0. for _ in range(d_scales)]
+        for ds in range(d_scales):
             for b in range(batch_size):
                 real_means[ds] += tf.reduce_mean(real_patches[b][ds])
                 fake_means[ds] += tf.reduce_mean(fake_patches[b][ds])
             real_means[ds] /= tf.cast(batch_size, tf.float32)
             fake_means[ds] /= tf.cast(batch_size, tf.float32)
-        # real_means = [tf.reduce_mean(real_patches[i][c], axis=[1, 2, 3]) for i in range(batch_size)
-        #               for c in range(discriminator_scales)]
-        # fake_means = [tf.reduce_mean(fake_patches[i][c], axis=[1, 2, 3]) for i in range(batch_size)
-        #               for c in range(discriminator_scales)]
-        # print("len(real_means):", len(real_means))
-        # print("real_means", real_means)
-        # real_means, fake_means (list of means for each discriminator scale, [b] x [ds])
-        # real_means = tf.reduce_mean(real_means, axis=0)
-        # fake_means = tf.reduce_mean(fake_means, axis=0)
-        # real_means (shape=[ds,]), fake_means (shape=[ds,])
-        # print("Real means shape:", real_means.shape)
-        # print("Fake means shape:", fake_means.shape)
 
         # lsgan yields an unbounded real number, which should be 1 for real images and 0 for fake
         # but, we need to provide them in the [0, 1] range
         flattened_real_patches = tf.concat([tf.squeeze(tf.reshape(real_patches[i][c], [-1])) for i in range(batch_size)
-                                            for c in range(discriminator_scales)], axis=0)
+                                            for c in range(d_scales)], axis=0)
         flattened_fake_patches = tf.concat([tf.squeeze(tf.reshape(fake_patches[i][c], [-1])) for i in range(batch_size)
-                                            for c in range(discriminator_scales)], axis=0)
+                                            for c in range(d_scales)], axis=0)
         concatenated_predictions = tf.concat([flattened_real_patches, flattened_fake_patches], axis=0)
         min_value = tf.reduce_min(concatenated_predictions)
         max_value = tf.reduce_max(concatenated_predictions)
         amplitude = max_value - min_value
-        real_predicted = [[(real_patches[i][c] - min_value) / amplitude for c in range(discriminator_scales)]
+        real_predicted = [[(real_patches[i][c] - min_value) / amplitude for c in range(d_scales)]
                           for i in range(batch_size)]
-        fake_predicted = [[(fake_patches[i][c] - min_value) / amplitude for c in range(discriminator_scales)]
+        fake_predicted = [[(fake_patches[i][c] - min_value) / amplitude for c in range(d_scales)]
                           for i in range(batch_size)]
 
-        discriminator_titles = [f"Disc. Scale {c}" for c in range(discriminator_scales)]
-        titles = ["Real", *discriminator_titles, "Imputed", *discriminator_titles]
+        discriminator_titles = [f"Disc. Scale {c}" for c in range(d_scales)]
+        generator_titles = [f"Imputed (scale {x})" for x in range(g_scales)]
+        titles = ["Real", *discriminator_titles, *generator_titles, *discriminator_titles]
         num_cols = len(titles)
         num_rows = batch_size.numpy()
 
         fig = plt.figure(figsize=(4 * num_cols, 4 * num_rows))
+        is_discriminator_scales_column = lambda col: 0 > col >= d_scales or d_scales + g_scales < col
         for i in range(num_rows):
             for j in range(num_cols):
                 plt.subplot(num_rows, num_cols, (i * num_cols) + j + 1)
                 subplot_title = ""
                 if i == 0:
-                    if j != 0 and j != discriminator_scales + 1:
+                    if is_discriminator_scales_column(j):
                         # it's a discriminator scale column... append the mean of the patches to the title
-                        means = real_means if j <= discriminator_scales else fake_means
-                        subtractor = 1 if j <= discriminator_scales else discriminator_scales + 2
+                        means = real_means if j <= d_scales else fake_means
+                        subtractor = 1 if j <= d_scales else d_scales + g_scales + 1
                         titles[j] += f" ({means[j - subtractor]:.3f})"
                     subplot_title = titles[j]
                 plt.title(subplot_title, fontdict={"fontsize": 24})
 
                 imshow_args = {}
                 if j == 0:
+                    # the real image
                     image = real_images[i] * 0.5 + 0.5
-                elif 0 < j < discriminator_scales + 1:
+                elif 0 < j < d_scales + 1:
+                    # the discriminated real image in one of the scales
                     image = tf.squeeze(real_predicted[i][j - 1])
                     imshow_args = {"cmap": "gray", "vmin": 0.0, "vmax": 1.0}
-                elif j == discriminator_scales + 1:
-                    image = fake_images[i] * 0.5 + 0.5
-                elif j > discriminator_scales + 1:
-                    image = tf.squeeze(fake_predicted[i][j - discriminator_scales - 2])
+                elif j <= d_scales + g_scales:
+                    # the imputed image or some reduced scale
+                    subtractor = d_scales + 1
+                    # fake_images (list of [batch x generator_scales x shape=[1, d, ?, ?, c]])
+                    image = tf.clip_by_value(fake_images[i][j-subtractor][0][target_domains[i]] * 0.5 + 0.5, 0., 1.)
+                elif j > d_scales + g_scales:
+                    # the discriminated fake image in one of the scales
+                    image = tf.squeeze(fake_predicted[i][j - d_scales - g_scales - 1])
                     imshow_args = {"cmap": "gray", "vmin": 0.0, "vmax": 1.0}
                 else:
                     raise ValueError(f"Invalid column index {j}")
