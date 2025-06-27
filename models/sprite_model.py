@@ -34,13 +34,13 @@ class SpriteEditorModel(RemicModel):
         else:
             self.annealing_scheduler = NoopAnnealingScheduler()
 
-        if config.inpaint_mode == "none":
+        if config.inpaint_mask == "none":
             self.mask_creator = NoopInpaintMaskGenerator()
-        elif config.inpaint_mode == "random":
+        elif config.inpaint_mask == "random":
             self.mask_creator = RandomInpaintMaskGenerator()
-        elif config.inpaint_mode == "constant":
+        elif config.inpaint_mask == "constant":
             self.mask_creator = ConstantInpaintMaskGenerator()
-        elif config.inpaint_mode == "curriculum":
+        elif config.inpaint_mask == "curriculum":
             self.mask_creator = CurriculumInpaintMaskGenerator()
 
         self.diversity_encoder_optimizer = None
@@ -208,7 +208,6 @@ class SpriteEditorModel(RemicModel):
         :param t:
         :return:
         """
-        discriminator_scales = self.config.discriminator_scales
         # [d, b, s, s, c] = domain, batch, size, size, channels
         batch_shape = tf.shape(batch)
         number_of_domains, batch_size, image_size, channels = self.config.number_of_domains, batch_shape[1], \
@@ -242,7 +241,7 @@ class SpriteEditorModel(RemicModel):
         # 5. prepares the ground truth for the generator
         # for each generator_scale, the target images are the source images downsampled by 1/2
         # (e.g., if generator_scales=3, then the target images have sizes 64x64, then 32x32, then 16x16)
-        target_images = []
+        real_images = []
         for s in range(self.config.generator_scales):
             downscaling_factor = 2 ** s
             target_image = source_images[:half_batch_size]
@@ -254,8 +253,8 @@ class SpriteEditorModel(RemicModel):
             target_image = tf.reshape(target_image, (half_batch_size, number_of_domains,
                                                      image_size // downscaling_factor,
                                                      image_size // downscaling_factor, channels))
-            target_images.append(target_image)
-        # target_images ([generator_scales x shape=[hb, d, ?, ?, c]])
+            real_images.append(target_image)
+        # real_images ([generator_scales x shape=[hb, d, ?, ?, c]])
 
         # A. starts the generator training: first, image->latent->image, then latent->image->latent
         with (tf.GradientTape(persistent=True) as gen_tape):
@@ -294,7 +293,7 @@ class SpriteEditorModel(RemicModel):
             # A.6. calculates the generator loss
             g_loss = self.generator_loss(
                 fake_predicted,
-                generated_images, target_images,
+                generated_images, real_images,
                 input_keep_mask,
                 ec_mean, ec_log_var, random_codes, recovered_codes_mean,
                 source_palette, temperature,
@@ -320,25 +319,23 @@ class SpriteEditorModel(RemicModel):
         # generated_images ([generator_scales x shape=[b, d, ?, ?, c]])
         # gets only the last output of the generator, excluding the intermediate ones
         generated_images = generated_images[0]
-        generated_images = tf.reshape(generated_images, (batch_size * number_of_domains,
-                                                         image_size, image_size, channels))
-        # generated_images (shape=[b*d, s, s, c])
-        source_images = tf.reshape(source_images, (batch_size * number_of_domains,
-                                                   image_size, image_size, channels))
-        # source_images (shape=[b*d, s, s, c])
+        # generated_images (shape=[b, d, s, s, c])
 
         with tf.GradientTape(persistent=True) as disc_tape:
             # 3. calculates the discriminator losses
             real_predicted_all_discriminators = []
             fake_predicted_all_discriminators = []
             for i, disc in enumerate(self.discriminators):
-                real_predicted, fake_predicted = self.mix_and_discriminate(disc, source_images, generated_images,
+                target_domain = i
+                real_images = source_images[:, target_domain]
+                fake_images = generated_images[:, target_domain]
+                real_predicted, fake_predicted = self.mix_and_discriminate(disc, real_images, fake_images,
                                                                            batch_size)
-                # real_predicted, fake_predicted ([ds] x [b*d, ?, ?, 1])
+                # real_predicted, fake_predicted ([ds] x [b, ?, ?, 1])
                 real_predicted_all_discriminators.append(real_predicted)
                 fake_predicted_all_discriminators.append(fake_predicted)
 
-            # xxxx_predicted_all_discriminators ([d] x [ds] x [b*d, ?, ?, 1])
+            # xxxx_predicted_all_discriminators ([d] x [ds] x [b, ?, ?, 1])
             d_loss = self.discriminator_loss(real_predicted_all_discriminators, fake_predicted_all_discriminators)
 
         # 4. calculates the gradients and applies them, then releases the persistent tape
