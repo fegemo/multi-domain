@@ -523,6 +523,8 @@ def create_random_inpaint_mask(batch, n_holes=4):
     batch_size, number_of_domains, image_size = batch.shape[0], batch.shape[1], batch.shape[2]
     if n_holes == 0:
         # no holes, return original batch and empty masks
+        # need to declare an empty grid tensor to match the expectation of the tf.function
+        grid = tf.zeros([image_size, image_size, 2], dtype=tf.float32)
         return batch, tf.zeros([batch_size, image_size, image_size, 1])
 
     grid_i, grid_j = tf.meshgrid(tf.range(image_size, dtype=tf.float32),
@@ -635,3 +637,94 @@ def scales_output_to_two_halves(scales_output):
 
     # convert lists to tensors
     return half_1, half_2
+
+
+class InpaintMaskGenerator(ABC):
+    """
+    Abstract base class for inpainting modes.
+    Each mode should implement the `apply` method.
+    """
+    @abstractmethod
+    def apply(self, batch, t):
+        """
+        Applies the inpainting mode to the images with the given masks.
+        :param batch: Tensor of shape [b, d, s, s, c]
+        :param t: Current training progress (0.0 to 1.0)
+        :return: Tuple of (masked_batch, masks)
+            - masked_batch: Tensor with holes applied to RGB channels
+            - masks: Tensor of shape [b, s, s, 1] with holes
+        """
+        pass
+
+
+class NoopInpaintMaskGenerator(InpaintMaskGenerator):
+    """
+    No-op inpainting mode that returns the images unchanged.
+    """
+    def apply(self, batch, t):
+        empty_mask = tf.zeros([batch.shape[0], batch.shape[2], batch.shape[3], 1], dtype=batch.dtype)
+        return batch, empty_mask
+
+
+class ConstantInpaintMaskGenerator(InpaintMaskGenerator):
+    """
+    Random inpainting mode that applies random irregular masks to the images.
+    """
+    def __init__(self, num_holes=4):
+        self.num_holes = num_holes
+
+    def apply(self, batch, t):
+        """
+        Applies random irregular masks to the batch of images.
+        :param batch: Tensor of shape [b, d, s, s, c]
+        :param t: Current training progress (0.0 to 1.0)
+        :return: Tuple of (masked_batch, masks)
+            - masked_batch: Tensor with holes applied to RGB channels
+            - masks: Tensor of shape [b, s, s, 1] with holes
+        """
+        return create_random_inpaint_mask(batch, self.num_holes)
+
+
+class RandomInpaintMaskGenerator(InpaintMaskGenerator):
+    """
+    Random inpainting mode that applies random irregular masks to the images.
+    """
+    def __init__(self, max_holes=4):
+        self.max_holes = max_holes
+
+    def apply(self, batch, t):
+        """
+        Applies random irregular masks to the batch of images.
+        :param batch: Tensor of shape [b, d, s, s, c]
+        :param t: Current training progress (0.0 to 1.0)
+        :return: Tuple of (masked_batch, masks)
+            - masked_batch: Tensor with holes applied to RGB channels
+            - masks: Tensor of shape [b, s, s, 1] with holes
+        """
+        num_holes = tf.random.uniform([], minval=0, maxval=self.max_holes + 1, dtype=tf.int32)
+        return create_random_inpaint_mask(batch, num_holes)
+
+
+class CurriculumInpaintMaskGenerator(InpaintMaskGenerator):
+    """
+    Curriculum inpainting mode that applies masks to the images based on a curriculum.
+    The curriculum is defined by the `curriculum` parameter, which is a list of tuples
+    (n_holes, mask_probability).
+    """
+    def __init__(self, max_holes=4):
+        self.max_holes = max_holes
+
+    def apply(self, batch, t):
+        """
+        Applies curriculum-based inpainting to the batch of images.
+        :param batch: Tensor of shape [b, d, s, s, c]
+        :param t: Current training progress (0.0 to 1.0)
+        :return: Tuple of (masked_batch, masks)
+            - masked_batch: Tensor with holes applied to RGB channels
+            - masks: Tensor of shape [b, s, s, 1] with holes
+        """
+        is_random = t >= 0.5
+        num_holes = tf.random.uniform([], minval=0, maxval=self.max_holes + 1, dtype=tf.int32) \
+            if is_random \
+            else tf.cast(tf.math.floordiv(t, 0.5) * (self.max_holes + 1), tf.int32)
+        return create_random_inpaint_mask(batch, num_holes)

@@ -6,7 +6,8 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from utility import keras_utils, palette_utils, io_utils, dataset_utils
-from utility.keras_utils import LinearAnnealingScheduler, NoopAnnealingScheduler, create_random_inpaint_mask
+from utility.keras_utils import LinearAnnealingScheduler, NoopAnnealingScheduler, create_random_inpaint_mask, \
+    NoopInpaintMaskGenerator, ConstantInpaintMaskGenerator, RandomInpaintMaskGenerator, CurriculumInpaintMaskGenerator
 from .networks import resblock, munit_discriminator_multi_scale
 from .remic_model import RemicModel
 
@@ -32,6 +33,15 @@ class SpriteEditorModel(RemicModel):
             self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, [self.generator.quantization])
         else:
             self.annealing_scheduler = NoopAnnealingScheduler()
+
+        if config.inpaint_mode == "none":
+            self.mask_creator = NoopInpaintMaskGenerator()
+        elif config.inpaint_mode == "random":
+            self.mask_creator = RandomInpaintMaskGenerator()
+        elif config.inpaint_mode == "constant":
+            self.mask_creator = ConstantInpaintMaskGenerator()
+        elif config.inpaint_mode == "curriculum":
+            self.mask_creator = CurriculumInpaintMaskGenerator()
 
         self.diversity_encoder_optimizer = None
 
@@ -220,7 +230,7 @@ class SpriteEditorModel(RemicModel):
         noise_length = self.config.noise
         random_codes = tf.random.normal([half_batch_size, noise_length])
         # random_codes (shape=[hb, noise_length])
-        masked_source_images, inpaint_mask = create_random_inpaint_mask(visible_source_images, 4)
+        masked_source_images, inpaint_mask = self.mask_creator.apply(visible_source_images, t)
         # masked_source_images (shape=[b, d, s, s, c])
         # inpaint_mask (shape=[b, s, s, 1])
 
