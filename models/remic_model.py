@@ -710,6 +710,6 @@ class NoDropoutSampler(ExampleSampler):
 
         # selects a random single missing domain for each sample in the batch
         missing_domains = tf.random.uniform([batch_size], minval=0, maxval=number_of_domains, dtype="int32")
-        input_keep_mask = tf.one_hot(missing_domains, number_of_domains)
+        input_keep_mask = tf.one_hot(missing_domains, number_of_domains, on_value=0., off_value=1.)
 
         return batch, input_keep_mask
