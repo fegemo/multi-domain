@@ -659,9 +659,9 @@ def munit_discriminator_multi_scale(domain_letter, image_size, channels, scales)
         outputs.append(conv2d_blocks(x))
         x = layers.AveragePooling2D(pool_size=(3, 3), strides=2)(x)
 
-    if scales == 1:
-        shape = list(map(lambda d: d.value, outputs[0].shape.dims[1:]))
-        outputs[0] = layers.Reshape((1, *shape))(outputs[0])
+    # if scales == 1:
+    #     shape = list(map(lambda d: d.value, outputs[0].shape[1:]))
+    #     outputs[0] = layers.Reshape((1, *shape))(outputs[0])
     return tf.keras.Model(inputs=input_layer, outputs=outputs, name=f"Discriminator{domain_letter.upper()}")
 
 
