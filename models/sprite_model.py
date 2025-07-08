@@ -748,7 +748,6 @@ class SpriteEditorModel(RemicModel):
     def debug_discriminator_output(self, batch, image_path):
         d_scales = self.config.discriminator_scales
         g_scales = self.config.generator_scales
-        batch = tf.transpose(batch, [1, 0, 2, 3, 4])
         # batch (b, d, s, s, c)
         batch_shape = tf.shape(batch)
         number_of_domains, batch_size, image_size, channels = batch_shape[1], batch_shape[0], batch_shape[2], \
@@ -766,6 +765,7 @@ class SpriteEditorModel(RemicModel):
 
             extracted_code = self.diversity_encoder.predict([visible_source_images, keep_mask[tf.newaxis, ...]],
                                                             verbose=0)[0]
+            # extracted_code (shape=[1, noise_length])
 
             masked_source_images, inpaint_mask = keras_utils.create_random_inpaint_mask(visible_source_images, 2)
             # masked_source_images (shape=[1, d, s, s, c])
@@ -783,7 +783,7 @@ class SpriteEditorModel(RemicModel):
                     extracted_code
                 ), verbose=0)
             fake_images.append(fake_image)
-        # fake_images (list of [generator_scales x shape=[1, d, ?, ?, c]])
+        # fake_images (list of [b] x [generator_scales] x shape=[1, d, ?, ?, c]])
 
         # gets the result of discriminating the real and fake (translated) images
         real_patches = [self.discriminators[target_domains[i]](real_images[i][tf.newaxis, ...])
@@ -827,7 +827,7 @@ class SpriteEditorModel(RemicModel):
         num_rows = batch_size.numpy()
 
         fig = plt.figure(figsize=(4 * num_cols, 4 * num_rows))
-        is_discriminator_scales_column = lambda col: 0 > col >= d_scales or d_scales + g_scales < col
+        is_discriminator_scales_column = lambda col: 0 < col <= d_scales or d_scales + g_scales < col
         for i in range(num_rows):
             for j in range(num_cols):
                 plt.subplot(num_rows, num_cols, (i * num_cols) + j + 1)
