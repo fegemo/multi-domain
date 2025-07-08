@@ -131,10 +131,11 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels, 
         x = layers.Conv2DTranspose(filters, 2, strides=2, padding="same")(block_input)
         return x
 
-    def conv_1x1__(block_input, filters):
+    def conv_1x1__(block_input, filters, name):
         # Conv1x1 function from (with an additional tanh activation by us):
         # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L38
-        x = layers.Conv2D(filters, 1, strides=1, padding="same", use_bias=False, activation="tanh")(block_input)
+        x = layers.Conv2D(filters, 1, strides=1, padding="same", use_bias=False, activation="tanh",
+                          name=name)(block_input)
         return x
 
     source_images_input = layers.Input(shape=[number_of_domains, image_size, image_size, output_channels],
@@ -207,7 +208,7 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels, 
     up_conv_0_2____ = conv_block(up_conv_0_1____, filters_per_domain * 1)
 
     # added beyond CollaGAN to make pixel values between [-1,1]
-    output = conv_1x1__(up_conv_0_2____, output_channels, name="output-image")
+    output = conv_1x1__(up_conv_0_2____, output_channels, name="output_image")
 
     if not palette_quantization:
         model = tf.keras.Model(inputs=inputs, outputs=output, name="CollaGANAffluentGenerator")
@@ -217,7 +218,7 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels, 
         palettes = palette_input
         inputs += [palette_input]
 
-        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized-image")
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized_image")
         quantized_output = quantization_layer((output, palettes))
 
         model = tf.keras.Model(inputs=inputs, outputs=quantized_output, name="CollaGANPaletteGenerator")
