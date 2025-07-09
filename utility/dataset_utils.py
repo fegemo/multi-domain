@@ -63,11 +63,15 @@ def denormalize(image):
 # loads an image from the file system and transforms it for the network:
 # (a) casts to float, (b) ensures transparent pixels are black-transparent, and (c)
 # puts the values in the range of [-1, 1]
-def load_image(path, image_size, input_channels, output_channels, should_normalize=True):
+def load_image(path, image_size, input_channels, output_channels, should_normalize=True, config=None):
     image = None
     try:
         image = tf.io.read_file(path)
         image = tf.image.decode_png(image, channels=input_channels)
+
+        if config and config.up_preprocessing:
+            image = resize_images(image, config)
+
         image = tf.reshape(image, [image_size, image_size, input_channels])
         image = tf.cast(image, "float32")
         if input_channels == 4:
@@ -100,6 +104,91 @@ def augment_translation(images):
     images = tf.split(image, len(images), axis=-1)
     return tf.tuple(images)
 
+# resize images to a new size (config.resizing_factor). 'images' parameter can be a 3D with shape (size, size, channels)
+# or a 4D tensor with shape (domains, size, size, channels).
+def resize_images(images, config):
+    shape = tf.shape(images)
+
+    dtype = images.dtype
+    images = tf.cast(images, tf.int32)
+
+
+    # 'images' parameter will always be a 4D [d, s, s, c] or a 3D [s, s, c] tensor, so we can retrieve the original size
+    # with index 1
+
+    size = shape[1]
+    new_size = tf.cast(size * config.resizing_factor, tf.int32)
+
+    resized_images = tf.image.resize(
+        images,
+        size=[new_size, new_size],
+        method=tf.image.ResizeMethod.NEAREST_NEIGHBOR,
+        preserve_aspect_ratio=True
+    )
+
+    return tf.cast(resized_images, dtype)
+
+# resize an entire batch (the default batch size is 4). 'batch' parameter is a 
+def resize_batch(batch, config):
+    shape = tf.shape(batch)
+    reshaped_batch = tf.reshape(batch, [shape[0] * shape[1], shape[2], shape[2], shape[4]])
+
+    resized_batch = resize_images(reshaped_batch, config)
+    new_shape = tf.shape(resized_batch)
+
+    return tf.reshape(resized_batch, [shape[0], shape[1], new_shape[1], new_shape[1], new_shape[3]])
+
+# finds the bounding box that contains all the non-transparent pixels of all images in the batch|domain
+# receives a 4d tensor with shape (batch_size|domains, height, width, channels=4)
+def find_bounding_box_per_batch(images):
+    pixel_is_opaque = images[..., 3] > -1
+    non_transparent_mask = tf.reduce_any(pixel_is_opaque, axis=0)
+    y_indices, x_indices = tf.where(non_transparent_mask)[:, 0], tf.where(non_transparent_mask)[:, 1]
+    y_indices, x_indices = tf.cast(y_indices, tf.int32), tf.cast(x_indices, tf.int32)
+    min_y, max_y = tf.reduce_min(y_indices), tf.reduce_max(y_indices)
+    min_x, max_x = tf.reduce_min(x_indices), tf.reduce_max(x_indices)
+    return tf.stack([min_y, max_y, min_x, max_x])
+
+# performs a random crop of size (crop_size, crop_size) on images from all domains for each example
+# in the batch. The images tensor is 5d (batch_size, domains, height, width, channels=4).
+# each example in the batch is cropped to a random area that covers at least partially the bounding box
+# of the non-transparent pixels in the images for that character in all domains.
+def random_crop_5d(images, crop_size):
+    # gets the bounding boxes for each example in the batch considering the images from all domains
+    batch_size, domains, height, width, channels = tf.unstack(tf.shape(images))
+    bounding_boxes = tf.map_fn(
+        find_bounding_box_per_batch,
+        images,
+        parallel_iterations=batch_size,
+        fn_output_signature=tf.TensorSpec(shape=[4], dtype=tf.int32)  # [min_y, max_y, min_x, max_x]
+    )
+
+    bounding_boxes = tf.cast(bounding_boxes, tf.float32)
+
+    # gets a random start_x and start_y for each example in the batch
+    start_y = tf.random.uniform(
+        [batch_size],
+        minval=tf.maximum(0., bounding_boxes[:, 0] - crop_size // 2),
+        maxval=tf.minimum(tf.cast(height - crop_size, tf.float32), bounding_boxes[:, 1] - crop_size // 2),
+        dtype=tf.float32
+    )
+    start_x = tf.random.uniform(
+        [batch_size],
+        minval=tf.maximum(0., bounding_boxes[:, 2] - crop_size // 2),
+        maxval=tf.minimum(tf.cast(width - crop_size, tf.float32), bounding_boxes[:, 3] - crop_size // 2),
+        dtype=tf.float32
+    )
+    start_y = tf.cast(tf.floor(start_y), tf.int32)
+    start_x = tf.cast(tf.floor(start_x), tf.int32)
+
+    # effectively crops each image in the batch using the calculated start_x and start_y
+    cropped_images = tf.map_fn(
+        lambda idx: images[idx, :, start_y[idx]:start_y[idx] + crop_size, start_x[idx]:start_x[idx] + crop_size, :],
+        tf.range(batch_size),
+        dtype=tf.float32
+    )
+
+    return cropped_images
 
 def augment(should_rotate_hue, should_translate, channels, *images):
     stacked_images = tf.stack(images, axis=0)
@@ -123,6 +212,18 @@ def augment(should_rotate_hue, should_translate, channels, *images):
 
     images = tf.unstack(stacked_images, num=len(images))
     return tf.tuple(images)
+
+def upscaling_augmentation(images, config, prob = 0.80):
+    prob = tf.constant(prob)
+    choice = tf.random.uniform(shape=[])
+    inside_augmentation_probability = choice < prob
+
+    def augment():
+        resized_images = resize_batch(images, config)
+        cropped_images = random_crop_5d(resized_images, config.image_size)
+        return cropped_images
+
+    return tf.cond(inside_augmentation_probability, augment, lambda: images)
 
 
 def normalize_all(*images):
@@ -160,7 +261,7 @@ def create_multi_domain_image_loader(config, train_or_test_folder):
     def load_single_image(dataset, side_index, image_number):
         path = tf.strings.join(
             [dataset, train_or_test_folder, tf.gather(domain_folders, side_index), image_number + ".png"], os.sep)
-        image = load_image(path, image_size, input_channels, output_channels, False)
+        image = load_image(path, image_size, input_channels, output_channels, False, config)
         return image
 
     @tf.function
