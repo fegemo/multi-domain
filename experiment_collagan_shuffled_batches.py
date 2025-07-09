@@ -12,24 +12,21 @@ if __name__ == "__main__":
         {
             "model": "collagan",
             "adhoc": [
-                "callback-evaluate-fid", "callback-evaluate-l1", #"callback-debug-discriminator",
+                "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
                 "save-model",
-                "shuffled-batches",
             ],
             "log-folder": config.output if config.output is not None else "output",
             "steps": 300000,
             "evaluate-steps": 1000,
             "capacity": 4,
-            "lr": 0.00001,
+            "lr": 0.0001,
             "ttur": 0.2,
             "lr-decay": "none",
             "batch": 4,
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
-            "model-name": "collagan-palette-transformer",
-            "experiment": "&generator,&lr,&lr-decay,&perturb-palette",
-            "annealing": "linear",
-            "temperature": 0.1,
+            "model-name": "collagan-shuffled-batches",
+            "experiment": "&adhoc",
             "lambda-adversarial": 1.,
             "lambda-l1": 100.,
             "lambda-ssim": 10.,
@@ -39,8 +36,7 @@ if __name__ == "__main__":
             "lambda-palette": 1.0,
             "vram": -1,
         }, {
-            "generator": ["palette-transformer"],
-            "perturb-palette": [0, 0.25, 0.5, 0.75, 1.0],
+            "adhoc": [["shuffled-batches"], [""]],
         }, {
             # "tiny": {
             #     "adhoc": ["no-aug"],

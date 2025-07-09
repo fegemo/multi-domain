@@ -121,7 +121,7 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
 
         return model
 
-def collagan_affluent_generator(number_of_domains, image_size, output_channels, capacity=1):
+def collagan_affluent_generator(number_of_domains, image_size, output_channels, capacity=1, palette_quantization=False):
     # UnetINDiv4 extracted from:
     # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L941
     def conv_block(block_input, filters, regularizer="l2"):
@@ -145,10 +145,11 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels, 
         x = layers.Conv2DTranspose(filters, 2, strides=2, padding="same")(block_input)
         return x
 
-    def conv_1x1__(block_input, filters):
+    def conv_1x1__(block_input, filters, name):
         # Conv1x1 function from (with an additional tanh activation by us):
         # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L38
-        x = layers.Conv2D(filters, 1, strides=1, padding="same", use_bias=False, activation="tanh")(block_input)
+        x = layers.Conv2D(filters, 1, strides=1, padding="same", use_bias=False, activation="tanh",
+                          name=name)(block_input)
         return x
 
     source_images_input = layers.Input(shape=[number_of_domains, image_size, image_size, output_channels],
@@ -221,9 +222,23 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels, 
     up_conv_0_2____ = conv_block(up_conv_0_1____, filters_per_domain * 1)
 
     # added beyond CollaGAN to make pixel values between [-1,1]
-    output = conv_1x1__(up_conv_0_2____, output_channels)
+    output = conv_1x1__(up_conv_0_2____, output_channels, name="output_image")
 
-    return tf.keras.Model(inputs=inputs, outputs=output, name="CollaGANAffluentGenerator")
+    if not palette_quantization:
+        model = tf.keras.Model(inputs=inputs, outputs=output, name="CollaGANAffluentGenerator")
+    else:
+        # quantize to the palette
+        palette_input = layers.Input(shape=[None, output_channels], name="desired_palette")
+        palettes = palette_input
+        inputs += [palette_input]
+
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized_image")
+        quantized_output = quantization_layer((output, palettes))
+
+        model = tf.keras.Model(inputs=inputs, outputs=quantized_output, name="CollaGANPaletteGenerator")
+        model.quantization = quantization_layer
+
+    return model
 
 
 def collagan_original_discriminator(number_of_domains, image_size, output_channels):
@@ -264,131 +279,6 @@ def collagan_original_discriminator(number_of_domains, image_size, output_channe
     classification = layers.Reshape((number_of_domains,), name="domain_classification")(classification)
 
     return tf.keras.Model(inputs=inputs, outputs=(patches, classification), name="CollaGANDiscriminator")
-
-
-# most of this code was copied from the collagan_affluent_generator function
-# we just added functionality in the end to quantize to the palette
-def collagan_palette_affluent_generator(number_of_domains, image_size, output_channels, capacity=1,
-                                        gumbel_softmax=False):
-    # UnetINDiv4 extracted from:
-    # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L941
-    def conv_block(block_input, filters, regularizer="l2"):
-        # CNR function from:
-        # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L44
-        x = block_input
-        x = layers.Conv2D(filters, 3, strides=1, padding="same", kernel_regularizer=regularizer)(x)
-        x = layers.GroupNormalization(groups=filters)(x)
-        x = layers.ReLU()(x)
-        return x
-
-    def downsample(block_input, filters):
-        # Pool2d function from:
-        # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L23
-        x = layers.Conv2D(filters, 2, strides=2, padding="same", use_bias=False, )(block_input)
-        return x
-
-    def upsample__(block_input, filters):
-        # Conv2dT function from:
-        # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L29
-        x = layers.Conv2DTranspose(filters, 2, strides=2, padding="same")(block_input)
-        return x
-
-    def conv_1x1__(block_input, filters):
-        # Conv1x1 function from (with an additional tanh activation by us):
-        # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L38
-        x = layers.Conv2D(filters, 1, strides=1, padding="same", use_bias=False, activation="tanh")(block_input)
-        return x
-
-    source_images_input = layers.Input(shape=[number_of_domains, image_size, image_size, output_channels],
-                                       name="source_images")
-    target_domain_input = layers.Input(shape=[1], dtype=tf.int32, name="target_domain")
-    inputs = [source_images_input, target_domain_input]
-
-    target_domain = layers.CategoryEncoding(num_tokens=number_of_domains, output_mode="one_hot")(target_domain_input)
-    target_domain = keras_utils.TileLayer(image_size)(target_domain)
-    target_domain = keras_utils.TileLayer(image_size)(target_domain)
-
-    # ENCODER starts here...
-    base_filters = 64 * capacity
-    filters_per_domain = base_filters // number_of_domains
-
-    source_image_split = tf.keras.ops.unstack(source_images_input, number_of_domains, axis=1)
-    affluents_conv_0_2 = []
-    affluents_conv_1_2 = []
-    affluents_conv_2_2 = []
-    affluents_conv_3_2 = []
-    affluents_down_4__ = []
-    for d in range(number_of_domains):
-        conv_0_0 = concatenate([source_image_split[d], target_domain], axis=-1)
-        conv_0_1 = conv_block(conv_0_0, filters_per_domain * 1)
-        conv_0_2 = conv_block(conv_0_1, filters_per_domain * 1)
-        down_1__ = downsample(conv_0_2, filters_per_domain * 2)
-        conv_1_1 = conv_block(down_1__, filters_per_domain * 2)
-        conv_1_2 = conv_block(conv_1_1, filters_per_domain * 2)
-        down_2__ = downsample(conv_1_2, filters_per_domain * 4)
-        conv_2_1 = conv_block(down_2__, filters_per_domain * 4)
-        conv_2_2 = conv_block(conv_2_1, filters_per_domain * 4)
-        down_3__ = downsample(conv_2_2, filters_per_domain * 8)
-        conv_3_1 = conv_block(down_3__, filters_per_domain * 8)
-        conv_3_2 = conv_block(conv_3_1, filters_per_domain * 8)
-        down_4__ = downsample(conv_3_2, filters_per_domain * 16)
-
-        affluents_conv_0_2 += [conv_0_2]
-        affluents_conv_1_2 += [conv_1_2]
-        affluents_conv_2_2 += [conv_2_2]
-        affluents_conv_3_2 += [conv_3_2]
-        affluents_down_4__ += [down_4__]
-
-    # DECODER starts here...
-    concat_down_4__ = concatenate(affluents_down_4__, axis=-1)
-    concat_conv_4_1 = conv_block(concat_down_4__, filters_per_domain * 16)
-    concat_conv_4_2 = conv_block(concat_conv_4_1, filters_per_domain * 16)
-    up_4___________ = upsample__(concat_conv_4_2, filters_per_domain * 8)
-
-    concat_down_3_2 = concatenate(affluents_conv_3_2, axis=-1)
-    concat_skip_3__ = concatenate([concat_down_3_2, up_4___________], axis=-1)
-    up_conv_3_1____ = conv_block(concat_skip_3__, filters_per_domain * 8)
-    up_conv_3_2____ = conv_block(up_conv_3_1____, filters_per_domain * 8)
-    up_3___________ = upsample__(up_conv_3_2____, filters_per_domain * 4)
-
-    concat_down_2_2 = concatenate(affluents_conv_2_2, axis=-1)
-    concat_skip_2__ = concatenate([concat_down_2_2, up_3___________], axis=-1)
-    up_conv_2_1____ = conv_block(concat_skip_2__, filters_per_domain * 4)
-    up_conv_2_2____ = conv_block(up_conv_2_1____, filters_per_domain * 4)
-    up_2___________ = upsample__(up_conv_2_2____, filters_per_domain * 2)
-
-    concat_down_1_2 = concatenate(affluents_conv_1_2, axis=-1)
-    concat_skip_1__ = concatenate([concat_down_1_2, up_2___________], axis=-1)
-    up_conv_1_1____ = conv_block(concat_skip_1__, filters_per_domain * 2)
-    up_conv_1_2____ = conv_block(up_conv_1_1____, filters_per_domain * 2)
-    up_1___________ = upsample__(up_conv_1_2____, filters_per_domain * 1)
-
-    concat_down_0_2 = concatenate(affluents_conv_0_2, axis=-1)
-    concat_skip_0__ = concatenate([concat_down_0_2, up_1___________], axis=-1)
-    up_conv_0_1____ = conv_block(concat_skip_0__, filters_per_domain * 1)
-    up_conv_0_2____ = conv_block(up_conv_0_1____, filters_per_domain * 1)
-
-    if not gumbel_softmax:
-        # added beyond CollaGAN to make pixel values between [-1,1]
-        pre_output = conv_1x1__(up_conv_0_2____, output_channels)
-    else:
-        MAX_PALETTE_SIZE = 64
-        pre_output = layers.Conv2D(MAX_PALETTE_SIZE, kernel_size=1, strides=1, padding="same", kernel_regularizer="l2")(up_conv_0_2____)
-        # pre_output = layers.Lambda(lambda x: tf.clip_by_value(x, -10., 10.))(pre_output)
-        # pre_output = conv_block(up_conv_0_2____, MAX_PALETTE_SIZE)
-
-    # quantize to the palette
-    palette_input = layers.Input(shape=[None, output_channels], name="desired_palette")
-    palettes = palette_input
-    inputs += [palette_input]
-
-    quantization_layer = keras_utils.DifferentiablePaletteQuantization() if not gumbel_softmax \
-        else keras_utils.GumbelSoftmaxPaletteQuantization(MAX_PALETTE_SIZE)
-    quantized_output = quantization_layer((pre_output, palettes))
-
-    model = tf.keras.Model(inputs=inputs, outputs=quantized_output, name="CollaGANPaletteGenerator")
-    model.quantization = quantization_layer
-    return model
 
 
 def collagan_palette_conditioned_with_transformer_generator(number_of_domains, image_size, output_channels, capacity=1):
@@ -549,7 +439,7 @@ def munit_content_encoder(domain_letter, image_size, channels, number_of_input_i
         return y
 
     if number_of_input_images > 1:
-        # the single content encoder in ReMIC receives multiple images as input (first dimension0. Then, we permute
+        # the single content encoder in ReMIC receives multiple images as input (first dimension). Then, we permute
         # the images to the last dimension and reshape the tensor to have the images concatenated in the last dimension
         input_layer = layers.Input(shape=(number_of_input_images, image_size, image_size, channels))
         x = layers.Permute((2, 3, 4, 1))(input_layer)
@@ -679,12 +569,12 @@ def munit_decoder(domain_letter, channels):
         y = layers.Add()([y, input_tensor])
         return y
 
-    input_style = layers.Input(shape=(8,))
+    input_style = layers.Input(shape=(8,), name="input_style")
     style_code = input_style
     mlp = mlp_munit()
     adain_params = mlp(style_code)
 
-    input_content = layers.Input(shape=(16, 16, 256))
+    input_content = layers.Input(shape=(16, 16, 256), name="input_content")
     w = content_code = input_content
 
     # 4x resblocks
@@ -700,8 +590,13 @@ def munit_decoder(domain_letter, channels):
     output_image = layers.Conv2D(channels, 7, strides=1, padding="valid",
                                  kernel_initializer="he_normal", kernel_regularizer=tf.keras.regularizers.l2(1e-4),
                                  activation="tanh")(x)
-    return tf.keras.Model(inputs=(input_style, input_content), outputs=(output_image, style_code, content_code),
-                          name=f"Decoder{domain_letter.upper()}")
+
+    outputs = dict({
+        "output_image": output_image,
+        "style_code": style_code,
+        "content_code": content_code
+    })
+    return tf.keras.Model(inputs=(input_style, input_content), outputs=outputs, name=f"Decoder{domain_letter.upper()}")
 
 
 def munit_conv_block(input_tensor, filters, kernel_size=3, strides=2, use_norm=False):
@@ -778,9 +673,9 @@ def munit_discriminator_multi_scale(domain_letter, image_size, channels, scales)
         outputs.append(conv2d_blocks(x))
         x = layers.AveragePooling2D(pool_size=(3, 3), strides=2)(x)
 
-    if scales == 1:
-        shape = list(map(lambda d: d.value, outputs[0].shape.dims[1:]))
-        outputs[0] = layers.Reshape((1, *shape))(outputs[0])
+    # if scales == 1:
+    #     shape = list(map(lambda d: d.value, outputs[0].shape[1:]))
+    #     outputs[0] = layers.Reshape((1, *shape))(outputs[0])
     return tf.keras.Model(inputs=input_layer, outputs=outputs, name=f"Discriminator{domain_letter.upper()}")
 
 

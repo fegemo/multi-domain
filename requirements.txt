@@ -1,7 +1,7 @@
-tensorflow[and-cuda]==2.18.0
+tensorflow[and-cuda]==2.16.2
 matplotlib==3.9.4
 tqdm==4.67.1
-numpy==2.0.2
+numpy==1.26.4
 
 # scipy and scikit-image are required for FID calculation
 # scipy is used for the linalg.sqrtm function (tf has, but it is really slow as of 2.18.0)

@@ -18,13 +18,13 @@ class RemicModel(MunitModel):
     share it.
     """
 
-    def __init__(self, config):
+    def __init__(self, config, export_additional_training_endpoint=False):
         self.unified_content_encoder = None
         self.style_encoders = None
         self.decoders = None
         self.generators = None
         self.discriminators = None
-        super().__init__(config)
+        super().__init__(config, export_additional_training_endpoint)
         self.lambda_image_consistency = config.lambda_l1
         self.lambda_latent_consistency = config.lambda_latent_reconstruction
         self.lambda_image_reconstruction = config.lambda_cyclic_reconstruction
@@ -81,7 +81,7 @@ class RemicModel(MunitModel):
         inner_channels = config.inner_channels
         scales = config.discriminator_scales
         domain_letters = [name[0].upper() for name in config.domains]
-        if config.generator in ["remic", ""]:
+        if config.discriminator in ["remic", ""]:
             discriminators = [remic_discriminator(s, image_size, inner_channels, scales)
                               for s in domain_letters]
             self.discriminators = discriminators
@@ -432,7 +432,7 @@ class RemicModel(MunitModel):
             decoded_images = [self.decoders[d].predict([encoded_styles[d], encoded_contents], batch_size=batch_size,
                                                        verbose=0)[0]
                               for d in range(self.config.number_of_domains)]
-            # return decoded_images
+
             fake_images = tf.gather(tf.transpose(decoded_images, [1, 0, 2, 3, 4]), possible_target_domain, axis=1,
                                     batch_dims=1)
             real_images = tf.gather(domain_images, possible_target_domain, batch_dims=1)
@@ -523,7 +523,7 @@ class RemicModel(MunitModel):
         real_images = tf.gather(batch, target_domains, axis=1, batch_dims=1)
         fake_images = []
         for i in range(batch_size):
-            keep_mask = tf.one_hot(target_domains[i], number_of_domains)
+            keep_mask = tf.one_hot(target_domains[i], number_of_domains, on_value=0.0, off_value=1.0)
             keep_mask = keep_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
             visible_source_images = batch[i] * keep_mask
             # visible_source_images (d, s, s, c)
@@ -710,6 +710,6 @@ class NoDropoutSampler(ExampleSampler):
 
         # selects a random single missing domain for each sample in the batch
         missing_domains = tf.random.uniform([batch_size], minval=0, maxval=number_of_domains, dtype="int32")
-        input_keep_mask = tf.one_hot(missing_domains, number_of_domains)
+        input_keep_mask = tf.one_hot(missing_domains, number_of_domains, on_value=0., off_value=1.)
 
         return batch, input_keep_mask

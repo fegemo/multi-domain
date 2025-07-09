@@ -1,7 +1,10 @@
+from abc import abstractmethod, ABC
+
 import tensorflow as tf
 from tensorflow import keras, RaggedTensorSpec
 from tensorflow.keras.layers import Layer
 from tensorflow.keras import layers
+
 
 class ConstantThenLinearDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
     def get_config(self):
@@ -15,8 +18,8 @@ class ConstantThenLinearDecay(tf.keras.optimizers.schedules.LearningRateSchedule
         self.total_steps = tf.cast(total_steps, "float32")
 
     def __call__(self, step):
-        t = tf.divide(step, self.total_steps)
-        down_slope_value = self.initial_learning_rate * (-t + 1.) * 2.
+        t = tf.cast(tf.divide(step, self.total_steps), tf.float32)
+        down_slope_value = tf.cast(self.initial_learning_rate * (-t + 1.) * 2., tf.float32)
         return tf.maximum(0.0, tf.minimum(self.initial_learning_rate, down_slope_value))
 
 
@@ -49,6 +52,17 @@ class NParamsSupplier:
 
     def __call__(self, *args, **kwargs):
         return [*args[:self.n]]
+
+
+class SkipParamsSupplier:
+    def __init__(self, skip_params_with_index=None):
+        if skip_params_with_index is None:
+            skip_params_with_index = []
+        self.indices_to_skip = skip_params_with_index
+
+    def __call__(self, *args, **kwargs):
+        params = [args[i] for i in range(len(args)) if i not in self.indices_to_skip]
+        return params
 
 
 class ReflectPadding(keras.layers.Layer):
@@ -150,12 +164,46 @@ class DifferentiablePaletteQuantization(Layer):
         a soft assignment using the softmax function with a temperature. During inference, it is done
         with a hard assignment, using the closest color in the palette (hence, losing differentiability).
 
-        :param inputs: Tuple of (images, palettes), with shapes [b, h, w, c] and [b, (k), c] respectively
+        :param inputs: Tuple of (images, palettes), with shapes:
+            - Option 1: [b, h, w, c] and [b, (k), c] (original format)
+            - Option 2: [b, num_domains, h, w, c] and [b, k, c] (format with full example, but does not support
+                ragged palettes)
         :param training: True if training (uses soft assignment through softmax with temperature)
             or False otherwise (uses hard assignment, losing differentiability)
-        :return: Quantized images: Tensor of shape [b, h, w, c]
+        :return: Quantized images: Tensor of shape matching input images shape
         """
         images, palettes = inputs
+
+        # Determine input format based on rank
+        if images.shape.rank == 4:
+            # single image per item in the batch format: [b, h, w, c]
+            return self.quantize_images(images, palettes, training)
+        elif images.shape.rank == 5:
+            # full example per item in the batch format: [b, num_domains, h, w, c]
+            batch_size, num_domains, image_size, channels = (tf.shape(images)[0], tf.shape(images)[1],
+                                                             tf.shape(images)[2], tf.shape(images)[-1])
+
+            # Repeat the palette for each domain
+            palettes_expanded = tf.tile(tf.expand_dims(palettes, 1), [1, num_domains, 1, 1])
+            # palettes_expanded (shape=[b, num_domains, k, c])
+
+            # Reshape to combine batch and domains dimensions
+            images_reshaped = tf.reshape(images, [batch_size * num_domains,
+                                                  image_size, image_size, channels])
+            palettes_reshaped = tf.reshape(palettes_expanded, [batch_size * num_domains, -1, channels])
+            # images_reshaped (shape=[b * num_domains, h, w, c])
+            # palettes_reshaped (shape=[b * num_domains, k, c])
+
+            # Quantize all images
+            quantized = self.quantize_images(images_reshaped, palettes_reshaped, training)
+
+            # Reshape back to original format
+            return tf.reshape(quantized, [batch_size, num_domains] + quantized.shape[1:].as_list())
+        else:
+            raise ValueError(f"Unsupported input rank: {images.shape.rank}. Expected 4 or 5.")
+
+    def quantize_images(self, images, palettes, training):
+        """Helper function to quantize images with the given palettes."""
 
         # Process each (image, palette) pair independently
         def quantize_single_image(args):
@@ -177,7 +225,7 @@ class DifferentiablePaletteQuantization(Layer):
         # there is no easy way to vectorize this operation, so we use map_fn to
         # process each <image,palette> pair independently
         images_shape = images.shape
-        image_size, channels = images_shape[1], images_shape[3]
+        image_size, channels = images_shape[-3], images_shape[-1]
         return tf.map_fn(
             fn=quantize_single_image,
             elems=(images, palettes),
@@ -239,13 +287,13 @@ class GumbelSoftmaxPaletteQuantization(Layer):
         # process each <image,palette> pair independently
         images_shape = images.shape
         image_size = images_shape[1]
-        # tf.print("palettes.shape", palettes.shape)
-        # tf.print("tf.shape(palettes)", tf.shape(palettes))
         if isinstance(palettes, tf.RaggedTensor):
-            palettes = palettes.to_tensor(default_value=self.invalid_color, shape=[images_shape[0], self.max_palette_size, channels])
+            palettes = palettes.to_tensor(default_value=self.invalid_color,
+                                          shape=[images_shape[0], self.max_palette_size, channels])
         elif palettes.shape[1] < self.max_palette_size:
             number_of_colors = palettes.shape[1]
-            palettes = tf.pad(palettes, [[0, 0], [0, self.max_palette_size - number_of_colors], [0, 0]], constant_values=-1.)
+            palettes = tf.pad(palettes, [[0, 0], [0, self.max_palette_size - number_of_colors], [0, 0]],
+                              constant_values=-1.)
         return tf.map_fn(
             fn=quantize_single_image,
             elems=(images, palettes),
@@ -291,7 +339,6 @@ class PaletteExtractor(Layer):
     def compute_output_shape(self, input_shape):
         return tf.TensorShape([input_shape[0], None, 4])
 
-
     @staticmethod
     def extract_palette(image):
         """
@@ -330,8 +377,6 @@ class PaletteTransformerEncoder(layers.Layer):
         self.layer_norms = [layers.LayerNormalization() for _ in range(self.num_layers)]
 
     def call(self, inputs):
-        # print(f"inputs.shape: {inputs.shape}")
-        # tf.print(f"inputs.shape: {inputs.shape}")
         if isinstance(inputs, tf.RaggedTensor):
             colors = inputs.to_tensor()  # [batch, max_colors, channels]
             mask = tf.sequence_mask(inputs.row_lengths(), tf.shape(colors)[1])
@@ -356,11 +401,8 @@ class PaletteTransformerEncoder(layers.Layer):
 
         # Masked mean pooling
         mask_expanded = tf.expand_dims(tf.cast(mask, x.dtype), -1)  # [batch, num_colors, 1]
-        # tf.print(f"mask_expanded.shape: {mask_expanded.shape}")
         masked_count = tf.reduce_sum(mask_expanded, axis=1)
-        # tf.print(f"masked_count.shape: {masked_count.shape}")
         masked_x = tf.reduce_sum(x * mask_expanded, axis=1)  # [batch, embed_dim]
-        # tf.print(f"masked_x.shape: {masked_x.shape}")
         return masked_x / masked_count
 
     def compute_output_spec(self, inputs):
@@ -433,3 +475,256 @@ class PaletteConditioner(layers.Layer):
             [batch_size, h, w, self.embed_dim]
         )
         return self.output_proj(attended)
+
+
+class AnnealingScheduler(ABC):
+    def __init__(self, annealing_layers=None):
+        if annealing_layers is None:
+            annealing_layers = []
+        self.annealing_layers = annealing_layers
+
+    def update(self, t):
+        new_temperature = self.get_value(t)
+        for l in self.annealing_layers:
+            l.temperature.assign(new_temperature)
+        return new_temperature
+
+    @abstractmethod
+    def get_value(self, t):
+        pass
+
+
+class LinearAnnealingScheduler(AnnealingScheduler):
+    def __init__(self, initial_temperature, layers):
+        super().__init__(layers)
+        self.initial_temperature = initial_temperature
+
+    def get_value(self, t):
+        return tf.maximum(0.0, (1.0 - t) * self.initial_temperature)
+
+
+class NoopAnnealingScheduler(AnnealingScheduler):
+    def get_value(self, t):
+        return 1.0
+
+
+def create_random_inpaint_mask(batch, n_holes=4):
+    """
+    Applies random irregular masks to batch of character images.
+    Returns masked batch and masks.
+
+    :param batch: Tensor of shape (b, d, s, s, c)
+    :param n_holes: Number of irregular holes to generate per mask
+    :return: Tuple of (masked_batch, masks)
+        - masked_batch: Tensor with holes applied to RGB channels
+        - masks: Tensor of shape (b, s, s, 1) with holes
+    """
+    # Precompute grid once for the entire batch
+    batch_size, number_of_domains, image_size = batch.shape[0], batch.shape[1], batch.shape[2]
+    if n_holes == 0:
+        # no holes, return original batch and empty masks
+        # need to declare an empty grid tensor to match the expectation of the tf.function
+        grid = tf.zeros([image_size, image_size, 2], dtype=tf.float32)
+        return batch, tf.zeros([batch_size, image_size, image_size, 1])
+
+    grid_i, grid_j = tf.meshgrid(tf.range(image_size, dtype=tf.float32),
+                                 tf.range(image_size, dtype=tf.float32), indexing='ij')
+    grid = tf.stack([grid_i, grid_j], axis=-1)  # Shape: [64, 64, 2]
+
+    def generate_mask_for_character(example):
+        """Generate single mask for all directions of one character"""
+        # Combine alphas from all directions (union of character pixels)
+        alphas = example[..., 3]  # Shape: [4, 64, 64]
+        combined_alpha = tf.reduce_max(alphas, axis=0)  # Shape: [64, 64]
+
+        # Find character pixels
+        indices = tf.where(combined_alpha > 0.5)  # Shape: [n, 2]
+        n_points = tf.shape(indices)[0]
+
+        def create_mask():
+            # Sample points from character pixels
+            idx = tf.random.uniform(shape=[n_holes], minval=0, maxval=n_points, dtype=tf.int32)
+            base_points = tf.gather(indices, idx)  # Shape: [n_holes, 2]
+            base_points_float = tf.cast(base_points, tf.float32)
+
+            # Add small random offsets
+            offset = 0.  # tf.random.uniform(shape=[n_holes, 2], minval=-0.5, maxval=0.5, dtype=tf.float32)
+            points = base_points_float + offset  # Shape: [n_holes, 2]
+
+            # Generate random radii for holes
+            radii = tf.random.uniform(shape=[n_holes], minval=2.0, maxval=9.0, dtype=tf.float32)
+            squared_radii = tf.square(radii)  # Shape: [n_holes]
+
+            # Compute distances from grid points to centers
+            diff = grid[tf.newaxis, :, :, :] - points[:, tf.newaxis, tf.newaxis, :]  # Shape: [n_holes, 64, 64, 2]
+            squared_distances = tf.reduce_sum(tf.square(diff), axis=-1)  # Shape: [n_holes, 64, 64]
+
+            # Create mask by combining shapes
+            mask_i = squared_distances < squared_radii[:, tf.newaxis, tf.newaxis]  # Shape: [n_holes, 64, 64]
+            mask = tf.reduce_any(mask_i, axis=0)  # Shape: [64, 64]
+            return tf.cast(mask, tf.float32)
+
+        # Return zero mask if no character pixels
+        return tf.cond(n_points > 0, create_mask, lambda: tf.zeros([image_size, image_size], dtype=tf.float32))
+
+    masks_list = tf.map_fn(generate_mask_for_character, batch)
+
+    # stack masks and expand dimensions
+    masks = tf.stack(masks_list, axis=0)  # Shape: [batch_size, 64, 64]
+    masks = tf.expand_dims(masks, axis=1)  # Add domain dimension: [batch_size, 1, 64, 64]
+    masks = tf.expand_dims(masks, axis=-1)  # Add channel dimension: [batch_size, 1, 64, 64, 1]
+
+    # replicate mask across all 4 directions
+    masks = tf.tile(masks, [1, number_of_domains, 1, 1, 1])  # Shape: [batch_size, 4, 64, 64, 1]
+
+    # replace the RGBA values of the batch where the mask is 1 with -1
+    masked_batch = tf.where(masks == 1.0, -1.0, batch)  # Shape: [batch_size, 4, 64, 64, 4]
+
+    return masked_batch, masks[:, 0, ...]  # return only one domain mask (e.g., first domain), as they are the same
+
+
+class ConcatenateMask(layers.Layer):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def call(self, inputs):
+        """
+        Concatenates an inpainting mask to the input images.
+        :param inputs: Tuple of (images, masks), where:
+            - images: Tensor of shape [b, d, s, s, c]
+            - masks: Tensor of shape [b, s, s, 1]
+        :return: Concatenated tensor of shape [b, d, s, s, c+1]
+        """
+        images, masks = inputs
+        number_of_domains = images.shape[1]
+        masks = tf.expand_dims(masks, axis=1)
+        # masks (shape=[b, 1, s, s, 1])
+        masks = tf.tile(masks, [1, number_of_domains, 1, 1, 1])
+        # masks (shape=[b, d, s, s, 1])
+        return tf.concat([images, masks], axis=-1)
+
+    # def compute_output_shape(self, input_shape):
+    #     return input_shape[0], input_shape[1], input_shape[2], input_shape[3], input_shape[4] + 1
+
+
+def list_of_palettes_to_ragged_tensor(palettes):
+    """
+    Converts a list of palettes to a ragged tensor.
+    :param palettes: List of palettes, where each palette is a 2D array of shape [k, c]
+    :return: RaggedTensor of shape [b, (k), c]
+    """
+    # creates a flattened tensor of all colors
+    values = tf.concat(palettes, axis=0)
+    # creates a list of row lengths (number of colors) for each palette
+    row_lengths = [tf.shape(palette)[0] for palette in palettes]
+
+    return tf.RaggedTensor.from_row_lengths(values, row_lengths)
+
+
+def scales_output_to_two_halves(scales_output):
+    """
+    Splits the output of the scales output of a generator into two halves along the batch dimension.
+    :param scales_output: a list of tensors [scales] x shape=[b, d, h, w, c] or [b, d, h, w]
+    :return: two lists (half_1, half_2), each having [scales] x shape=[b/2, d, h, w, c] or [b/2, d, h, w]
+    """
+    half_1 = []
+    half_2 = []
+    for tensor in scales_output:
+        # split each tensor into 2 parts along batch dim
+        split_tensors = tf.split(tensor, num_or_size_splits=2, axis=0)
+        half_1.append(split_tensors[0])
+        half_2.append(split_tensors[1])
+
+    # convert lists to tensors
+    return half_1, half_2
+
+
+class InpaintMaskGenerator(ABC):
+    """
+    Abstract base class for inpainting modes.
+    Each mode should implement the `apply` method.
+    """
+    @abstractmethod
+    def apply(self, batch, t):
+        """
+        Applies the inpainting mode to the images with the given masks.
+        :param batch: Tensor of shape [b, d, s, s, c]
+        :param t: Current training progress (0.0 to 1.0)
+        :return: Tuple of (masked_batch, masks)
+            - masked_batch: Tensor with holes applied to RGB channels
+            - masks: Tensor of shape [b, s, s, 1] with holes
+        """
+        pass
+
+
+class NoopInpaintMaskGenerator(InpaintMaskGenerator):
+    """
+    No-op inpainting mode that returns the images unchanged.
+    """
+    def apply(self, batch, t):
+        empty_mask = tf.zeros([batch.shape[0], batch.shape[2], batch.shape[3], 1], dtype=batch.dtype)
+        return batch, empty_mask
+
+
+class ConstantInpaintMaskGenerator(InpaintMaskGenerator):
+    """
+    Random inpainting mode that applies random irregular masks to the images.
+    """
+    def __init__(self, num_holes=4):
+        self.num_holes = num_holes
+
+    def apply(self, batch, t):
+        """
+        Applies random irregular masks to the batch of images.
+        :param batch: Tensor of shape [b, d, s, s, c]
+        :param t: Current training progress (0.0 to 1.0)
+        :return: Tuple of (masked_batch, masks)
+            - masked_batch: Tensor with holes applied to RGB channels
+            - masks: Tensor of shape [b, s, s, 1] with holes
+        """
+        return create_random_inpaint_mask(batch, self.num_holes)
+
+
+class RandomInpaintMaskGenerator(InpaintMaskGenerator):
+    """
+    Random inpainting mode that applies random irregular masks to the images.
+    """
+    def __init__(self, max_holes=4):
+        self.max_holes = max_holes
+
+    def apply(self, batch, t):
+        """
+        Applies random irregular masks to the batch of images.
+        :param batch: Tensor of shape [b, d, s, s, c]
+        :param t: Current training progress (0.0 to 1.0)
+        :return: Tuple of (masked_batch, masks)
+            - masked_batch: Tensor with holes applied to RGB channels
+            - masks: Tensor of shape [b, s, s, 1] with holes
+        """
+        num_holes = tf.random.uniform([], minval=0, maxval=self.max_holes + 1, dtype=tf.int32)
+        return create_random_inpaint_mask(batch, num_holes)
+
+
+class CurriculumInpaintMaskGenerator(InpaintMaskGenerator):
+    """
+    Curriculum inpainting mode that applies masks to the images based on a curriculum.
+    The curriculum is defined by the `curriculum` parameter, which is a list of tuples
+    (n_holes, mask_probability).
+    """
+    def __init__(self, max_holes=4):
+        self.max_holes = max_holes
+
+    def apply(self, batch, t):
+        """
+        Applies curriculum-based inpainting to the batch of images.
+        :param batch: Tensor of shape [b, d, s, s, c]
+        :param t: Current training progress (0.0 to 1.0)
+        :return: Tuple of (masked_batch, masks)
+            - masked_batch: Tensor with holes applied to RGB channels
+            - masks: Tensor of shape [b, s, s, 1] with holes
+        """
+        is_random = t >= 0.5
+        num_holes = tf.random.uniform([], minval=0, maxval=self.max_holes + 1, dtype=tf.int32) \
+            if is_random \
+            else tf.cast(tf.math.floordiv(t, 0.5) * (self.max_holes + 1), tf.int32)
+        return create_random_inpaint_mask(batch, num_holes)

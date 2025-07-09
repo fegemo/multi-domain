@@ -36,6 +36,7 @@ from models.munit_model import MunitModel
 from models.remic_model import RemicModel
 from models.yamata_model import YamataModel
 from models.star_model import UnpairedStarGANModel, PairedStarGANModel
+from models.sprite_model import SpriteEditorModel
 
 if config.verbose:
     logging.debug(f"Tensorflow version: {tf.__version__}")
@@ -75,6 +76,8 @@ elif config.model == "remic":
     class_name = RemicModel
 elif config.model == "yamata":
     class_name = YamataModel
+elif config.model == "sprite":
+    class_name = SpriteEditorModel
 else:
     raise Exception(f"The asked model of {config.model} was not found.")
 
@@ -85,7 +88,6 @@ if config.verbose:
     model.discriminator.summary()
     model.generator.summary()
 parser.save_configuration(model.get_output_folder(), sys.argv)
-
 
 
 # configuration for training
@@ -99,10 +101,11 @@ logging.info(
 
 # starting training
 callbacks = [c[len("callback_"):] for c in ["callback_debug_discriminator", "callback_evaluate_fid",
-                                            "callback_evaluate_l1"] if
+                                            "callback_evaluate_l1", "callback_early_stop"] if
              getattr(config, c)]
 
-
+# tf.keras.utils.plot_model(model.generator, to_file=model.get_output_folder() + "/generator.png",
+#                           show_shapes=True, show_layer_names=True, show_layer_activations=True)
 model.fit(train_ds, test_ds, steps, evaluate_steps, callbacks=callbacks)
 
 
@@ -146,3 +149,4 @@ logging.info("Finished executing.")
 # python train.py munit --log-folder output --steps 4000 --evaluate-steps 1000 --lr 0.0001 --batch 1 --lr-decay step --model-name munit --experiment all,lambda-l1-1,lambda-latent-reconstruction-0 --lambda-l1 1 --lambda-latent-reconstruction 0 --callback-evaluate-fid --callback-evaluate-l1 --save-model --tiny --rm2k --rmxp --rmvx --misc --no-tran
 # python train.py munit --log-folder output --steps 4000 --evaluate-steps 250 --lr 0.0001 --batch 1 --lr-decay step --model-name munit --experiment pytorch-impl --lambda-l1 10 --lambda-latent-reconstruction 1 --lambda-cyclic-reconstruction 10 --domains back left --callback-evaluate-fid --callback-evaluate-l1 --rmxp
 # python train.py remic --steps 4000 --evaluate-steps 500 --lr 0.0001 --batch 3 --model-name remic --rmxp --lambda-l1 10 --lambda-latent-reconstruction 1 --lambda-cyclic-reconstruction 20 --discriminator-scales 1 --lr-decay none
+# python train.py sprite --rm2k --steps 100 --evaluate-steps 100 --vram 4096 --temperature 0.1 --annealing linear
