@@ -6,6 +6,7 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from utility import keras_utils, palette_utils, io_utils, dataset_utils
+from utility.functional_utils import listify
 from utility.keras_utils import LinearAnnealingScheduler, NoopAnnealingScheduler, create_random_inpaint_mask, \
     NoopInpaintMaskGenerator, ConstantInpaintMaskGenerator, RandomInpaintMaskGenerator, CurriculumInpaintMaskGenerator
 from .networks import resblock, munit_discriminator_multi_scale
@@ -163,7 +164,7 @@ class SpriteEditorModel(RemicModel):
                 "kl": kl_loss,
                 "total": total_loss}
 
-    @tf.function
+    # @tf.function
     def train_step(self, batch, step, evaluate_steps, t):
         """
         Performs a single training step for the Sprite Editor model.
@@ -267,6 +268,7 @@ class SpriteEditorModel(RemicModel):
             generated_images = self.generator(
                 self.gen_supplier(masked_source_images, inpaint_mask, source_palette, input_keep_mask,
                                   tf.concat([extracted_codes, random_codes], axis=0)), training=True)
+            generated_images = listify(generated_images)
             # generated_images ([generator_scales x shape=[b, d, ?, ?, c]])
 
             generated_images_with_extracted_codes, generated_images_with_random_codes = keras_utils.scales_output_to_two_halves(
@@ -286,9 +288,9 @@ class SpriteEditorModel(RemicModel):
             generated_images_per_domain = tf.unstack(generated_images_full_size, axis=1)
             # generated_images_per_domain (d x [b, s, s, c])
 
-            fake_predicted = [self.discriminators[d](generated_images_per_domain[d], training=True)
+            fake_predicted = [listify(self.discriminators[d](generated_images_per_domain[d], training=True))
                               for d in range(number_of_domains)]
-            # fake_predicted (d x [b, ds, ?, ?, 1]) where ds is the number of discriminator scales
+            # fake_predicted ([d] x [ds] x shape=[b, ?, ?, 1]) where ds is the number of discriminator scales
 
             # A.6. calculates the generator loss
             g_loss = self.generator_loss(
@@ -316,6 +318,7 @@ class SpriteEditorModel(RemicModel):
         generated_images = self.generator(
             self.gen_supplier(masked_source_images, inpaint_mask, source_palette, input_keep_mask,
                               tf.concat([extracted_codes, random_codes], axis=0)), training=True)
+        generated_images = listify(generated_images)
         # generated_images ([generator_scales x shape=[b, d, ?, ?, c]])
         # gets only the last output of the generator, excluding the intermediate ones
         generated_images = generated_images[0]
@@ -479,14 +482,19 @@ class SpriteEditorModel(RemicModel):
             inpaint_mask,
             source_palettes,
             keep_mask,
-            extracted_codes), training=True)[0]
+            extracted_codes), training=True)
+        # generated_images_with_extracted_codes (gs x shape=[b, d, s, s, c]) or (shape=[b, d, s, s, c]) if gs=1)
+        generated_images_with_extracted_codes = listify(generated_images_with_extracted_codes)[0]
+        # generated_images_with_extracted_codes ([gs] x shape=[b, d, s, s, c])
 
         generated_images_with_random_codes = self.generator(self.gen_supplier(
             visible_masked_images,
             inpaint_mask,
             source_palettes,
             keep_mask,
-            random_codes), training=True)[0]
+            random_codes), training=True)
+        generated_images_with_random_codes = listify(generated_images_with_random_codes)[0]
+        # generated_images_with_random_codes ([gs] x shape=[b, d, s, s, c])
 
         column_contents = [visible_masked_images, inpaint_mask, source_images,
                            generated_images_with_extracted_codes, generated_images_with_random_codes]
@@ -555,9 +563,10 @@ class SpriteEditorModel(RemicModel):
                 extracted_codes_mean),
                 verbose=0,
                 batch_size=batch_size
-            )[0]
+            )
+            generated_images = listify(generated_images)[0]
+            # generated_images (shape=[b, d, s, s, c])
 
-            # return decoded_images
             fake_images = tf.gather(generated_images, possible_target_domain, batch_dims=1)
             real_images = tf.gather(domain_images, possible_target_domain, batch_dims=1)
             return real_images, fake_images
@@ -670,7 +679,8 @@ class SpriteEditorModel(RemicModel):
                 tf.repeat(keep_mask, 3, axis=0),
                 # codes: (num_rows x 3 x shape=[noise_length])
                 tf.concat([extracted_codes_mean, random_codes, extracted_codes_mean], axis=0)
-            ), verbose=0, batch_size=batch_size)[0]
+            ), verbose=0, batch_size=batch_size)
+            generated_images = listify(generated_images)[0]
             # generated_images (shape=[num_rows x 3, d, s, s, c])
 
             # 6. reshapes the generated images to have the shape [num_rows, 3, d, s, s, c]
@@ -782,13 +792,14 @@ class SpriteEditorModel(RemicModel):
                     keep_mask[tf.newaxis, ...],
                     extracted_code
                 ), verbose=0)
+            fake_image = listify(fake_image)
             fake_images.append(fake_image)
-        # fake_images (list of [b] x [generator_scales] x shape=[1, d, ?, ?, c]])
+        # fake_images (list of [b] x [gs] x shape=[1, d, ?, ?, c]])
 
         # gets the result of discriminating the real and fake (translated) images
-        real_patches = [self.discriminators[target_domains[i]](real_images[i][tf.newaxis, ...])
+        real_patches = [listify(self.discriminators[target_domains[i]](real_images[i][tf.newaxis, ...]))
                         for i in range(batch_size)]
-        fake_patches = [self.discriminators[target_domains[i]](fake_images[i][0][0][target_domains[i]][tf.newaxis, ...])
+        fake_patches = [listify(self.discriminators[target_domains[i]](fake_images[i][0][0][target_domains[i]][tf.newaxis, ...]))
                         for i in range(batch_size)]
         # if d_scales == 1:
         #     real_patches = [[real_patches[i]] for i in range(batch_size)]
