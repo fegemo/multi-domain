@@ -66,7 +66,7 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument(
             "model", help="one from { stargan-unpaired, stargan-paired, collagan, munit, remic, yamatagan }"
                           "- the model to train")
-        self.parser.add_argument("--generator", help="network from { resnet } for stargan or "
+        self.parser.add_argument("--generator", help="network from { resnet, palette } for stargan or "
                                                      "{ affluent, palette, palette-transformer } for collagan", default="")
         self.parser.add_argument("--discriminator", help="different network topology, currently an "
                                                          "unused option", default="")
@@ -136,6 +136,7 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--no-hue", action="store_true", help="Disables hue augmentation", default=False)
         self.parser.add_argument("--no-tran", action="store_true", help="Disables translation augmentation",
                                  default=False)
+        self.parser.add_argument("--no-up-aug", action="store_true", help="Disables upscaling augmentation", default=False)
         self.parser.add_argument("--perturb-palette", type=float, default=0.0,
                                  help="The probability with which to perturb the target palette when training CollaGAN")
         self.parser.add_argument("--sampler", help="one from {multi-target, single-target} indicating whether "
@@ -216,6 +217,11 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--vram", type=int, help="Amount of VRAM in MB to limit. Use 0 for "
                                                           "default behavior and -1 for on-demand growth", default=0)
 
+        self.parser.add_argument("--resizing-factor", type=int, help="Resizing factor for input images."
+                                                                    "Default value is 1", default=1)
+        self.parser.add_argument("--up-preprocessing", action="store_true", default=False,
+                                 help="Enables preprocessing by upscaling input images.")
+
         self.initialized = True
 
     def parse(self, args=None, return_parser=False):
@@ -236,6 +242,7 @@ class OptionParser(metaclass=SingletonMeta):
         if self.values.no_aug:
             setattr(self.values, "no_hue", True)
             setattr(self.values, "no_tran", True)
+            setattr(self.values, "no_up_aug", True)
         datasets_used = list(filter(lambda opt: getattr(self.values, opt), ["tiny", "rm2k", "rmxp", "rmvx", "misc"]))
         setattr(self.values, "datasets_used", datasets_used)
         if len(datasets_used) == 0:
@@ -286,6 +293,8 @@ class OptionParser(metaclass=SingletonMeta):
         setattr(self.values, "domains_capitalized", list(map(lambda name: name[0].upper() + name[1:],
                                                              self.values.domains)))
 
+        if self.values.up_preprocessing is True:
+            self.values.image_size = self.values.image_size * self.values.resizing_factor
         if return_parser:
             return self.values, self
         else:
