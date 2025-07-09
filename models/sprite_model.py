@@ -164,7 +164,7 @@ class SpriteEditorModel(RemicModel):
                 "kl": kl_loss,
                 "total": total_loss}
 
-    # @tf.function
+    @tf.function
     def train_step(self, batch, step, evaluate_steps, t):
         """
         Performs a single training step for the Sprite Editor model.
