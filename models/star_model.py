@@ -28,8 +28,8 @@ class UnpairedStarGANModel(S2SModel):
             self.sampler = MultiTargetSampler(config)
         else:
             self.sampler = SingleTargetSampler(config)
-        self.gen_supplier = SkipParamsSupplier([2] if not config.source_domain_aware_generator else []
-                                               + [3] if not "palette" in config.generator else [])
+        self.gen_supplier = SkipParamsSupplier(([2] if not config.source_domain_aware_generator else []) +
+                             ([3] if "palette" not in config.generator else []))
         self.crit_supplier = NParamsSupplier(2 if config.conditional_discriminator else 1)
         self.generator = self.inference_networks["generator"]
         self.discriminator = self.training_only_networks["discriminator"]
@@ -271,7 +271,7 @@ class UnpairedStarGANModel(S2SModel):
                               fontdict={"fontsize": 24})
                 elif j == 1:
                     plt.title(target_domain_name, fontdict={"fontsize": 24})
-                plt.imshow(images[j] * 0.5 + 0.5)
+                plt.imshow(tf.clip_by_value(images[j] * 0.5 * 0.5, 0, 1))
                 plt.axis("off")
 
         figure.tight_layout()
@@ -463,7 +463,7 @@ class UnpairedStarGANModel(S2SModel):
                         generated_image = self.generator(
                             self.gen_supplier(source_input, target_domain, source_domain, palette), training=True)
                         image = generated_image
-                    plt.imshow(tf.squeeze(image) * 0.5 + 0.5)
+                    plt.imshow(tf.clip_by_value(tf.squeeze(image) * 0.5 + 0.5, 0, 1))
                     plt.axis("off")
             plt.savefig(image_path, transparent=True)
             plt.close(fig)
