@@ -29,7 +29,7 @@ class UnpairedStarGANModel(S2SModel):
         else:
             self.sampler = SingleTargetSampler(config)
         self.gen_supplier = SkipParamsSupplier(([2] if not config.source_domain_aware_generator else []) +
-                             ([3] if "palette" not in config.generator else []))
+                             ([3] if not config.palette_quantization else []))
         self.crit_supplier = NParamsSupplier(2 if config.conditional_discriminator else 1)
         self.generator = self.inference_networks["generator"]
         self.discriminator = self.training_only_networks["discriminator"]
@@ -45,13 +45,8 @@ class UnpairedStarGANModel(S2SModel):
             return {
                 "generator": stargan_resnet_generator(config.image_size, config.output_channels,
                                                       config.number_of_domains,
-                                                      config.source_domain_aware_generator, config.capacity)
-            }
-        elif config.generator == "palette":
-            return {
-                "generator": stargan_resnet_generator(config.image_size, config.output_channels,
-                                                              config.number_of_domains,
-                                                              config.source_domain_aware_generator, config.capacity, True)
+                                                      config.source_domain_aware_generator, config.capacity,
+                                                      config.palette_quantization)
             }
         else:
             raise ValueError(f"The provided {config.generator} type for generator has not been implemented.")
