@@ -621,7 +621,7 @@ def munit_upscale_nn(input_tensor, filters, use_norm=False):
     return x
 
 
-def munit_discriminator_multi_scale(domain_letter, image_size, channels, scales):
+def munit_discriminator_multi_scale(domain_letter, image_size, channels, scales, normalization=False):
     """
     From pytorch reference: https://github.com/NVlabs/MUNIT/blob/master/networks.py#L35:
     discriminator_ms (3 redes idênticas a esta:)
@@ -644,10 +644,10 @@ def munit_discriminator_multi_scale(domain_letter, image_size, channels, scales)
     """
     def conv2d_blocks(input_tensor):
         x = input_tensor
-        x = munit_conv_block_d(x, 64)
-        x = munit_conv_block_d(x, 128)
-        x = munit_conv_block_d(x, 256)
-        x = munit_conv_block_d(x, 512)
+        x = munit_conv_block_d(x, 64,  use_norm=normalization)
+        x = munit_conv_block_d(x, 128, use_norm=normalization)
+        x = munit_conv_block_d(x, 256, use_norm=normalization)
+        x = munit_conv_block_d(x, 512, use_norm=normalization)
         x = layers.Conv2D(1, kernel_size=1, kernel_initializer="he_normal",
                           kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=True, padding="valid")(x)
         return x

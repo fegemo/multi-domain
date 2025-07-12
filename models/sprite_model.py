@@ -22,6 +22,7 @@ class SpriteEditorModel(RemicModel):
         self.lambda_adversarial = config.lambda_adversarial
         self.lambda_reconstruction = config.lambda_reconstruction
         self.lambda_palette = config.lambda_palette
+        self.lambda_regularization = config.lambda_regularization
 
         self.generator = self.inference_networks["generator"]
         self.discriminators = self.training_only_networks["discriminators"]
@@ -95,6 +96,22 @@ class SpriteEditorModel(RemicModel):
         z = mu + eps * std
         # z (shape=[b, noise_length])
         return z, mu, logvar
+
+    def discriminator_loss(self, predicted_patches_real, predicted_patches_fake):
+        super_losses = super().discriminator_loss(predicted_patches_real, predicted_patches_fake)
+        lambda_regularization = self.lambda_regularization
+        number_of_domains = self.config.number_of_domains
+
+        total_loss = [super_losses["real"][i] +
+                      super_losses["fake"][i] +
+                      lambda_regularization * super_losses["l2-regularization"][i] for i in range(number_of_domains)]
+
+        return {
+            "real": super_losses["real"],
+            "fake": super_losses["fake"],
+            "l2-regularization": super_losses["l2-regularization"],
+            "total": total_loss
+        }
 
     def generator_loss(self, fake_predicted_patches, generated_images, target_images, input_dropout_mask,
                        ec_mean, ec_log_var, random_codes, recovered_codes_mean, target_palettes, temperature,
@@ -1020,7 +1037,7 @@ def build_monolith_generator(config):
 
 
 def build_munitlike_discriminator(domain_letter, image_size, channels, scales):
-    return munit_discriminator_multi_scale(domain_letter, image_size, channels, scales)
+    return munit_discriminator_multi_scale(domain_letter, image_size, channels, scales, True)
 
 
 def build_diversity_encoder(config):
