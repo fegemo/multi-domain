@@ -1,11 +1,10 @@
 import os
-from functools import reduce
 
 import tensorflow as tf
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from utility import keras_utils, palette_utils, io_utils, dataset_utils
+from utility import keras_utils, palette_utils, io_utils
 from utility.functional_utils import listify
 from utility.keras_utils import LinearAnnealingScheduler, NoopAnnealingScheduler, create_random_inpaint_mask, \
     NoopInpaintMaskGenerator, ConstantInpaintMaskGenerator, RandomInpaintMaskGenerator, CurriculumInpaintMaskGenerator
