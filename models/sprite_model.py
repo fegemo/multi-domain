@@ -442,16 +442,23 @@ class SpriteEditorModel(RemicModel):
             - inpaint mask (shape=[b, s, s, 1])
             - target palette (shape=[b, (n), c])
         """
+        image_size = self.config.image_size
+        is_trained_to_inpaint = self.config.inpaint_mask != "none"
+
         examples = super().select_examples_for_visualization(train_ds, test_ds)
         # examples (list of tuples with: source images, keep mask), [examples] x [d, s, s, c], [examples] x [d]
         # now we add to the examples: inpaint mask and target palette
         number_of_examples_per_partition = len(examples) // 2
 
-        # inpainting masks: from hard to easy, with the last one having a full mask
-        number_of_holes = list(range(4, 0, -1))[:number_of_examples_per_partition - 1] + [0]
-        example_masks = [create_random_inpaint_mask(tf.stack(examples[ex][0])[tf.newaxis, ...], holes) for ex, holes in
-                         enumerate(number_of_holes * 2)]
-        # example_masks (list of tuples with: masked source images, inpaint mask)
+        # inpainting masks: from hard to easy, with the last one having a full mask, but only if training to inpaint
+        if is_trained_to_inpaint:
+            number_of_holes = list(range(4, 0, -1))[:number_of_examples_per_partition - 1] + [0]
+            example_masks = [create_random_inpaint_mask(tf.stack(examples[ex][0])[tf.newaxis, ...], holes) for ex, holes in
+                             enumerate(number_of_holes * 2)]
+            # example_masks (list of tuples with: masked source images, inpaint mask)
+        else:
+            example_masks = [(tf.expand_dims(ex[0], 0), tf.ones((1, image_size, image_size, 1))) for ex in examples]
+            # example_masks (list of tuples with: masked source images, inpaint mask)
 
         # extract the source palettes and make them the target palettes
         source_palettes = [palette_utils.batch_extract_palette_ragged(tf.stack(ex[0])[tf.newaxis, ...])[0]
@@ -1116,3 +1123,12 @@ def build_diversity_encoder(config):
 
 
 # python train.py sprite --rm2k --steps 100 --evaluate-steps 100 --vram 4096 --temperature 0.1 --annealing linear
+
+
+def build_cohesion_discriminator(config):
+    """
+    Builds a discriminator that takes a batch of full image examples (from all domains) and predicts whether
+    the images are from the same example (poses of the same character) or not.
+    :param config:
+    :return:
+    """
