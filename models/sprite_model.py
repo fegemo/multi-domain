@@ -935,6 +935,7 @@ def build_monolith_generator(config):
     film_length = config.film
     generator_scales = config.generator_scales
     quantize_to_palette = config.palette_quantization
+    capacity = config.capacity
 
     # define the inputs
     masked_images_input = layers.Input(shape=(domains, image_size, image_size, channels), name="source_images")
@@ -954,7 +955,7 @@ def build_monolith_generator(config):
     # x (shape=[b, d, s, s, c + 1])
     x = layers.Reshape((image_size, image_size, domains * (channels + 1)))(x)
 
-    number_of_filters = [32, 64, 128, 256]
+    number_of_filters = [f * capacity for f in [32, 64, 128, 256]]
     init = tf.random_normal_initializer(0., 0.02)
     x = layers.Conv2D(number_of_filters[0], kernel_size=4, strides=1, padding="same", kernel_initializer=init)(x)
     x = layers.GroupNormalization(groups=number_of_filters[0], epsilon=0.00001)(x)
