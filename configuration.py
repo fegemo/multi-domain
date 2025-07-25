@@ -318,7 +318,7 @@ class OptionParser(metaclass=SingletonMeta):
         setattr(self.values, "domains_capitalized", list(map(lambda name: name[0].upper() + name[1:],
                                                              self.values.domains)))
 
-        if self.values.up_preprocessing is True:
+        if self.values.up_preprocessing is True and self.values.resizing_factor > 1:
             self.values.image_size = self.values.image_size * self.values.resizing_factor
         if return_parser:
             return self.values, self
