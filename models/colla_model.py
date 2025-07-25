@@ -719,7 +719,7 @@ class CollaGANModel(S2SModel):
                     image = back_predicted[i]
                     imshow_args = {"cmap": "gray", "vmin": 0.0, "vmax": 1.0}
 
-                plt.imshow(image, **imshow_args)
+                plt.imshow(tf.clip_by_value(image, 0, 1), **imshow_args)
                 plt.axis("off")
 
         plt.savefig(image_path, transparent=True)
