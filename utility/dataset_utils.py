@@ -69,10 +69,13 @@ def load_image(path, image_size, input_channels, output_channels, should_normali
         image = tf.io.read_file(path)
         image = tf.image.decode_png(image, channels=input_channels)
 
-        if config and config.up_preprocessing:
-            image = resize_images(image, config)
+        real_size = image_size
+        # if up_preprocessing=True, then image_size is already multiplied by resizing_factor.
+        # However, up to this point in the runtime, the images have not been resized yet, so we need the original size.
+        if config and config.up_preprocessing and config.resizing_factor > 1:
+            real_size = tf.cast(image_size/config.resizing_factor, tf.int32)
 
-        image = tf.reshape(image, [image_size, image_size, input_channels])
+        image = tf.reshape(image, [real_size, real_size, input_channels])
         image = tf.cast(image, "float32")
         if input_channels == 4:
             image = blacken_transparent_pixels(image)
@@ -104,44 +107,30 @@ def augment_translation(images):
     images = tf.split(image, len(images), axis=-1)
     return tf.tuple(images)
 
-# resize images to a new size (config.resizing_factor). 'images' parameter can be a 3D with shape (size, size, channels)
-# or a 4D tensor with shape (domains, size, size, channels).
-def resize_images(images, config):
-    shape = tf.shape(images)
-
-    dtype = images.dtype
-    images = tf.cast(images, tf.int32)
-
-
-    # 'images' parameter will always be a 4D [d, s, s, c] or a 3D [s, s, c] tensor, so we can retrieve the original size
-    # with index 1
-
-    size = shape[1]
-    new_size = tf.cast(size * config.resizing_factor, tf.int32)
+def resize_images_preprocessing(images, image_size):
+    #images shape is [d, h, w, c]
 
     resized_images = tf.image.resize(
         images,
-        size=[new_size, new_size],
+        size=[image_size, image_size], #image_size is already multiplied by resizing_factor
         method=tf.image.ResizeMethod.NEAREST_NEIGHBOR,
         preserve_aspect_ratio=True
     )
+    return resized_images
 
-    return tf.cast(resized_images, dtype)
+def resize_batch(batch, domains, image_size, channels, resizing_factor):
+    new_size = image_size * resizing_factor
 
-# resize an entire batch (the default batch size is 4). 'batch' parameter is a 
-def resize_batch(batch, config):
-    shape = tf.shape(batch)
-    reshaped_batch = tf.reshape(batch, [shape[0] * shape[1], shape[2], shape[2], shape[4]])
-
-    resized_batch = resize_images(reshaped_batch, config)
-    new_shape = tf.shape(resized_batch)
-
-    return tf.reshape(resized_batch, [shape[0], shape[1], new_shape[1], new_shape[1], new_shape[3]])
+    flattened_batch = tf.reshape(batch, [-1, image_size, image_size, channels])
+    resized_flattened_batch = tf.image.resize(flattened_batch, size=[new_size, new_size],
+                                              method=tf.image.ResizeMethod.NEAREST_NEIGHBOR)
+    resized_batch = tf.reshape(resized_flattened_batch, [domains, -1, new_size, new_size, channels])
+    return resized_batch
 
 # finds the bounding box that contains all the non-transparent pixels of all images in the batch|domain
 # receives a 4d tensor with shape (batch_size|domains, height, width, channels=4)
 def find_bounding_box_per_batch(images):
-    pixel_is_opaque = images[..., 3] > -1
+    pixel_is_opaque = tf.math.greater(images[..., 3], tf.constant(-1.0))
     non_transparent_mask = tf.reduce_any(pixel_is_opaque, axis=0)
     y_indices, x_indices = tf.where(non_transparent_mask)[:, 0], tf.where(non_transparent_mask)[:, 1]
     y_indices, x_indices = tf.cast(y_indices, tf.int32), tf.cast(x_indices, tf.int32)
@@ -153,12 +142,13 @@ def find_bounding_box_per_batch(images):
 # in the batch. The images tensor is 5d (batch_size, domains, height, width, channels=4).
 # each example in the batch is cropped to a random area that covers at least partially the bounding box
 # of the non-transparent pixels in the images for that character in all domains.
-def random_crop_5d(images, crop_size):
+def random_crop_5d(images, crop_size, batch_size):
+    transposed_images = tf.transpose(images, [1, 0, 2, 3, 4])
     # gets the bounding boxes for each example in the batch considering the images from all domains
-    batch_size, domains, height, width, channels = tf.unstack(tf.shape(images))
+    _, domains, height, width, channels = tf.unstack(tf.shape(transposed_images))
     bounding_boxes = tf.map_fn(
         find_bounding_box_per_batch,
-        images,
+        transposed_images,
         parallel_iterations=batch_size,
         fn_output_signature=tf.TensorSpec(shape=[4], dtype=tf.int32)  # [min_y, max_y, min_x, max_x]
     )
@@ -183,12 +173,12 @@ def random_crop_5d(images, crop_size):
 
     # effectively crops each image in the batch using the calculated start_x and start_y
     cropped_images = tf.map_fn(
-        lambda idx: images[idx, :, start_y[idx]:start_y[idx] + crop_size, start_x[idx]:start_x[idx] + crop_size, :],
+        lambda idx: transposed_images[idx, :, start_y[idx]:start_y[idx] + crop_size, start_x[idx]:start_x[idx] + crop_size, :],
         tf.range(batch_size),
         dtype=tf.float32
     )
 
-    return cropped_images
+    return tf.transpose(cropped_images, [1, 0, 2, 3, 4])
 
 def augment(should_rotate_hue, should_translate, channels, *images):
     stacked_images = tf.stack(images, axis=0)
@@ -213,18 +203,18 @@ def augment(should_rotate_hue, should_translate, channels, *images):
     images = tf.unstack(stacked_images, num=len(images))
     return tf.tuple(images)
 
-def upscaling_augmentation(images, config, prob = 0.80):
+@tf.function
+def upscaling_augmentation(images, number_of_domains, image_size, inner_channels, resizing_factor, batch_size, prob = 0.8):
     prob = tf.constant(prob)
     choice = tf.random.uniform(shape=[])
-    inside_augmentation_probability = choice < prob
+    inside_augmentation_probability = tf.less(choice, prob)
 
     def augment():
-        resized_images = resize_batch(images, config)
-        cropped_images = random_crop_5d(resized_images, config.image_size)
-        return cropped_images
+        resized_images = resize_batch(images, number_of_domains, image_size, inner_channels, resizing_factor)
+        cropped_images = random_crop_5d(resized_images, image_size, batch_size)
+        return tuple(tf.unstack(cropped_images, axis=0))
 
     return tf.cond(inside_augmentation_probability, augment, lambda: images)
-
 
 def normalize_all(*images):
     return tuple(map(lambda image: normalize(image), images))
@@ -280,6 +270,10 @@ def create_multi_domain_image_loader(config, train_or_test_folder):
 
         # loads all images and return them
         images = [load_single_image(dataset, i, image_number) for i in range(len(domains))]
+        if config and config.up_preprocessing:
+            resized = resize_images_preprocessing(tf.stack(images, axis=0), config.image_size)
+            return tuple(tf.unstack(resized, axis=0))
+
         return tuple(images)
 
     return load_images
