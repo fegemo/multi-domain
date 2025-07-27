@@ -345,10 +345,11 @@ class S2SModel(ABC):
             t = tf.cast(step / steps, tf.float32)
 
             # check for augmentation by upscaling
-            should_augment_upscaling = not self.config.no_up_aug
+            should_augment_upscaling = not self.config.no_up_aug and self.config.resizing_factor > 1
             if should_augment_upscaling:
-                batch = dataset_utils.upscaling_augmentation(batch, self.config)
-
+                batch = dataset_utils.upscaling_augmentation(batch, self.config.number_of_domains, self.config.image_size,
+                                                             self.config.inner_channels, self.config.resizing_factor,
+                                                             self.config.batch)
             self.train_step(batch, step, evaluate_steps, t)
 
             # dot feedback for every 10 training steps
