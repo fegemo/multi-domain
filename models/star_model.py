@@ -34,7 +34,7 @@ class UnpairedStarGANModel(S2SModel):
         self.generator = self.inference_networks["generator"]
         self.discriminator = self.training_only_networks["discriminator"]
 
-        if config.generator == "palette" and config.annealing != "none":
+        if config.palette_quantization and config.annealing != "none":
             self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, [self.generator.quantization])
         else:
             self.annealing_scheduler = NoopAnnealingScheduler()
@@ -266,7 +266,7 @@ class UnpairedStarGANModel(S2SModel):
                               fontdict={"fontsize": 24})
                 elif j == 1:
                     plt.title(target_domain_name, fontdict={"fontsize": 24})
-                plt.imshow(tf.clip_by_value(images[j] * 0.5 * 0.5, 0, 1))
+                plt.imshow(tf.clip_by_value(images[j] * 0.5 + 0.5, 0, 1))
                 plt.axis("off")
 
         figure.tight_layout()
@@ -422,7 +422,7 @@ class UnpairedStarGANModel(S2SModel):
                     image = fake_predicted_patches[i]
                     imshow_args = {"cmap": "gray", "vmin": 0.0, "vmax": 1.0}
 
-                plt.imshow(image, **imshow_args)
+                plt.imshow(tf.clip_by_value(image, 0, 1), **imshow_args)
                 plt.axis("off")
 
         plt.savefig(image_path, transparent=True)
