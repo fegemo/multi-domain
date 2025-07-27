@@ -54,7 +54,8 @@ def stargan_resnet_discriminator(number_of_domains, image_size, output_channels,
     return tf.keras.Model(inputs=inputs, outputs=(patches, classification), name="StarGANDiscriminator")
 
 
-def stargan_resnet_generator(image_size, output_channels, number_of_domains, receive_source_domain, capacity=1):
+def stargan_resnet_generator(image_size, output_channels, number_of_domains, receive_source_domain, capacity=1,
+                             palette_quantization=False):
     init = tf.random_normal_initializer(0., 0.02)
 
     source_image_input = layers.Input(shape=[image_size, image_size, output_channels], name="source_image")
@@ -102,10 +103,24 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
 
     x = layers.Conv2D(output_channels, kernel_size=7, strides=1, padding="same", kernel_initializer=init,
                       use_bias=False)(x)
-    activation = layers.Activation("tanh", name="generated_image")(x)
 
-    return tf.keras.Model(inputs=inputs, outputs=activation, name="StarGANGenerator")
+    if not palette_quantization:
+        activation = layers.Activation("tanh", name="generated_image")(x)
+        return tf.keras.Model(inputs=inputs, outputs=activation, name="StarGANGenerator")
+    else:
+        pre_output = layers.Activation("tanh", name="pre_output")(x)
 
+        palette_input = layers.Input(shape=[None, output_channels], name="desired_palette")
+        palettes = palette_input
+        inputs += [palette_input]
+
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization()
+        quantized_output = quantization_layer((pre_output, palettes))
+
+        model = tf.keras.Model(inputs=inputs, outputs=quantized_output, name="StarGANGenerator")
+        model.quantization = quantization_layer
+
+        return model
 
 def collagan_affluent_generator(number_of_domains, image_size, output_channels, capacity=1, palette_quantization=False):
     # UnetINDiv4 extracted from:

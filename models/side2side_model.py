@@ -5,7 +5,7 @@ import tensorflow as tf
 from tensorboard.plugins.custom_scalar import layout_pb2, summary as cs_summary
 import time
 
-from utility import io_utils, frechet_inception_distance as fid
+from utility import io_utils, frechet_inception_distance as fid, dataset_utils
 from utility.functional_utils import listify
 from utility.keras_utils import ConstantThenLinearDecay, count_network_parameters
 
@@ -343,6 +343,13 @@ class S2SModel(ABC):
 
             # actually TRAIN
             t = tf.cast(step / steps, tf.float32)
+
+            # check for augmentation by upscaling
+            should_augment_upscaling = not self.config.no_up_aug and self.config.resizing_factor > 1
+            if should_augment_upscaling:
+                batch = dataset_utils.upscaling_augmentation(batch, self.config.number_of_domains, self.config.image_size,
+                                                             self.config.inner_channels, self.config.resizing_factor,
+                                                             self.config.batch)
             self.train_step(batch, step, evaluate_steps, t)
 
             # dot feedback for every 10 training steps

@@ -712,48 +712,4 @@ def build_discriminator(image_shape=(64, 64, 4)):
     return Model(inputs, real_fake_score)
 
 
-def plot_5d_tensor_images(tensor):
-    """
-    Plots a tensor with shape [batch, domains, image_size, image_size, channels] and values in the [-1, 1] domain.
-
-    Args:
-        tensor: A tensor with shape [batch, domains, image_size, image_size, channels].
-    """
-    batch, domains, image_size, _, channels = tensor.shape
-    fig, axes = plt.subplots(batch, domains, figsize=(domains * 2, batch * 2))
-
-    for i in range(batch):
-        for j in range(domains):
-            image = tensor[i, j]
-            image = (image + 1) / 2  # Convert from [-1, 1] to [0, 1] for plotting
-            if channels == 1:
-                image = tf.squeeze(image, axis=-1)  # Remove the channel dimension if it's 1
-            axes[i, j].imshow(image)
-            axes[i, j].axis('off')
-
-    plt.tight_layout()
-    plt.show()
-
-def plot_4d_tensor_images(tensor):
-    """
-    Plots a tensor with shape [batch, image_size, image_size, channels] and values in the [-1, 1] domain.
-
-    Args:
-        tensor: A tensor with shape [batch, image_size, image_size, channels].
-    """
-    batch, image_size, _, channels = tensor.shape
-    fig, axes = plt.subplots(batch, 1, figsize=(1 * 2, batch * 2))
-
-    for i in range(batch):
-        image = tensor[i]
-        image = (image + 1) / 2  # Convert from [-1, 1] to [0, 1] for plotting
-        if channels == 1:
-            image = tf.squeeze(image, axis=-1)  # Remove the channel dimension if it's 1
-        axes[i].imshow(image)
-        axes[i].axis('off')
-
-    plt.tight_layout()
-    plt.show()
-
-
 # python train.py yamata --rm2k --model-name yamata --lr 0.00005 --steps 5000 --evaluate-steps 100 --lr 0.00001
