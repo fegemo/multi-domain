@@ -16,16 +16,18 @@ logging.info(f"Running with options: {parser.get_description(', ', ':')}")
 
 # configures GPU VRAM usage according to config.vram (limit, default behavior or allow growth on demand)
 gpus = tf.config.list_physical_devices("GPU")
+requested_gpu = config.gpu
 if gpus:
+    tf.config.set_visible_devices(gpus[requested_gpu], "GPU")
     if config.vram == -1:
-        tf.config.experimental.set_memory_growth(gpus[0], True)
+        tf.config.experimental.set_memory_growth(gpus[requested_gpu], True)
     elif config.vram == 0:
         # do nothing -- allow tf to allocate as much as it wants at once
         pass
     else:
         # put a hard limit on the VRAM usage
         tf.config.set_logical_device_configuration(
-            gpus[0],
+            gpus[requested_gpu],
             [tf.config.LogicalDeviceConfiguration(memory_limit=config.vram)]
         )
 

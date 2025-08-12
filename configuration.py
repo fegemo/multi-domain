@@ -238,6 +238,7 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--tiny-validation", action="store_true", default=False,
                                  help="Uses only tiny (136 test examples) for validation and to generate images in "
                                       "the end")
+        self.parser.add_argument("--gpu", type=int, help="GPU index to use", default=0)
         self.parser.add_argument("--vram", type=int, help="Amount of VRAM in MB to limit. Use 0 for "
                                                           "default behavior and -1 for on-demand growth", default=0)
 
