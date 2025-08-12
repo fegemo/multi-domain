@@ -867,7 +867,7 @@ class NoopGradientPenalty(GradientPenalty):
         :param discriminators_input: Input images to the discriminator with shape [d] x [b, s, s, c]
         :return: List of zeros for each discriminator
         """
-        return [tf.constant(0.0) for _ in range(len(discriminators))]
+        return [tf.constant(0.0) for _ in range(len(listify(discriminators)))]
 
 
 class ZeroCenteredGradientPenalty(GradientPenalty):
