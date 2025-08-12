@@ -1,10 +1,12 @@
 import logging
+import sys
 import os
 from abc import ABC, abstractmethod
 import tensorflow as tf
 from tensorboard.plugins.custom_scalar import layout_pb2, summary as cs_summary
 import time
 
+from configuration import OptionParser
 from utility import io_utils, frechet_inception_distance as fid
 from utility.functional_utils import listify
 from utility.keras_utils import ConstantThenLinearDecay, count_network_parameters
@@ -237,6 +239,9 @@ class S2SModel(ABC):
             with self.summary_writer.as_default():
                 tf.summary.experimental.write_raw_pb(
                     self.layout_summary.SerializeToString(), step=0)
+                tf.summary.text("configuration",
+                                f"# Command\n`python {' '.join(sys.argv)}`\n\n# Configuration\n    " + OptionParser.get_description(self.config, "\n    ", "=") + "\n",
+                                step=0)
 
             # initialize training metrics (used for saving the best model according to FID or L1)
             self.training_metrics = dict({

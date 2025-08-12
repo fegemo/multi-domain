@@ -12,7 +12,7 @@ logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("PIL").setLevel(logging.WARNING)
 
 config, parser = OptionParser().parse(sys.argv[1:], True)
-logging.info(f"Running with options: {parser.get_description(', ', ':')}")
+logging.info(f"Running with options: {OptionParser.get_description(config, ', ', ':')}")
 
 # configures GPU VRAM usage according to config.vram (limit, default behavior or allow growth on demand)
 gpus = tf.config.list_physical_devices("GPU")
@@ -50,12 +50,12 @@ else:
 
 # check if datasets need unzipping
 if config.verbose:
-    logging.info("Datasets used: ", config.datasets_used)
+    logging.info(f"Datasets used: {config.datasets_used}")
 setup.ensure_datasets(config.verbose)
 
 # setting the seed
 if config.verbose:
-    logging.debug("SEED set to: ", config.seed)
+    logging.debug(f"SEED set to: {config.seed}")
 tf.random.set_seed(config.seed)
 
 # loading the dataset according to the required model
@@ -87,8 +87,10 @@ model = class_name(config)
 
 model.save_model_description(model.get_output_folder())
 if config.verbose:
-    model.discriminator.summary()
-    model.generator.summary()
+    if hasattr(model, "discriminator"):
+        model.discriminator.summary()
+    if hasattr(model, "generator"):
+        model.generator.summary()
 parser.save_configuration(model.get_output_folder(), sys.argv)
 
 
