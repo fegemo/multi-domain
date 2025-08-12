@@ -5,6 +5,8 @@ from tensorflow import keras, RaggedTensorSpec
 from tensorflow.keras.layers import Layer
 from tensorflow.keras import layers
 
+from utility.functional_utils import listify
+
 
 class ConstantThenLinearDecay(tf.keras.optimizers.schedules.LearningRateSchedule):
     def get_config(self):
@@ -728,3 +730,156 @@ class CurriculumInpaintMaskGenerator(InpaintMaskGenerator):
             if is_random \
             else tf.cast(tf.math.floordiv(t, 0.5) * (self.max_holes + 1), tf.int32)
         return create_random_inpaint_mask(batch, num_holes)
+
+
+# Custom weight initializer which is very similar to MSRInitializer (He/MSRA), but allows to set a custom gain which
+# is useful for activation functions derived from ReLU, such as LeakyReLU This has been adapted from the R3GAN
+# implementation: https://github.com/brownvc/R3GAN/blob/19a7ddf463fbac2bd39b4c1c73d63f1c441c7403/R3GAN/Networks.py#L7
+class MSRInitializer(keras.initializers.VarianceScaling):
+    def __init__(self, activation_gain=1.0):
+        super(MSRInitializer, self).__init__(
+            scale=activation_gain, mode="fan_in", distribution="truncated_normal")
+
+
+class AdversarialLoss(ABC):
+    def __init__(self, number_of_domains, discriminator_scales, domain_specific_discriminators=True):
+        self.number_of_domains = number_of_domains
+        self.discriminator_scales = discriminator_scales
+        self.domain_reductor = lambda x: tf.reduce_mean(x, axis=1) if not domain_specific_discriminators else x
+
+    @abstractmethod
+    def calculate_discriminator_loss(self, fake_logits, real_logits):
+        """
+        Calculates the adversarial loss between the real and fake images for the discriminator.
+        The logits can have the following shape:
+          - [d] x [ds] x [b, x, x, 1]
+        The logits are reduced to [d, ds] => [d] if domain_specific_discriminators is True, else [ds] => []
+        :param fake_logits: the output of the discriminator for the fake images
+        :param real_logits: the output of the discriminator for the real images
+        :return: the adversarial loss, on the discriminator perspective, and the real and fake terms
+        """
+        pass
+
+    @abstractmethod
+    def calculate_generator_loss(self, fake_logits, real_logits=None):
+        """
+        Calculates the adversarial loss between for the generator.
+        The logits can have the following shapes:
+          - [d] x [ds] x [b, x, x, 1] if both discriminator_scales > 1 and domain_specific_discriminators is True
+          - [ds] x [b, x, x, 1] if discriminator_scales > 1
+          - [b, x, x, 1] if discriminator_scales == 1
+          - [ds] x [b, x, x, 1] if domain_specific_discriminators is True
+        The logits are reduced to [d, ds] => [d] if domain_specific_discriminators is True, else [ds] => []
+        :param fake_logits: the output of the discriminator for the fake images
+        :param real_logits: the output of the discriminator for the real images, if necessary (otherwise None)
+        :return: the adversarial loss on the generator perspective
+        """
+        pass
+
+
+class LSGANLoss(AdversarialLoss):
+    def __init__(self, number_of_domains, discriminator_scales, domain_specific_discriminators=True):
+        super().__init__(number_of_domains, discriminator_scales, domain_specific_discriminators)
+        self.loss = tf.keras.losses.MeanSquaredError()
+
+    def calculate_generator_loss(self, fake_logits, real_logits=None):
+        for d in range(self.number_of_domains):
+            for ds in range(self.discriminator_scales):
+                fake_logits[d][ds] = self.loss(tf.ones_like(fake_logits[d][ds]), fake_logits[d][ds])
+                # fake_logits (shape=[d] x [ds] x [b, x, x, c])
+                fake_logits[d][ds] = tf.reduce_mean(fake_logits[d][ds])
+                # fake_logits (shape=[d] x [ds])
+        fake_logits = tf.reduce_mean(fake_logits, axis=1)
+        # fake_logits (shape=[d])
+        adversarial_loss = self.domain_reductor(fake_logits)
+        # adversarial_loss (shape=[d] if domain_specific_discriminators else [])
+
+        return adversarial_loss
+
+    def calculate_discriminator_loss(self, fake_logits, real_logits):
+        # shape=[d, ds] x [b, x, x, 1] => [d, ds] => [d]
+        for d in range(self.number_of_domains):
+            for ds in range(self.discriminator_scales):
+                real_logits[d][ds] = self.loss(tf.ones_like(real_logits[d][ds]), real_logits[d][ds])
+                fake_logits[d][ds] = self.loss(tf.zeros_like(fake_logits[d][ds]), fake_logits[d][ds])
+                # xxxx_logits (shape=[d] x [ds] x [b, x, x, c])
+                real_logits[d][ds] = tf.reduce_mean(real_logits[d][ds])
+                fake_logits[d][ds] = tf.reduce_mean(fake_logits[d][ds])
+                # xxxx_logits (shape=[d] x [ds])
+
+        real_logits = tf.reduce_mean(real_logits, axis=1)
+        fake_logits = tf.reduce_mean(fake_logits, axis=1)
+        adversarial_loss = [real_logits[d] + fake_logits[d] for d in range(self.number_of_domains)]
+        # xxxx_logits (shape=[d])
+
+        real_loss = self.domain_reductor(real_logits)
+        fake_loss = self.domain_reductor(fake_logits)
+        adversarial_loss = self.domain_reductor(adversarial_loss)
+        # xxxx_logits (shape=[d] if domain_specific_discriminators else [])
+
+        return adversarial_loss, real_loss, fake_loss
+
+
+class RelativisticLoss(AdversarialLoss):
+    def calculate_generator_loss(self, fake_logits, real_logits=None):
+        role_inverted_discriminator_loss, _, _ = self.calculate_discriminator_loss(real_logits, fake_logits)
+        return role_inverted_discriminator_loss
+
+    def calculate_discriminator_loss(self, fake_logits, real_logits):
+        relativistic_logits = [[0. for _ in range(self.discriminator_scales)] for _ in range(self.number_of_domains)]
+        for d in range(self.number_of_domains):
+            for ds in range(self.discriminator_scales):
+                relativistic_logits[d][ds] = real_logits[d][ds] - fake_logits[d][ds]
+                # relativistic_logits ([d] x [ds] x shape=[b, x, x, 1])
+                relativistic_logits[d][ds] = tf.reduce_mean(relativistic_logits[d][ds])
+                # relativistic_logits ([d] x [ds])
+
+                real_logits[d][ds] = tf.reduce_mean(real_logits[d][ds])
+                fake_logits[d][ds] = tf.reduce_mean(fake_logits[d][ds])
+                # xxxx_logits ([d] x [ds])
+
+        relativistic_logits = tf.reduce_mean(relativistic_logits, axis=1)
+        # relativistic_logits ([d])
+        real_logits = tf.reduce_mean(real_logits, axis=1)
+        fake_logits = tf.reduce_mean(fake_logits, axis=1)
+        # xxxx_logits ([d])
+
+        relativistic_logits = self.domain_reductor(relativistic_logits)
+        # relativistic_logits (shape=[d] if domain_specific_discriminators else [])
+        real_logits = self.domain_reductor(real_logits)
+        fake_logits = self.domain_reductor(fake_logits)
+        # xxxx_logits (shape=[d] if domain_specific_discriminators else [])
+        adversarial_loss = tf.math.softplus(-relativistic_logits)
+        return adversarial_loss, real_logits, fake_logits
+
+
+class GradientPenalty(ABC):
+    @abstractmethod
+    def __call__(self, discriminators, discriminators_input):
+        pass
+
+
+class NoopGradientPenalty(GradientPenalty):
+    def __call__(self, discriminators, discriminators_input):
+        """
+        No-op gradient penalty that returns zero for each discriminator.
+        :param discriminators: A list of 1 or more discriminators
+        :param discriminators_input: Input images to the discriminator with shape [d] x [b, s, s, c]
+        :return: List of zeros for each discriminator
+        """
+        return [tf.constant(0.0) for _ in range(len(discriminators))]
+
+
+class ZeroCenteredGradientPenalty(GradientPenalty):
+    def __call__(self, discriminator, discriminator_input):
+        with tf.GradientTape() as gp_tape:
+            gp_tape.watch(discriminator_input)
+            output = listify(discriminator(discriminator_input, training=True))
+            output = tf.reduce_mean([tf.reduce_sum(output) for output in output])
+
+        gp_grads = gp_tape.gradient(output, discriminator_input)
+        r_penalty = tf.reduce_sum(tf.square(gp_grads))
+
+        del gp_tape
+
+        return r_penalty

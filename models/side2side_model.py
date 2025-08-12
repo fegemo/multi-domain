@@ -209,6 +209,8 @@ class S2SModel(ABC):
         if starting_step == 0:
             # initialize generator and discriminator optimizers
             lr = self.config.lr
+            beta1 = self.config.beta1
+            beta2 = self.config.beta2
             if self.config.lr_decay == "constant-then-linear":
                 # configuration as used by stargan
                 lr_generator = ConstantThenLinearDecay(lr, steps // self.config.d_steps)
@@ -226,9 +228,9 @@ class S2SModel(ABC):
             else:
                 lr_generator = lr
                 lr_discriminator = lr * self.config.ttur
-            self.generator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_generator, beta_1=0.5, beta_2=0.999)
-            self.discriminator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_discriminator, beta_1=0.5,
-                                                                    beta_2=0.999)
+            self.generator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_generator, beta_1=beta1, beta_2=beta2)
+            self.discriminator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_discriminator, beta_1=beta1,
+                                                                    beta_2=beta2)
 
             # initializes tensorboard utilities for logging training statistics
             self.summary_writer = tf.summary.create_file_writer(self.get_output_folder())

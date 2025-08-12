@@ -15,7 +15,7 @@ IMG_SIZE = 64
 INPUT_CHANNELS = 4
 OUTPUT_CHANNELS = 4
 
-LAMBDA_GP = 10.
+LAMBDA_GP = 0.
 LAMBDA_DOMAIN = 1.
 LAMBDA_RECONSTRUCTION = 10.
 LAMBDA_L1 = 10.
@@ -70,7 +70,8 @@ class OptionParser(metaclass=SingletonMeta):
             "model", help="one from { stargan-unpaired, stargan-paired, collagan, munit, remic, yamatagan }"
                           "- the model to train")
         self.parser.add_argument("--generator", help="network from { resnet } for stargan or "
-                                                     "{ affluent, palette-transformer } for collagan",
+                                                     "{ affluent, palette-transformer } for collagan, "
+                                                     "{ monolith, r3gan } for sprite",
                                  default="")
         self.parser.add_argument("--discriminator", help="different network topology, currently an "
                                                          "unused option", default="")
@@ -95,8 +96,13 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--lr-decay", help="one from {none, constant-then-linear}", default=LR_DECAY)
         self.parser.add_argument("--lr", type=float, help="(initial) learning rate", default=LR)
         self.parser.add_argument("--ttur", type=float, help="multiplier for the discriminator lr", default=1.)
+        self.parser.add_argument("--beta1", type=float, help="beta1 for Adam optimizer", default=0.5)
+        self.parser.add_argument("--beta2", type=float, help="beta2 for Adam optimizer", default=0.999)
+        self.parser.add_argument("--adv", help="one from {lsgan, r3gan} for the adversarial loss of the "
+                                               "MUNIT subtree", default="lsgan")
         self.parser.add_argument(
-            "--lambda-gp", type=float, help="value for λgradient_penalty used in stargan", default=LAMBDA_GP)
+            "--lambda-gp", type=float, help="value for λgradient_penalty used in stargan "
+                                            "or R1/R2 regularization in SpriteGAN", default=LAMBDA_GP)
         self.parser.add_argument("--lambda-domain", type=float,
                                  help="value for λdomain used in stargan and collagan", default=LAMBDA_DOMAIN)
         self.parser.add_argument("--lambda-reconstruction", type=float,

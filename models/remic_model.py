@@ -91,7 +91,7 @@ class RemicModel(MunitModel):
         else:
             raise ValueError(f"The provided {config.discriminator} type of discriminator has not been implemented")
 
-    def generator_loss(self, predicted_patches_fake,
+    def generator_loss(self, predicted_patches_fake, predicted_patches_real,
                        decoded_images, source_images, input_keep_mask,
                        original_contents, recoded_contents, random_styles, recoded_styles,
                        decoded_images_with_random_style):
@@ -100,11 +100,7 @@ class RemicModel(MunitModel):
         discriminator_scales = self.config.discriminator_scales
 
         # loss from the discriminator
-        adversarial_loss = [
-            [self.lsgan_loss(tf.ones_like(predicted_patches_fake[d][ds]), predicted_patches_fake[d][ds])
-             for ds in range(discriminator_scales)]
-            for d in range(number_of_domains)]
-        adversarial_loss = tf.reduce_mean(adversarial_loss, axis=1)
+        adversarial_loss = self.adv_loss.calculate_generator_loss(predicted_patches_fake, predicted_patches_real)
         # adversarial_loss (shape=[d])
 
         # image consistency loss (trying to reconstruct the input images from their original content and style)
@@ -143,8 +139,8 @@ class RemicModel(MunitModel):
             "total": total_loss
         }
 
-    def discriminator_loss(self, predicted_patches_real, predicted_patches_fake):
-        return super().discriminator_loss(predicted_patches_real, predicted_patches_fake)
+    def discriminator_loss(self, predicted_patches_real, predicted_patches_fake, r1_penalty, r2_penalty):
+        return super().discriminator_loss(predicted_patches_real, predicted_patches_fake, r1_penalty, r2_penalty)
 
     @tf.function
     def train_step(self, batch, step, evaluate_steps, t):
@@ -197,13 +193,13 @@ class RemicModel(MunitModel):
 
             # 2. decode de encoded input images (using original content and style) to perfectly reconstruct them
             # this is for ReMIC's "image consistency loss"
-            decoded_images = [self.decoders[d]([encoded_styles[d], encoded_contents])[0]
+            decoded_images = [self.decoders[d]([encoded_styles[d], encoded_contents])["output_image"]
                               for d in range(number_of_domains)]
             # decoded_images (shape=[d, b, s, s, c])
 
             # 3. decode the encoded input images (with a random style) to generate fake images
             # this is for ReMIC's "latent consistency loss", "adversarial loss" and "reconstruction loss"
-            decoded_images_with_random_style = [self.decoders[d]([random_style_codes[d], encoded_contents])[0]
+            decoded_images_with_random_style = [self.decoders[d]([random_style_codes[d], encoded_contents])["output_image"]
                                                 for d in range(number_of_domains)]
             # decoded_images_with_random_style (shape=[d, b, s, s, c])
 
@@ -224,11 +220,15 @@ class RemicModel(MunitModel):
             # predicted_patches_xxxx (shape=[d, b, ds, ?, ?, 1]) where ds are the discriminator scales and
             # ?, ? are the dimensions of the patches (different for each scale)
 
+            r1_penalty = [self.gradient_penalty(self.discriminators[i], batch[i]) for i in range(number_of_domains)]
+            r2_penalty = [self.gradient_penalty(self.discriminators[i], decoded_images_with_random_style[i])
+                          for i in range(number_of_domains)]
+
             # calculates the loss functions
-            d_loss = self.discriminator_loss(predicted_patches_real, predicted_patches_fake)
+            d_loss = self.discriminator_loss(predicted_patches_real, predicted_patches_fake, r1_penalty, r2_penalty)
             g_loss = self.generator_loss(
                 # for adversarial loss
-                predicted_patches_fake,
+                predicted_patches_fake, predicted_patches_real,
                 # for image consistency loss
                 decoded_images, source_images, input_keep_mask,
                 # for latent consistency loss
@@ -250,22 +250,28 @@ class RemicModel(MunitModel):
         all_discriminator_trainable_variables = [v for d in range(number_of_domains)
                                                  for v in self.discriminators[d].trainable_variables]
         all_generator_trainable_variables = [v for d in range(number_of_domains)
-                                                for v in self.generators[d].trainable_variables]
-        self.discriminator_optimizer.apply_gradients(zip(discriminator_gradients, all_discriminator_trainable_variables))
+                                             for v in self.generators[d].trainable_variables]
+        self.discriminator_optimizer.apply_gradients(
+            zip(discriminator_gradients, all_discriminator_trainable_variables))
         self.generator_optimizer.apply_gradients(zip(generator_gradients, all_generator_trainable_variables))
 
         # writes statistics of the training step
         with tf.name_scope("discriminator"):
             with self.summary_writer.as_default():
-                fake_loss = real_loss = weight_loss = total_loss = 0
+                fake_loss = real_loss = weight_loss = gp_loss = total_loss = 0
                 for i in range(number_of_domains):
                     fake_loss += d_loss["fake"][i]
                     real_loss += d_loss["real"][i]
                     weight_loss += d_loss["l2-regularization"][i]
+                    gp_loss += d_loss["gradient-penalty"][i]
                     total_loss += d_loss["total"][i]
-                tf.summary.scalar("fake_loss", tf.reduce_mean(fake_loss / number_of_domains), step=step // evaluate_steps)
-                tf.summary.scalar("real_loss", tf.reduce_mean(real_loss / number_of_domains), step=step // evaluate_steps)
+                tf.summary.scalar("fake_loss", tf.reduce_mean(fake_loss / number_of_domains),
+                                  step=step // evaluate_steps)
+                tf.summary.scalar("real_loss", tf.reduce_mean(real_loss / number_of_domains),
+                                  step=step // evaluate_steps)
                 tf.summary.scalar("weight_loss", tf.reduce_mean(weight_loss / number_of_domains),
+                                  step=step // evaluate_steps)
+                tf.summary.scalar("gradient_penalty_loss", tf.reduce_mean(gp_loss / number_of_domains),
                                   step=step // evaluate_steps)
                 tf.summary.scalar("total_loss", tf.reduce_mean(total_loss / number_of_domains),
                                   step=step // evaluate_steps)
@@ -373,7 +379,7 @@ class RemicModel(MunitModel):
             # encoded_contents (1, 16, 16, 256)
             # encoded_styles (d, 1, 8)
 
-            decoded_images = [self.decoders[d]([encoded_styles[d], encoded_contents])[0]
+            decoded_images = [self.decoders[d]([encoded_styles[d], encoded_contents])["output_image"]
                               for d in range(number_of_domains)]
 
             contents = [*tf.squeeze(visible_source_images), *tf.squeeze(decoded_images)]
@@ -430,7 +436,7 @@ class RemicModel(MunitModel):
             # encoded_styles (d, b, 8)
 
             decoded_images = [self.decoders[d].predict([encoded_styles[d], encoded_contents], batch_size=batch_size,
-                                                       verbose=0)[0]
+                                                       verbose=0)["output_image"]
                               for d in range(self.config.number_of_domains)]
 
             fake_images = tf.gather(tf.transpose(decoded_images, [1, 0, 2, 3, 4]), possible_target_domain, axis=1,
@@ -455,7 +461,7 @@ class RemicModel(MunitModel):
         num_rows = reduce(lambda acc, v: acc + len(v), null_list[0], 0)
 
         permutations_for_each_target_domain = [reduce(lambda acc, p: acc + p, null_list[d], [])
-                                          for d in range(number_of_domains)]
+                                               for d in range(number_of_domains)]
         oh_to_readable_domains = lambda oh: "+".join([self.config.domains[l][0] for l in range(len(oh)) if oh[l] != 0])
         # permutations_for_each_target_domain (d, x, d), with x being the number of permutations for the target domain,
         # which is the number of rows of the image
@@ -482,7 +488,7 @@ class RemicModel(MunitModel):
 
                     # generates the image using the original style code
                     style_code = self.style_encoders[j](domain_images[j][tf.newaxis, ...])
-                    decoded_image = self.decoders[j]([style_code, content_code])[0]
+                    decoded_image = self.decoders[j]([style_code, content_code])["output_image"]
                     generated_with_original_style[-1].append(tf.squeeze(decoded_image))
 
                     # draws the image with the original style
@@ -497,7 +503,7 @@ class RemicModel(MunitModel):
 
                     # generates the image using a random style code
                     random_style_code = tf.random.normal([1, 8])
-                    decoded_image = self.decoders[j]([random_style_code, content_code])[0]
+                    decoded_image = self.decoders[j]([random_style_code, content_code])["output_image"]
                     generated_with_random_style[-1].append(tf.squeeze(decoded_image))
 
                     title = f"{domain_name} ({from_domains_abbr}, rnd)"
@@ -533,7 +539,7 @@ class RemicModel(MunitModel):
             fake_image = self.decoders[target_domains[i]]([
                 random_style_code,
                 content_code
-            ])[0]
+            ])["output_image"]
             fake_images.append(fake_image)
         fake_images = tf.concat(fake_images, axis=0)
 

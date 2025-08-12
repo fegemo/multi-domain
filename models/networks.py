@@ -712,60 +712,12 @@ def remic_style_encoder(domain_letter, image_size, channels):
 
 
 def remic_generator(domain_letter, channels):
-    # def adain_resblock(x, style, filters, kernel_size, adain_filters, init="he_normal"):
-    #     original_x = x
-    #
-    #     b = layers.Dense(adain_filters)(style)
-    #     b = layers.Reshape([1, 1, adain_filters])(b)
-    #     g = layers.Dense(adain_filters)(style)
-    #     g = layers.Reshape([1, 1, adain_filters])(g)
-    #
-    #     x = layers.Conv2D(filters, kernel_size, padding="same", kernel_initializer=init, use_bias=False)(x)
-    #     x = keras_utils.AdaInstanceNormalization()([x, b, g])
-    #     x = layers.LeakyReLU()(x)
-    #
-    #     b = layers.Dense(adain_filters)(style)
-    #     b = layers.Reshape([1, 1, adain_filters])(b)
-    #     g = layers.Dense(adain_filters)(style)
-    #     g = layers.Reshape([1, 1, adain_filters])(g)
-    #
-    #     x = layers.Conv2D(filters, kernel_size, padding="same", kernel_initializer=init, use_bias=False)(x)
-    #     x = keras_utils.AdaInstanceNormalization()([x, b, g])
-    #     x = layers.Add()([original_x, x])
-    #
-    #     return x
-    #
-    # latent_input_layer = layers.Input(shape=(16, 16, 4))
-    # style_input_layer = layers.Input(shape=(8,))
-    #
-    # x = latent_input_layer
-    # s = style_input_layer
-    #
-    # # 4x residual blocks
-    # for _ in range(4):
-    #     x = adain_resblock(x, s, 256, 3, style_code_length)
-    #
-    # # 2x upsample blocks
-    # x = layers.UpSampling2D()(x)
-    # x = layers.Conv2D(128, kernel_size=5, strides=1, padding="same")(x)
-    # x = layers.UpSampling2D()(x)
-    # x = layers.Conv2D(64, kernel_size=5, strides=1, padding="same")(x)
-    #
-    # x = layers.Conv2D(4, kernel_size=7, strides=1, padding="same", activation="tanh")(x)
-    # output_layer = x
-    #
-    # return tf.keras.Model([latent_input_layer, style_input_layer], [output_layer], name="Generator")
     return munit_decoder(domain_letter, channels)
 
 
 def remic_discriminator(domain_letter, image_size, channels, scales):
-    # input_layer = layers.Input(shape=(64, 64, 4))
-    # x = layers.Conv2D(64, kernel_size=4, strides=2, padding="same")(input_layer)
-    # x = layers.LeakyReLU(0.2)(x)
-    # x = layers.Conv2D(128, kernel_size=4, strides=2, padding="same")(x)
-    # x = layers.LeakyReLU(0.2)(x)
-    # x = layers.Conv2D(256, kernel_size=4, strides=2, padding="same")(x)
-    # x = layers.LeakyReLU(0.2)(x)
-    # x = layers.Conv2D(512, kernel_size=4, strides=2, padding="same")(x)
-    # x = layers.LeakyReLU(0.2)(x)
     return munit_discriminator_multi_scale(domain_letter, image_size, channels, scales)
+
+
+def remic_r3gan_generator(domain_letter, channels):
+    pass
