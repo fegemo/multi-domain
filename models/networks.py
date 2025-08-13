@@ -489,7 +489,7 @@ def munit_style_encoder(domain_letter, image_size, channels):
     return tf.keras.Model(input_layer, style_code, name=f"StyleEncoder{domain_letter.upper()}")
 
 
-def munit_decoder(domain_letter, channels):
+def munit_decoder(domain_letter, channels, palette_quantization=False):
     """
     From the reference pytorch implementation:
     https://github.com/NVlabs/MUNIT/blob/master/networks.py#L223
@@ -504,6 +504,7 @@ def munit_decoder(domain_letter, channels):
     - conv   64->4  tanh reflect nonorm (7x7 kernel, 1 stride, 3 pad)
     :param domain_letter: initial representing the domain
     :param channels: number of channels of the input images
+    :param palette_quantization: whether to use palette quantization
     :return: model that decodes the image, outputing a 64x64x4 tensor
     """
     def mlp_munit():
@@ -577,12 +578,29 @@ def munit_decoder(domain_letter, channels):
                                  kernel_initializer="he_normal", kernel_regularizer=tf.keras.regularizers.l2(1e-4),
                                  activation="tanh")(x)
 
+    inputs = [input_style, input_content]
     outputs = dict({
         "output_image": output_image,
         "style_code": style_code,
         "content_code": content_code
     })
-    return tf.keras.Model(inputs=(input_style, input_content), outputs=outputs, name=f"Decoder{domain_letter.upper()}")
+
+    if not palette_quantization:
+        model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"Decoder{domain_letter.upper()}")
+    else:
+        # quantize to the palette
+        palette_input = layers.Input(shape=[None, channels], name="desired_palette")
+        palettes = palette_input
+        inputs += [palette_input]
+
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized_image")
+        quantized_output = quantization_layer((output_image, palettes))
+        outputs["output_image"] = quantized_output
+
+        model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"Decoder{domain_letter.upper()}_quantized")
+        model.quantization = quantization_layer
+
+    return model
 
 
 def munit_conv_block(input_tensor, filters, kernel_size=3, strides=2, use_norm=False):

@@ -6,7 +6,7 @@ import tensorflow as tf
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from utility import io_utils, keras_utils
+from utility import io_utils, keras_utils, palette_utils
 from utility.keras_utils import ZeroCenteredGradientPenalty, NoopGradientPenalty
 from .side2side_model import S2SModel
 from .networks import munit_content_encoder, munit_style_encoder, munit_decoder, munit_discriminator_multi_scale
@@ -19,6 +19,7 @@ class MunitModel(S2SModel):
         self.decoders = None
         self.style_encoders = None
         self.content_encoders = None
+        self.gen_supplier = keras_utils.NParamsSupplier(3 if config.palette_quantization else 2)
         super().__init__(config, export_additional_training_endpoint)
         self.lambda_reconstruction = config.lambda_l1
         self.lambda_latent_reconstruction = config.lambda_latent_reconstruction
@@ -39,15 +40,18 @@ class MunitModel(S2SModel):
         config = self.config
         image_size = config.image_size
         inner_channels = config.inner_channels
+        palette_quantization = config.palette_quantization
         domain_letters = [name[0].upper() for name in config.domains]
         if config.generator in ["munit", ""]:
             content_encoders = [munit_content_encoder(s, image_size, inner_channels) for s in domain_letters]
             style_encoders = [munit_style_encoder(s, image_size, inner_channels) for s in domain_letters]
-            decoders = [munit_decoder(s, inner_channels) for s in domain_letters]
+            decoders = [munit_decoder(s, inner_channels, palette_quantization) for s in domain_letters]
 
             input_layer = tf.keras.layers.Input(shape=(config.image_size, config.image_size, config.output_channels))
+            palette_input_layer = tf.keras.layers.Input(shape=(None, config.output_channels))
             x = input_layer
-            generators = [tf.keras.Model(x, decoders[i]([style_encoders[i](x), content_encoders[i](x)]))
+            generators = [tf.keras.Model(x, decoders[i](
+                self.gen_supplier(style_encoders[i](x), content_encoders[i](x), palette_input_layer)))
                           for i in range(config.number_of_domains)]
 
             self.content_encoders = content_encoders
@@ -200,6 +204,10 @@ class MunitModel(S2SModel):
                               for _ in range(number_of_domains)]
         # random_style_codes (list of d * shape=[b, 8])
 
+        # c. extract the palettes of the input images
+        palette = [palette_utils.batch_extract_palette_ragged(batch[i]) for i in range(number_of_domains)]
+        # palette (d x shape=[b, (n), c])
+
         with tf.GradientTape(persistent=True) as tape:
             # 1. encode the input images
             encoded_contents = [self.content_encoders[i](batch[i]) for i in range(number_of_domains)]
@@ -219,8 +227,11 @@ class MunitModel(S2SModel):
             # encoded_styles = tf.stack([encoded_styles_a, encoded_styles_b, encoded_styles_c, encoded_styles_d], axis=0)
 
             # 2. decode the encoded input images (within the same domain) to perfectly reconstruct them
-            decoded_images = [self.decoders[i]([encoded_styles[i], encoded_contents[i]])["output_image"]
-                              for i in range(number_of_domains)]
+            decoded_images = [
+                self.decoders[i](
+                    self.gen_supplier(encoded_styles[i], encoded_contents[i], palette[i])
+                )["output_image"]
+                for i in range(number_of_domains)]
             # decoded_images (list of d * shape=[b, s, s, c])
             # decoded_images_a = self.decoders[0]([encoded_styles_a, encoded_contents_a])[0]
             # decoded_images_b = self.decoders[1]([encoded_styles_b, encoded_contents_b])[0]
@@ -230,7 +241,8 @@ class MunitModel(S2SModel):
 
             # 3. decode the encoded input images (to a random target domain and using a different style code)
             translated_images = [self.decoders[i](
-                [random_style_codes[i], tf.gather(encoded_contents, random_source_domain[i])])["output_image"]
+                self.gen_supplier(random_style_codes[i], tf.gather(encoded_contents, random_source_domain[i]),
+                                  palette[i]))["output_image"]
                                  for i in range(number_of_domains)]
             # translated_images (list of d * shape=[b, s, s, c])
             # translated_images_a = self.decoders[0]([random_style_codes[0], tf.gather(encoded_contents, random_source_domain[0])])[0]
@@ -252,8 +264,9 @@ class MunitModel(S2SModel):
             # encoded_translated_styles (list of d * shape=[b, 8])
 
             # 5. decode once more (used only for winter<>summer and cityscapes<>synthia datasets in munit)
-            decoded_translated_images = [self.decoders[i]([encoded_styles[i],
-                                                           encoded_translated_contents[i]])["output_image"]
+            decoded_translated_images = [self.decoders[i](self.gen_supplier(encoded_styles[i],
+                                                                            encoded_translated_contents[i],
+                                                                            palette[i]))["output_image"]
                                          for i in range(number_of_domains)]
 
             # 6. discriminate the input images (real, then fake from cross-domain translation)
@@ -380,6 +393,7 @@ class MunitModel(S2SModel):
             random_target_style = examples[i][2]
             source_domain = examples[i][3]
             target_domain = examples[i][4]
+            palette = palette_utils.batch_extract_palette_ragged(source_image[tf.newaxis, ...])
             source_image_content = self.content_encoders[source_domain](source_image[tf.newaxis, ...])
             source_image_style = self.style_encoders[source_domain](source_image[tf.newaxis, ...])
             for j in range(num_cols):
@@ -391,21 +405,36 @@ class MunitModel(S2SModel):
                     image = source_image
                 elif j == 1:
                     # Reconstructed (VAE)
-                    image = self.decoders[source_domain]([source_image_style, source_image_content])["output_image"]
+                    output = self.decoders[source_domain](
+                        self.gen_supplier(source_image_style, source_image_content, palette)
+                    )
+                    image = output["output_image"]
                 elif j == 2:
                     # Random Style, same domain
-                    image = self.decoders[source_domain]([random_target_style, source_image_content])["output_image"]
+                    output = self.decoders[source_domain](
+                        self.gen_supplier(random_target_style, source_image_content, palette)
+                    )
+                    image = output["output_image"]
                 elif j == 3:
                     # Translated, different domain
-                    image = self.decoders[target_domain]([random_target_style, source_image_content])["output_image"]
+                    output = self.decoders[target_domain](
+                        self.gen_supplier(random_target_style, source_image_content, palette)
+                    )
+                    image = output["output_image"]
                 elif j == 4:
                     # Target
                     image = target_image
                 elif j == 5:
                     # Cyclic, same domain
-                    translated_image = self.decoders[target_domain]([random_target_style, source_image_content])["output_image"]
+                    output = self.decoders[target_domain](
+                        self.gen_supplier(random_target_style, source_image_content, palette)
+                    )
+                    translated_image = output["output_image"]
                     content = self.content_encoders[target_domain](translated_image)
-                    image = self.decoders[source_domain]([source_image_style, content])["output_image"]
+                    output = self.decoders[source_domain](
+                        self.gen_supplier(source_image_style, content, palette)
+                    )
+                    image = output["output_image"]
                 image = tf.squeeze(image)
                 plt.imshow((image + 1.) / 2.)
                 plt.axis("off")
@@ -449,13 +478,18 @@ class MunitModel(S2SModel):
                 source_images_slice = source_images[batch_start:batch_end]
                 source_domains_slice = source_domains[batch_start:batch_end]
                 target_domains_slice = target_domains[batch_start:batch_end]
+                palette_slice = palette_utils.batch_extract_palette_ragged(source_images_slice)
 
                 for i in range(batch_end - batch_start):
                     decoder = self.decoders[target_domains_slice[i]]
                     style_encoder = self.style_encoders[target_domains_slice[i]]
                     content_encoder = self.content_encoders[source_domains_slice[i]]
-                    fake_images_slice = decoder([style_encoder(tf.expand_dims(source_images_slice[i], 0)),
-                                                 content_encoder(tf.expand_dims(source_images_slice[i], 0))])["output_image"]
+                    output_slice = decoder(
+                        self.gen_supplier(style_encoder(tf.expand_dims(source_images_slice[i], 0)),
+                                          content_encoder(tf.expand_dims(source_images_slice[i], 0)),
+                                          tf.expand_dims(palette_slice[i], 0))
+                    )
+                    fake_images_slice = output_slice["output_image"]
                     fake_images[batch_start + i] = fake_images_slice
 
             logging.debug(
@@ -517,6 +551,7 @@ class MunitModel(S2SModel):
                 source_image = domain_images[source_domain]
                 source_content = self.content_encoders[source_domain](source_image[tf.newaxis, ...])
                 source_style = self.style_encoders[source_domain](source_image[tf.newaxis, ...])
+                palette = palette_utils.batch_extract_palette_ragged(source_image[tf.newaxis, ...])
 
                 images_same_style.append([])
                 images_rnd_style.append([])
@@ -528,8 +563,12 @@ class MunitModel(S2SModel):
                         continue
                     else:
                         random_style_code = tf.random.normal([1, 8], mean=0.0, stddev=1.0)
-                        translated_image = self.decoders[target_domain]([source_style, source_content])["output_image"]
-                        translated_image_rnd = self.decoders[target_domain]([random_style_code, source_content])["output_image"]
+                        translated_image = self.decoders[target_domain](
+                            self.gen_supplier(source_style, source_content, palette)
+                        )["output_image"]
+                        translated_image_rnd = self.decoders[target_domain](
+                            self.gen_supplier(random_style_code, source_content, palette)
+                        )["output_image"]
                         images_same_style[i].append(tf.squeeze(translated_image))
                         images_rnd_style[i].append(tf.squeeze(translated_image_rnd))
 
@@ -569,11 +608,14 @@ class MunitModel(S2SModel):
 
         real_images = tf.gather(domain_images, source_domains, batch_dims=1)
         # real_images (shape=[b, s, s, c])
+        palette = palette_utils.batch_extract_palette_ragged(real_images)
         fake_images = []
         for i in range(batch_size):
             content_code = self.content_encoders[source_domains[i]](real_images[i][tf.newaxis, ...])
             random_style_code = tf.random.normal([1, 8], mean=0.0, stddev=1.0)
-            fake_image = self.decoders[target_domains[i]]([random_style_code, content_code])["output_image"]
+            fake_image = self.decoders[target_domains[i]](
+                self.gen_supplier(random_style_code, content_code, palette[i][tf.newaxis, ...])
+            )["output_image"]
             fake_images.append(fake_image)
         fake_images = tf.concat(fake_images, axis=0)
         # fake_images (shape=[b, s, s, c])
