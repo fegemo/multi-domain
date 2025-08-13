@@ -783,37 +783,40 @@ class LSGANLoss(AdversarialLoss):
         self.loss = tf.keras.losses.MeanSquaredError()
 
     def calculate_generator_loss(self, fake_logits, real_logits=None):
+        new_fake_logits = [[[] for _ in range(self.discriminator_scales)] for _ in range(self.number_of_domains)]
         for d in range(self.number_of_domains):
             for ds in range(self.discriminator_scales):
-                fake_logits[d][ds] = self.loss(tf.ones_like(fake_logits[d][ds]), fake_logits[d][ds])
+                new_fake_logits[d][ds] = self.loss(tf.ones_like(fake_logits[d][ds]), fake_logits[d][ds])
                 # fake_logits (shape=[d] x [ds] x [b, x, x, c])
-                fake_logits[d][ds] = tf.reduce_mean(fake_logits[d][ds])
+                new_fake_logits[d][ds] = tf.reduce_mean(new_fake_logits[d][ds])
                 # fake_logits (shape=[d] x [ds])
-        fake_logits = tf.reduce_mean(fake_logits, axis=1)
+        new_fake_logits = tf.reduce_mean(new_fake_logits, axis=1)
         # fake_logits (shape=[d])
-        adversarial_loss = self.domain_reductor(fake_logits)
+        adversarial_loss = self.domain_reductor(new_fake_logits)
         # adversarial_loss (shape=[d] if domain_specific_discriminators else [])
 
         return adversarial_loss
 
     def calculate_discriminator_loss(self, fake_logits, real_logits):
         # shape=[d, ds] x [b, x, x, 1] => [d, ds] => [d]
+        new_real_logits = [[[] for _ in range(self.discriminator_scales)] for _ in range(self.number_of_domains)]
+        new_fake_logits = [[[] for _ in range(self.discriminator_scales)] for _ in range(self.number_of_domains)]
         for d in range(self.number_of_domains):
             for ds in range(self.discriminator_scales):
-                real_logits[d][ds] = self.loss(tf.ones_like(real_logits[d][ds]), real_logits[d][ds])
-                fake_logits[d][ds] = self.loss(tf.zeros_like(fake_logits[d][ds]), fake_logits[d][ds])
+                new_real_logits[d][ds] = self.loss(tf.ones_like(real_logits[d][ds]), real_logits[d][ds])
+                new_fake_logits[d][ds] = self.loss(tf.zeros_like(fake_logits[d][ds]), fake_logits[d][ds])
                 # xxxx_logits (shape=[d] x [ds] x [b, x, x, c])
-                real_logits[d][ds] = tf.reduce_mean(real_logits[d][ds])
-                fake_logits[d][ds] = tf.reduce_mean(fake_logits[d][ds])
+                new_real_logits[d][ds] = tf.reduce_mean(new_real_logits[d][ds])
+                new_fake_logits[d][ds] = tf.reduce_mean(new_fake_logits[d][ds])
                 # xxxx_logits (shape=[d] x [ds])
 
-        real_logits = tf.reduce_mean(real_logits, axis=1)
-        fake_logits = tf.reduce_mean(fake_logits, axis=1)
-        adversarial_loss = [real_logits[d] + fake_logits[d] for d in range(self.number_of_domains)]
+        new_real_logits = tf.reduce_mean(new_real_logits, axis=1)
+        new_fake_logits = tf.reduce_mean(new_fake_logits, axis=1)
+        adversarial_loss = [new_real_logits[d] + new_fake_logits[d] for d in range(self.number_of_domains)]
         # xxxx_logits (shape=[d])
 
-        real_loss = self.domain_reductor(real_logits)
-        fake_loss = self.domain_reductor(fake_logits)
+        real_loss = self.domain_reductor(new_real_logits)
+        fake_loss = self.domain_reductor(new_fake_logits)
         adversarial_loss = self.domain_reductor(adversarial_loss)
         # xxxx_logits (shape=[d] if domain_specific_discriminators else [])
 

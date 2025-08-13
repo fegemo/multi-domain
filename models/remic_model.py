@@ -217,7 +217,7 @@ class RemicModel(MunitModel):
                                       for i in range(number_of_domains)]
             predicted_patches_fake = [self.discriminators[i](decoded_images_with_random_style[i])
                                       for i in range(number_of_domains)]
-            # predicted_patches_xxxx (shape=[d, b, ds, ?, ?, 1]) where ds are the discriminator scales and
+            # predicted_patches_xxxx (shape=[d, ds, b, ?, ?, 1]) where ds are the discriminator scales and
             # ?, ? are the dimensions of the patches (different for each scale)
 
             r1_penalty = [self.gradient_penalty(self.discriminators[i], batch[i]) for i in range(number_of_domains)]
