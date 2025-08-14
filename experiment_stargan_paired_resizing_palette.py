@@ -44,7 +44,7 @@ if __name__ == "__main__":
             "temperature": 0.1,
             "lambda-palette": 1.0,
             "model-name": "@model",
-            "experiment": "@dataset, &adhoc, &resizing-factor",
+            "experiment": "@dataset,&adhoc,&resizing-factor",
             "vram": -1
         },
         {

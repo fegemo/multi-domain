@@ -30,7 +30,7 @@ if __name__ == "__main__":
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "model-name": "@model",
-            "experiment": "@dataset, &adhoc, &resizing-factor",
+            "experiment": "@dataset,&adhoc,&resizing-factor",
             "generator": "affluent",
             "lambda-adversarial": 10.,
             "lambda-l1": 100.,
