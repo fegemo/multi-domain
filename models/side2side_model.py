@@ -329,11 +329,14 @@ class S2SModel(ABC):
                                                                           "evaluate_l1" not in callbacks)
 
                 if "early_stop" in callbacks and S2SModel.should_evaluate(callbacks):
-                    # check for the chosen metric and stop if it is not improving
                     if self.training_metrics is not None:
-                        chosen_metric = "l1" if self.training_metrics is not None and "l1" in self.training_metrics else "fid"
-                        if chosen_metric in improved_metric and improved_metric[chosen_metric]:
+                        # if any metric improved, we reset the patience to the initial value...
+                        improved_metrics = list(map(lambda m: m[0], filter(lambda m: m[1], improved_metric.items())))
+                        if len(improved_metrics) > 0:
                             self.early_stop_patience = INITIAL_PATIENCE
+                            logging.debug(f"Patience reset to {INITIAL_PATIENCE} due to better: "
+                                          f"{', '.join(improved_metrics)}")
+                        # no metric improved, so we deduce the patience
                         else:
                             if self.early_stop_patience > 0:
                                 self.early_stop_patience -= 1
