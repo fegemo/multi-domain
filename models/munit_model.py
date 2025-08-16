@@ -7,7 +7,8 @@ from matplotlib import pyplot as plt
 from tqdm import tqdm
 
 from utility import io_utils, keras_utils, palette_utils
-from utility.keras_utils import ZeroCenteredGradientPenalty, NoopGradientPenalty
+from utility.keras_utils import ZeroCenteredGradientPenalty, NoopGradientPenalty, LinearAnnealingScheduler, \
+    NoopAnnealingScheduler
 from .side2side_model import S2SModel
 from .networks import munit_content_encoder, munit_style_encoder, munit_decoder, munit_discriminator_multi_scale
 
@@ -35,6 +36,10 @@ class MunitModel(S2SModel):
             self.gradient_penalty = ZeroCenteredGradientPenalty()
         else:
             self.gradient_penalty = NoopGradientPenalty()
+        if config.palette_quantization and config.annealing != "none":
+            self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, [d.quantization for d in self.decoders])
+        else:
+            self.annealing_scheduler = NoopAnnealingScheduler()
 
     def create_inference_networks(self):
         config = self.config
@@ -189,6 +194,8 @@ class MunitModel(S2SModel):
         :param t:
         :return:
         """
+        temperature = self.annealing_scheduler.update(t)
+
         # [d, b, s, s, c] = domain, batch, size, size, channels
         batch_shape = tf.shape(batch)
         number_of_domains, batch_size, image_size, channels = self.config.number_of_domains, batch_shape[1], \

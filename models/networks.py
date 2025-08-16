@@ -729,13 +729,163 @@ def remic_style_encoder(domain_letter, image_size, channels):
     return tf.keras.Model(inputs=input_layer, outputs=style_code, name=f"StyleEncoder{domain_letter.upper()}")
 
 
-def remic_generator(domain_letter, channels):
-    return munit_decoder(domain_letter, channels)
+def remic_generator(domain_letter, channels, palette_quantization=False):
+    return munit_decoder(domain_letter, channels, palette_quantization)
 
 
 def remic_discriminator(domain_letter, image_size, channels, scales):
     return munit_discriminator_multi_scale(domain_letter, image_size, channels, scales)
 
 
-def remic_r3gan_generator(domain_letter, channels):
-    pass
+def remic_r3gan_generator(domain_letter, config):
+    """
+    From the reference pytorch implementation:
+    https://github.com/NVlabs/MUNIT/blob/master/networks.py#L223
+    decoder:
+    - 4x resblocks:
+        - conv  256->256 relu reflect adainor (3x3 kernel, 1 stride, 1 pad)
+        - conv  256->256 none reflect adainor (3x3 kernel, 1 stride, 1 pad)
+    - upsa
+    - conv  256->128 relu reflect lnnorm (5x5 kernel, 1 stride, 2 pad)
+    - upsa
+    - conv  128->64 relu reflect lnnorm (5x5 kernel, 1 stride, 2 pad)
+    - conv   64->4  tanh reflect nonorm (7x7 kernel, 1 stride, 3 pad)
+    :param domain_letter: initial representing the domain
+    :param channels: number of channels of the input images
+    :param palette_quantization: whether to use palette quantization
+    :return: model that decodes the image, outputing a 64x64x4 tensor
+    """
+    domains = config.number_of_domains
+    image_size = config.image_size
+    channels = config.inner_channels
+    film_length = config.film
+    generator_scales = config.generator_scales
+    palette_quantization = config.palette_quantization
+    capacity = config.capacity
+
+    input_style = layers.Input(shape=(8,), name="input_style")
+    input_content = layers.Input(shape=(16, 16, 256), name="input_content")
+    style_code = input_style
+    content_code = input_content
+
+    style_embedding = layers.Dense(film_length)(input_style)
+
+    initializer = keras_utils.MSRInitializer(1.0)
+    variance_scaling = 4
+    x = input_content
+    x = keras_utils.FiLMLayer()([x, style_embedding])
+    x = keras_utils.UpsampleStage(768, 768, 16, variance_scaling, True)(x)
+    x = keras_utils.FiLMLayer()([x, style_embedding])
+    x = keras_utils.UpsampleStage(768, 768, 32, variance_scaling)(x)
+    x = keras_utils.FiLMLayer()([x, style_embedding])
+
+    output_image = layers.Conv2D(channels, 7, strides=1, padding="same",
+                                 kernel_initializer=initializer, kernel_regularizer=tf.keras.regularizers.l2(1e-4))(x)
+
+    inputs = [input_style, input_content]
+    outputs = dict({
+        "output_image": output_image,
+        "style_code": style_code,
+        "content_code": content_code
+    })
+
+    if not palette_quantization:
+        model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"R3GANDecoder{domain_letter.upper()}")
+    else:
+        # quantize to the palette
+        palette_input = layers.Input(shape=[None, channels], name="desired_palette")
+        palettes = palette_input
+        inputs += [palette_input]
+
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized_image")
+        quantized_output = quantization_layer((output_image, palettes))
+        outputs["output_image"] = quantized_output
+
+        model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"R3GANDecoder{domain_letter.upper()}_quantized")
+        model.quantization = quantization_layer
+
+    return model
+
+
+def sprite_r3gan_generator(config):
+    """
+    Creates a R3GAN generator model based on the provided configuration.
+    :param config: Configuration object containing model parameters.
+    :return: A Keras Model representing the R3GAN generator.
+    """
+    domains = config.number_of_domains
+    image_size = config.image_size
+    channels = config.inner_channels
+    noise_length = config.noise
+    film_length = config.film
+    generator_scales = config.generator_scales
+    quantize_to_palette = config.palette_quantization
+    capacity = config.capacity
+
+    # define the inputs
+    masked_images_input = layers.Input(shape=(domains, image_size, image_size, channels), name="source_images")
+    inpaint_mask_input = layers.Input(shape=(image_size, image_size, 1), name="inpaint_mask")
+    target_palette_input = layers.Input(shape=(None, channels), name="desired_palette")
+    domain_availability_input = layers.Input(shape=(domains,), name="domain_availability")
+    noise_input = layers.Input(shape=(noise_length,), name="noise")
+
+    # processes the domain availability and the noise to generate embeddings
+    # they are used to condition the generator
+    domain_availability_channelized = layers.CategoryEncoding(num_tokens=domains, output_mode="multi_hot")(
+        domain_availability_input)
+    domain_availability_channelized = keras_utils.TileLayer(image_size)(domain_availability_channelized)
+    domain_availability_channelized = keras_utils.TileLayer(image_size)(domain_availability_channelized)
+
+    domain_embedding = layers.Dense(film_length)(domain_availability_input)
+    noise_embedding = layers.Dense(film_length)(noise_input)
+
+    initializer = keras_utils.MSRInitializer(1.0)
+    masked_images = layers.Reshape((image_size, image_size, domains * channels))(masked_images_input)
+    encoder_input = layers.Concatenate(axis=-1)([masked_images, inpaint_mask_input, domain_availability_channelized])
+
+    variance_scaling = 10 + 1 + 10
+    initial_stage = keras_utils.DownsampleStage(channels * domains + 1 + domains, 384, image_size, variance_scaling)
+    x = initial_stage(encoder_input)
+    x = keras_utils.DownsampleStage(768, 768, image_size // 2, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(768, 768, image_size // 4, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(768, 768, image_size // 8, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(768, 768, image_size // 16, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(768, 768, image_size // 32, variance_scaling)(x)
+
+    bottleneck = keras_utils.R3GANResidualBlock(768, variance_scaling)(x)
+
+    x = keras_utils.UpsampleStage(768, 768, image_size // 64, variance_scaling)(bottleneck)
+    x = keras_utils.UpsampleStage(768, 768, image_size // 32, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(768, 768, image_size // 16, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(768, 768, image_size // 8, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(768, 768, image_size // 4, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(768, 384, image_size // 2, variance_scaling)(x)
+
+    pre_output = layers.Conv2D(domains * channels, kernel_size=1, padding="same", use_bias=False,
+                               kernel_initializer=initializer, name="pre-output")(x)
+    # pre_output = layers.Activation("tanh")(pre_output)
+
+    if quantize_to_palette:
+        # quantize to the palette
+        # change the dimensions so the domains come first, then height, width and channels
+        pre_output = layers.Reshape((domains, image_size, image_size, channels),
+                                    name=f"pre-quantization-{image_size}x{image_size}")(pre_output)
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized-images")
+        final_output = quantization_layer([pre_output, target_palette_input])
+        inputs = [masked_images_input, inpaint_mask_input, target_palette_input, domain_availability_input, noise_input]
+    else:
+        # change the dimensions so the domains come first, then height, width and channels
+        final_output = layers.Reshape((domains, image_size, image_size, channels),
+                                      name=f"output-images")(pre_output)
+        inputs = [masked_images_input, inpaint_mask_input, domain_availability_input, noise_input]
+
+    model = tf.keras.models.Model(
+        inputs=inputs,
+        outputs=final_output,
+        name=f"SpriteR3GANGenerator{'_Quantized' if quantize_to_palette else ''}"
+    )
+
+    if quantize_to_palette:
+        model.quantization = quantization_layer
+
+    return model
