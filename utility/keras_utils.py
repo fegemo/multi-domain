@@ -1106,3 +1106,7 @@ class DownsampleStage(layers.Layer):
             return input_shape[0], new_size, new_size, self.output_channels
 
 
+def check_nans(tensor, name):
+    # return tensor
+    return tf.debugging.check_numerics(tensor, f"NaN in {name}")
+

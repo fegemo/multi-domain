@@ -590,11 +590,10 @@ def munit_decoder(domain_letter, channels, palette_quantization=False):
     else:
         # quantize to the palette
         palette_input = layers.Input(shape=[None, channels], name="desired_palette")
-        palettes = palette_input
         inputs += [palette_input]
 
-        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized_image")
-        quantized_output = quantization_layer((output_image, palettes))
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name=f"quantized_image{domain_letter.upper()}")
+        quantized_output = quantization_layer((output_image, palette_input))
         outputs["output_image"] = quantized_output
 
         model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"Decoder{domain_letter.upper()}_quantized")

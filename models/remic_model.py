@@ -12,10 +12,6 @@ from .networks import remic_generator, remic_discriminator, remic_style_encoder,
     remic_r3gan_generator
 
 
-def check_nans(tensor, name):
-    return tf.debugging.check_numerics(tensor, f"NaN in {name}")
-
-
 class RemicModel(MunitModel):
     """
     Implements ReMIC model, which is a modification of MUNIT. The main difference is that the content encoder is shared.
@@ -33,6 +29,7 @@ class RemicModel(MunitModel):
         self.lambda_image_consistency = config.lambda_l1
         self.lambda_latent_consistency = config.lambda_latent_reconstruction
         self.lambda_image_reconstruction = config.lambda_cyclic_reconstruction
+        self.lambda_palette = config.lambda_palette
         if config.input_dropout == "none":
             self.sampler = NoDropoutSampler(config)
         elif config.input_dropout == "original":
@@ -44,7 +41,6 @@ class RemicModel(MunitModel):
         else:
             raise ValueError(f"The provided {config.input_dropout} type for input dropout has not been implemented.")
         self.l1_loss = lambda y_true, y_pred: tf.reduce_mean(tf.abs(y_true - y_pred))
-        # tf.debugging.enable_check_numerics()
 
     def create_inference_networks(self):
         config = self.config
@@ -83,6 +79,10 @@ class RemicModel(MunitModel):
             self.decoders = decoders
             self.generators = generators
 
+            if self.config.verbose:
+                tf.keras.utils.plot_model(generators[0], to_file="remic_generators[0].png", expand_nested=True,
+                                          show_layer_names=True, show_trainable=True, show_shapes=True)
+
             return {
                 "unified_content_encoder": unified_content_encoder,
                 "style_encoders": style_encoders,
@@ -110,10 +110,9 @@ class RemicModel(MunitModel):
     def generator_loss(self, predicted_patches_fake, predicted_patches_real,
                        decoded_images, source_images, input_keep_mask,
                        original_contents, recoded_contents, random_styles, recoded_styles,
-                       decoded_images_with_random_style):
+                       decoded_images_with_random_style, palettes, temperature):
         # predicted_patches_fake (shape=[d, ds, b, ?, ?, 1])
         number_of_domains = self.config.number_of_domains
-        discriminator_scales = self.config.discriminator_scales
 
         # loss from the discriminator
         adversarial_loss = self.adv_loss.calculate_generator_loss(predicted_patches_fake, predicted_patches_real)
@@ -138,8 +137,9 @@ class RemicModel(MunitModel):
                                      for d in range(number_of_domains)]
 
         # palette loss
-        # palette_loss = palette_utils.calculate_palette_coverage_loss_ragged(decoded_images, fw_target_palette,
-        #                                                                         temperature)
+        palette_loss = [palette_utils.calculate_palette_coverage_loss_ragged(decoded_images[:, d], palettes,
+                                                                             temperature)
+                        for d in range(number_of_domains)]
 
         # l2 regularization loss
         l2_regularization = [
@@ -153,12 +153,14 @@ class RemicModel(MunitModel):
                       self.lambda_latent_consistency * content_consistency_loss +
                       self.lambda_latent_consistency * style_consistency_loss[d] +
                       self.lambda_image_reconstruction * image_reconstruction_loss[d] +
+                      self.lambda_palette * palette_loss[d] +
                       l2_regularization[d]
                       for d in range(number_of_domains)]
         return {
             "adversarial": adversarial_loss, "image-consistency": image_consistency_loss,
             "style-consistency": style_consistency_loss, "content-consistency": content_consistency_loss,
             "image-reconstruction": image_reconstruction_loss,
+            "palette": palette_loss,
             "l2-regularization": l2_regularization,
             "total": total_loss
         }
@@ -166,7 +168,7 @@ class RemicModel(MunitModel):
     def discriminator_loss(self, predicted_patches_real, predicted_patches_fake, r1_penalty, r2_penalty):
         return super().discriminator_loss(predicted_patches_real, predicted_patches_fake, r1_penalty, r2_penalty)
 
-    # @tf.function
+    @tf.function
     def train_step(self, batch, step, evaluate_steps, t):
         """
         These steps were inferred from the ReMIC paper (there is no reference implementation):
@@ -211,39 +213,40 @@ class RemicModel(MunitModel):
         # random_style_codes (shape=[d, b, 8])
 
         # extract the palettes of the input images
-        palette = check_nans(palette_utils.batch_extract_palette_ragged(tf.transpose(batch, [1, 0, 2, 3, 4])), "palette")
-        # palette (d x shape=[b, (n), c])
+        palettes = palette_utils.batch_extract_palette_ragged(tf.transpose(batch, [1, 0, 2, 3, 4]))
+        # palettes (d x shape=[b, (n), c])
 
         with tf.GradientTape(persistent=True) as tape:
             # 1. encode the input images to get their content and style of the visible images
             encoded_contents = self.unified_content_encoder(visible_source_images)
             encoded_styles = [self.style_encoders[d](visible_source_images[:, d]) for d in range(number_of_domains)]
             # encoded_contents (shape=[b, 16, 16, 256])
-            # encoded_styles (shape=[d, b, 8])
+            # encoded_styles ([d] x shape=[b, 8])
 
             # 2. decode de encoded input images (using original content and style) to perfectly reconstruct them
             # this is for ReMIC's "image consistency loss"
-            decoded_images = [check_nans(self.decoders[d](
-                self.gen_supplier(encoded_styles[d], encoded_contents, palette)
-            )["output_image"], f"decoder{d}")
+            decoded_images = [self.decoders[d](
+                self.gen_supplier(encoded_styles[d], encoded_contents, palettes), training=True
+            )["output_image"]
                               for d in range(number_of_domains)]
-            # decoded_images (shape=[d, b, s, s, c])
+            # decoded_images ([d] x shape=[b, s, s, c])
 
             # 3. decode the encoded input images (with a random style) to generate fake images
             # this is for ReMIC's "latent consistency loss", "adversarial loss" and "reconstruction loss"
-            decoded_images_with_random_style = [check_nans(self.decoders[d](
-                self.gen_supplier(random_style_codes[d], encoded_contents, palette)
-            )["output_image"], f"decoder{d}")
+            decoded_images_with_random_style = [self.decoders[d](
+                self.gen_supplier(random_style_codes[d], encoded_contents, palettes), training=True
+            )["output_image"]
                                                 for d in range(number_of_domains)]
-            # decoded_images_with_random_style (shape=[d, b, s, s, c])
+            # decoded_images_with_random_style ([d] x shape=[b, s, s, c])
 
             # 4. encode the images generated with random style
             # this is for ReMIC's "latent consistency loss"
-            encoded_contents_with_random_style = check_nans(self.unified_content_encoder(
-                tf.transpose(decoded_images_with_random_style, [1, 0, 2, 3, 4])), "uce")
+            encoded_contents_with_random_style = self.unified_content_encoder(
+                tf.transpose(decoded_images_with_random_style, [1, 0, 2, 3, 4]))
             # encoded_contents_with_random_style (shape=[b, 16, 16, 256])
-            encoded_style_with_random_style = [check_nans(self.style_encoders[d](decoded_images_with_random_style[d]), f"style_encoder_{d}")
+            encoded_style_with_random_style = [self.style_encoders[d](decoded_images_with_random_style[d])
                                                for d in range(number_of_domains)]
+            # encoded_style_with_random_style ([d] x shape=[b, 8])
 
             # 5. discriminates the images generated with random style
             # this is for ReMIC's "adversarial loss"
@@ -254,8 +257,8 @@ class RemicModel(MunitModel):
             # predicted_patches_xxxx (shape=[d, ds, b, ?, ?, 1]) where ds are the discriminator scales and
             # ?, ? are the dimensions of the patches (different for each scale)
 
-            r1_penalty = [check_nans(self.gradient_penalty(self.discriminators[i], batch[i]), "r1_penalty") for i in range(number_of_domains)]
-            r2_penalty = [check_nans(self.gradient_penalty(self.discriminators[i], decoded_images_with_random_style[i]), "r2_penalty") for i in range(number_of_domains)
+            r1_penalty = [self.gradient_penalty(self.discriminators[i], batch[i]) for i in range(number_of_domains)]
+            r2_penalty = [self.gradient_penalty(self.discriminators[i], decoded_images_with_random_style[i])
                           for i in range(number_of_domains)]
 
             # calculates the loss functions
@@ -269,7 +272,8 @@ class RemicModel(MunitModel):
                 encoded_contents, encoded_contents_with_random_style,
                 random_style_codes, encoded_style_with_random_style,
                 # for image reconstruction loss
-                decoded_images_with_random_style)
+                decoded_images_with_random_style,
+                palettes, temperature)
 
         # since the update to keras 3.0 (due to tensorflow 2.18), the optimizer needs to be called with
         # only a single set of gradients and variables. Therefore, we need to concatenate the gradients and
@@ -313,13 +317,14 @@ class RemicModel(MunitModel):
         with tf.name_scope("generator"):
             with self.summary_writer.as_default():
                 adversarial_loss = image_consistency_loss = style_loss = 0
-                image_reconstruction_loss = weight_loss = total_loss = 0
+                image_reconstruction_loss = palette_loss = weight_loss = total_loss = 0
                 content_loss = g_loss["content-consistency"]
                 for i in range(number_of_domains):
                     adversarial_loss += g_loss["adversarial"][i]
                     image_consistency_loss += g_loss["image-consistency"][i]
                     style_loss += g_loss["style-consistency"][i]
                     image_reconstruction_loss += g_loss["image-reconstruction"][i]
+                    palette_loss += g_loss["palette"][i]
                     weight_loss += g_loss["l2-regularization"][i]
                     total_loss += g_loss["total"][i]
                 tf.summary.scalar("adversarial_loss", tf.reduce_mean(adversarial_loss), step=step // evaluate_steps)
@@ -329,6 +334,7 @@ class RemicModel(MunitModel):
                 tf.summary.scalar("content_loss", tf.reduce_mean(content_loss), step=step // evaluate_steps)
                 tf.summary.scalar("image_reconstruction_loss", tf.reduce_mean(image_reconstruction_loss),
                                   step=step // evaluate_steps)
+                tf.summary.scalar("palette_loss", tf.reduce_mean(palette_loss), step=step // evaluate_steps)
                 tf.summary.scalar("weight_loss", tf.reduce_mean(weight_loss), step=step // evaluate_steps)
                 tf.summary.scalar("total_loss", tf.reduce_mean(total_loss), step=step // evaluate_steps)
 
@@ -417,7 +423,7 @@ class RemicModel(MunitModel):
             # encoded_styles (d, 1, 8)
 
             decoded_images = [self.decoders[d](
-                self.gen_supplier(encoded_styles[d], encoded_contents, palette)
+                self.gen_supplier(encoded_styles[d], encoded_contents, palette), training=True
             )["output_image"]
                               for d in range(number_of_domains)]
 
@@ -428,7 +434,7 @@ class RemicModel(MunitModel):
                 plt.subplot(num_rows, num_cols, idx)
                 if i == 0:
                     plt.title(titles[j], fontdict={"fontsize": 24})
-                plt.imshow(contents[j] * 0.5 + 0.5)
+                plt.imshow(tf.clip_by_value(contents[j] * 0.5 + 0.5, 0., 1.))
                 plt.axis("off")
 
         figure.tight_layout()
@@ -545,7 +551,7 @@ class RemicModel(MunitModel):
 
                     plt.subplot(num_rows, num_cols, i * num_cols + j + 1)
                     plt.title(title, fontdict={"fontsize": 24})
-                    plt.imshow(generated_with_original_style[i][j] * 0.5 + 0.5)
+                    plt.imshow(tf.clip_by_value(generated_with_original_style[i][j] * 0.5 + 0.5, 0., 1.))
                     plt.axis("off")
 
                     # generates the image using a random style code
@@ -558,7 +564,7 @@ class RemicModel(MunitModel):
                     title = f"{domain_name} ({from_domains_abbr}, rnd)"
                     plt.subplot(num_rows, num_cols, i * num_cols + j + number_of_domains + 1)
                     plt.title(title, fontdict={"fontsize": 24})
-                    plt.imshow(generated_with_random_style[i][j] * 0.5 + 0.5)
+                    plt.imshow(tf.clip_by_value(generated_with_random_style[i][j] * 0.5 + 0.5, 0., 1.))
                     plt.axis("off")
 
             fig.tight_layout()
@@ -656,7 +662,7 @@ class RemicModel(MunitModel):
                 else:
                     raise ValueError(f"Invalid column index {j}")
                 plt.axis("off")
-                plt.imshow(image, **imshow_args)
+                plt.imshow(tf.clip_by_value(image, 0., 1.), **imshow_args)
 
         fig.tight_layout()
         plt.savefig(image_path, transparent=True)
