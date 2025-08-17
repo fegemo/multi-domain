@@ -142,7 +142,11 @@ class RemicModel(MunitModel):
         #                                                                         temperature)
 
         # l2 regularization loss
-        l2_regularization = [tf.reduce_sum(self.decoders[i].losses) for i in range(number_of_domains)]
+        l2_regularization = [
+            tf.reduce_sum(self.decoders[i].losses) +
+            tf.reduce_sum(self.style_encoders[i].losses) +
+            tf.reduce_sum(self.unified_content_encoder.losses) / 4
+            for i in range(number_of_domains)]
 
         total_loss = [adversarial_loss[d] +
                       self.lambda_image_consistency * image_consistency_loss[d] +
@@ -162,7 +166,7 @@ class RemicModel(MunitModel):
     def discriminator_loss(self, predicted_patches_real, predicted_patches_fake, r1_penalty, r2_penalty):
         return super().discriminator_loss(predicted_patches_real, predicted_patches_fake, r1_penalty, r2_penalty)
 
-    @tf.function
+    # @tf.function
     def train_step(self, batch, step, evaluate_steps, t):
         """
         These steps were inferred from the ReMIC paper (there is no reference implementation):
@@ -238,7 +242,7 @@ class RemicModel(MunitModel):
             encoded_contents_with_random_style = check_nans(self.unified_content_encoder(
                 tf.transpose(decoded_images_with_random_style, [1, 0, 2, 3, 4])), "uce")
             # encoded_contents_with_random_style (shape=[b, 16, 16, 256])
-            encoded_style_with_random_style = [self.style_encoders[d](decoded_images_with_random_style[d])
+            encoded_style_with_random_style = [check_nans(self.style_encoders[d](decoded_images_with_random_style[d]), f"style_encoder_{d}")
                                                for d in range(number_of_domains)]
 
             # 5. discriminates the images generated with random style
@@ -250,8 +254,8 @@ class RemicModel(MunitModel):
             # predicted_patches_xxxx (shape=[d, ds, b, ?, ?, 1]) where ds are the discriminator scales and
             # ?, ? are the dimensions of the patches (different for each scale)
 
-            r1_penalty = [self.gradient_penalty(self.discriminators[i], batch[i]) for i in range(number_of_domains)]
-            r2_penalty = [self.gradient_penalty(self.discriminators[i], decoded_images_with_random_style[i])
+            r1_penalty = [check_nans(self.gradient_penalty(self.discriminators[i], batch[i]), "r1_penalty") for i in range(number_of_domains)]
+            r2_penalty = [check_nans(self.gradient_penalty(self.discriminators[i], decoded_images_with_random_style[i]), "r2_penalty") for i in range(number_of_domains)
                           for i in range(number_of_domains)]
 
             # calculates the loss functions
