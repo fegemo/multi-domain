@@ -462,7 +462,7 @@ class RemicModel(MunitModel):
         })
 
     def generate_images_for_evaluation(self, example_indices_for_evaluation):
-        batch_size = self.config.batch
+        batch_size = self.config.batch * 2
 
         def generate_images_from_example_indices(example_indices):
             domain_images, keep_mask, possible_target_domain = example_indices
