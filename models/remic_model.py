@@ -26,12 +26,10 @@ class RemicModel(MunitModel):
         self.generators = None
         self.discriminators = None
         super().__init__(config, export_additional_training_endpoint)
-        self.lambda_adversarial = config.lambda_adversarial
         self.lambda_image_consistency = config.lambda_l1
         self.lambda_latent_consistency = config.lambda_latent_reconstruction
         self.lambda_image_reconstruction = config.lambda_cyclic_reconstruction
         self.lambda_palette = config.lambda_palette
-        self.lambda_regularization = config.lambda_regularization
         if config.input_dropout == "none":
             self.sampler = NoDropoutSampler(config)
         elif config.input_dropout == "original":

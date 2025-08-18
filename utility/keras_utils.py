@@ -1009,7 +1009,7 @@ class GenerativeBasis(layers.Layer):
         super().__init__()
         self.output_channels = output_channels
         self.basis = self.add_weight(shape=(4, 4, output_channels), initializer="random_normal", trainable=True)
-        self.linear = layers.Dense(output_channels, use_bias=False, kernel_initializer=keras_utils.MSRInitializer(1.0))
+        self.linear = layers.Dense(output_channels, use_bias=False, kernel_initializer=MSRInitializer(1.0))
 
     def call(self, x):
         return self.basis * tf.reshape(self.linear(x), (-1, 1, 1, self.output_channels))
@@ -1022,7 +1022,7 @@ class DiscriminativeBasis(layers.Layer):
             input_channels, kernel_size=4, strides=1, padding="valid", groups=input_channels, use_bias=False,
             kernel_initializer=MSRInitializer(1.0)
         )
-        self.linear = layers.Dense(output_dimension, use_bias=False, kernel_initializer=keras_utils.MSRInitializer(1.0))
+        self.linear = layers.Dense(output_dimension, use_bias=False, kernel_initializer=MSRInitializer(1.0))
         self.flatten = layers.Flatten()
 
     def call(self, x):

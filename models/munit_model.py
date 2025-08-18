@@ -22,9 +22,11 @@ class MunitModel(S2SModel):
         self.content_encoders = None
         self.gen_supplier = keras_utils.NParamsSupplier(3 if config.palette_quantization else 2)
         super().__init__(config, export_additional_training_endpoint)
+        self.lambda_adversarial = config.lambda_adversarial
         self.lambda_reconstruction = config.lambda_l1
         self.lambda_latent_reconstruction = config.lambda_latent_reconstruction
         self.lambda_cyclic_reconstruction = config.lambda_cyclic_reconstruction
+        self.lambda_regularization = config.lambda_regularization
         if config.adv == "lsgan":
             self.adv_loss = keras_utils.LSGANLoss(config.number_of_domains, config.discriminator_scales, True)
         elif config.adv == "r3gan":
@@ -122,12 +124,12 @@ class MunitModel(S2SModel):
         # l2 regularization
         l2_regularization = [tf.reduce_sum(self.decoders[i].losses) for i in range(number_of_domains)]
 
-        total_loss = [adversarial_loss[i] +
+        total_loss = [self.lambda_adversarial * adversarial_loss[i] +
                       self.lambda_reconstruction * same_domain_reconstruction[i] +
                       self.lambda_latent_reconstruction * style_reconstruction[i] +
                       self.lambda_latent_reconstruction * content_reconstruction[i] +
-                      self.lambda_cyclic_reconstruction * cross_domain_reconstruction[i]
-                      + l2_regularization[i]
+                      self.lambda_cyclic_reconstruction * cross_domain_reconstruction[i] +
+                      self.lambda_regularization * l2_regularization[i]
                       for i in range(number_of_domains)]
 
         return {"adversarial": adversarial_loss, "same-domain": same_domain_reconstruction,
@@ -148,10 +150,13 @@ class MunitModel(S2SModel):
         l2_regularization = [tf.reduce_sum(self.discriminators[i].losses) for i in range(number_of_domains)]
 
         # r1/r2 regularization
-        gp_loss = (r1_penalty + r2_penalty) * tf.constant(self.config.lambda_gp / 2.)
+        gp_loss = (r1_penalty + r2_penalty)  / 2.
         # gp_loss (shape=[d])
 
-        total_loss = [adversarial_loss[i] + l2_regularization[i] + gp_loss[i] for i in range(number_of_domains)]
+        total_loss = [adversarial_loss[i] +
+            self.lambda_regularization * l2_regularization[i] +
+            self.config.lambda_gp * gp_loss[i]
+            for i in range(number_of_domains)]
 
         return {
             "adversarial": adversarial_loss,
@@ -217,8 +222,8 @@ class MunitModel(S2SModel):
 
         with tf.GradientTape(persistent=True) as tape:
             # 1. encode the input images
-            encoded_contents = [self.content_encoders[i](batch[i]) for i in range(number_of_domains)]
-            encoded_styles = [self.style_encoders[i](batch[i]) for i in range(number_of_domains)]
+            encoded_contents = [self.content_encoders[i](batch[i], training=True) for i in range(number_of_domains)]
+            encoded_styles = [self.style_encoders[i](batch[i], training=True) for i in range(number_of_domains)]
             # encoded_contents (list of d * shape=[b, 16, 16, 256])
             # encoded_styles (list of d * shape=[b, 8])
             # encoded_contents_a = self.content_encoders[0](batch[0])
@@ -236,7 +241,7 @@ class MunitModel(S2SModel):
             # 2. decode the encoded input images (within the same domain) to perfectly reconstruct them
             decoded_images = [
                 self.decoders[i](
-                    self.gen_supplier(encoded_styles[i], encoded_contents[i], palette[i])
+                    self.gen_supplier(encoded_styles[i], encoded_contents[i], palette[i]), training=True
                 )["output_image"]
                 for i in range(number_of_domains)]
             # decoded_images (list of d * shape=[b, s, s, c])
@@ -249,7 +254,7 @@ class MunitModel(S2SModel):
             # 3. decode the encoded input images (to a random target domain and using a different style code)
             translated_images = [self.decoders[i](
                 self.gen_supplier(random_style_codes[i], tf.gather(encoded_contents, random_source_domain[i]),
-                                  palette[i]))["output_image"]
+                                  palette[i]), training=True)["output_image"]
                                  for i in range(number_of_domains)]
             # translated_images (list of d * shape=[b, s, s, c])
             # translated_images_a = self.decoders[0]([random_style_codes[0], tf.gather(encoded_contents, random_source_domain[0])])[0]
@@ -261,24 +266,24 @@ class MunitModel(S2SModel):
             # 4. encode again the cross-domain translated images
             # we need to rearrange the encoded_translated_contents, as they are the reconstruction of the content in the
             # random source domain. We do not need to rearrange the encoded_styles
-            encoded_translated_contents = [self.content_encoders[i](translated_images[i])
+            encoded_translated_contents = [self.content_encoders[i](translated_images[i], training=True)
                                            for i in range(number_of_domains)]
             encoded_translated_contents = tf.stack(encoded_translated_contents)
             encoded_translated_contents = tf.gather(encoded_translated_contents, random_source_domain)
             # encoded_translated_contents (shape=[d, b, 16, 16, 256])
-            encoded_translated_styles = [self.style_encoders[i](translated_images[i])
+            encoded_translated_styles = [self.style_encoders[i](translated_images[i], training=True)
                                          for i in range(number_of_domains)]
             # encoded_translated_styles (list of d * shape=[b, 8])
 
             # 5. decode once more (used only for winter<>summer and cityscapes<>synthia datasets in munit)
             decoded_translated_images = [self.decoders[i](self.gen_supplier(encoded_styles[i],
                                                                             encoded_translated_contents[i],
-                                                                            palette[i]))["output_image"]
+                                                                            palette[i]), training=True)["output_image"]
                                          for i in range(number_of_domains)]
 
             # 6. discriminate the input images (real, then fake from cross-domain translation)
-            predicted_patches_real = [self.discriminators[i](batch[i]) for i in range(number_of_domains)]
-            predicted_patches_fake = [self.discriminators[i](translated_images[i]) for i in range(number_of_domains)]
+            predicted_patches_real = [self.discriminators[i](batch[i], training=True) for i in range(number_of_domains)]
+            predicted_patches_fake = [self.discriminators[i](translated_images[i], training=True) for i in range(number_of_domains)]
 
             r1_penalty = self.gradient_penalty(self.discriminators, batch)
             r2_penalty = self.gradient_penalty(self.discriminators, translated_images)
@@ -621,7 +626,7 @@ class MunitModel(S2SModel):
             content_code = self.content_encoders[source_domains[i]](real_images[i][tf.newaxis, ...])
             random_style_code = tf.random.normal([1, 8], mean=0.0, stddev=1.0)
             fake_image = self.decoders[target_domains[i]](
-                self.gen_supplier(random_style_code, content_code, palette[i][tf.newaxis, ...])
+                self.gen_supplier(random_style_code, content_code, palette[i][tf.newaxis, ...]), training=True
             )["output_image"]
             fake_images.append(fake_image)
         fake_images = tf.concat(fake_images, axis=0)

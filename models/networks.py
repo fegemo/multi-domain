@@ -796,7 +796,7 @@ def remic_r3gan_generator(domain_letter, config):
         palettes = palette_input
         inputs += [palette_input]
 
-        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized_image")
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name=f"quantized_image{domain_letter.upper()}")
         quantized_output = quantization_layer((output_image, palettes))
         outputs["output_image"] = quantized_output
 
