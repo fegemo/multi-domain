@@ -26,10 +26,12 @@ class RemicModel(MunitModel):
         self.generators = None
         self.discriminators = None
         super().__init__(config, export_additional_training_endpoint)
+        self.lambda_adversarial = config.lambda_adversarial
         self.lambda_image_consistency = config.lambda_l1
         self.lambda_latent_consistency = config.lambda_latent_reconstruction
         self.lambda_image_reconstruction = config.lambda_cyclic_reconstruction
         self.lambda_palette = config.lambda_palette
+        self.lambda_regularization = config.lambda_regularization
         if config.input_dropout == "none":
             self.sampler = NoDropoutSampler(config)
         elif config.input_dropout == "original":
@@ -148,13 +150,13 @@ class RemicModel(MunitModel):
             tf.reduce_sum(self.unified_content_encoder.losses) / 4
             for i in range(number_of_domains)]
 
-        total_loss = [adversarial_loss[d] +
+        total_loss = [self.lambda_adversarial * adversarial_loss[d] +
                       self.lambda_image_consistency * image_consistency_loss[d] +
                       self.lambda_latent_consistency * content_consistency_loss +
                       self.lambda_latent_consistency * style_consistency_loss[d] +
                       self.lambda_image_reconstruction * image_reconstruction_loss[d] +
                       self.lambda_palette * palette_loss[d] +
-                      l2_regularization[d]
+                      self.lambda_regularization * l2_regularization[d]
                       for d in range(number_of_domains)]
         return {
             "adversarial": adversarial_loss, "image-consistency": image_consistency_loss,
