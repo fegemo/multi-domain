@@ -11,8 +11,6 @@ from utility import io_utils, frechet_inception_distance as fid
 from utility.functional_utils import listify
 from utility.keras_utils import ConstantThenLinearDecay, count_network_parameters
 
-INITIAL_PATIENCE = 30
-
 
 def show_eta(training_start_time, step_start_time, current_step, training_starting_step, total_steps,
              update_steps):
@@ -57,11 +55,11 @@ class S2SModel(ABC):
         self.checkpoint_manager = None
         self.summary_writer = None
         self.training_metrics = None
-        self.early_stop_patience = INITIAL_PATIENCE
 
         self.config = config
         self.model_name = config.model_name
         self.experiment = config.experiment
+        self.early_stop_patience = config.patience
         self.checkpoint_dir = self.get_output_folder("training-checkpoints")
         self.layout_summary = S2SModel.create_layout_summary()
 
@@ -333,8 +331,8 @@ class S2SModel(ABC):
                         # if any metric improved, we reset the patience to the initial value...
                         improved_metrics = list(map(lambda m: m[0], filter(lambda m: m[1], improved_metric.items())))
                         if len(improved_metrics) > 0:
-                            self.early_stop_patience = INITIAL_PATIENCE
-                            logging.debug(f"Patience reset to {INITIAL_PATIENCE} due to better: "
+                            self.early_stop_patience = self.config.patience
+                            logging.debug(f"Patience reset to {self.config.patience} due to better: "
                                           f"{', '.join(improved_metrics)}")
                         # no metric improved, so we deduce the patience
                         else:

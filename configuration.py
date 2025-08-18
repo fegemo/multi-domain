@@ -150,6 +150,8 @@ class OptionParser(metaclass=SingletonMeta):
                                                                     "to wait until an evaluation is done", default=1000)
         self.parser.add_argument("--pretrain-epochs", type=int, help="number of epochs pretraining (used by collagan)",
                                  default=PRETRAIN_EPOCHS)
+        self.parser.add_argument("--patience", help="How many evaluations to wait before early stopping",
+                                 type=int, default=10)
         self.parser.add_argument("--no-aug", action="store_true", help="Disables all augmentation", default=False)
         self.parser.add_argument("--no-hue", action="store_true", help="Disables hue augmentation", default=False)
         self.parser.add_argument("--no-tran", action="store_true", help="Disables translation augmentation",
