@@ -147,7 +147,7 @@ class RemicModel(MunitModel):
         l2_regularization = [
             tf.reduce_sum(self.decoders[i].losses) +
             tf.reduce_sum(self.style_encoders[i].losses) +
-            tf.reduce_sum(self.unified_content_encoder.losses) / 4
+            tf.reduce_sum(self.unified_content_encoder.losses) / number_of_domains
             for i in range(number_of_domains)]
 
         total_loss = [self.lambda_adversarial * adversarial_loss[d] +
@@ -220,8 +220,9 @@ class RemicModel(MunitModel):
 
         with tf.GradientTape(persistent=True) as tape:
             # 1. encode the input images to get their content and style of the visible images
-            encoded_contents = self.unified_content_encoder(visible_source_images)
-            encoded_styles = [self.style_encoders[d](visible_source_images[:, d]) for d in range(number_of_domains)]
+            encoded_contents = self.unified_content_encoder(visible_source_images, training=True)
+            encoded_styles = [self.style_encoders[d](visible_source_images[:, d], training=True)
+                              for d in range(number_of_domains)]
             # encoded_contents (shape=[b, 16, 16, 256])
             # encoded_styles ([d] x shape=[b, 8])
 
@@ -244,17 +245,17 @@ class RemicModel(MunitModel):
             # 4. encode the images generated with random style
             # this is for ReMIC's "latent consistency loss"
             encoded_contents_with_random_style = self.unified_content_encoder(
-                tf.transpose(decoded_images_with_random_style, [1, 0, 2, 3, 4]))
+                tf.transpose(decoded_images_with_random_style, [1, 0, 2, 3, 4]), training=True)
             # encoded_contents_with_random_style (shape=[b, 16, 16, 256])
-            encoded_style_with_random_style = [self.style_encoders[d](decoded_images_with_random_style[d])
+            encoded_style_with_random_style = [self.style_encoders[d](decoded_images_with_random_style[d], training=True)
                                                for d in range(number_of_domains)]
             # encoded_style_with_random_style ([d] x shape=[b, 8])
 
             # 5. discriminates the images generated with random style
             # this is for ReMIC's "adversarial loss"
-            predicted_patches_real = [self.discriminators[i](visible_source_images[:, i])
+            predicted_patches_real = [self.discriminators[i](visible_source_images[:, i], training=True)
                                       for i in range(number_of_domains)]
-            predicted_patches_fake = [self.discriminators[i](decoded_images_with_random_style[i])
+            predicted_patches_fake = [self.discriminators[i](decoded_images_with_random_style[i], training=True)
                                       for i in range(number_of_domains)]
             # predicted_patches_xxxx (shape=[d, ds, b, ?, ?, 1]) where ds are the discriminator scales and
             # ?, ? are the dimensions of the patches (different for each scale)
@@ -425,7 +426,7 @@ class RemicModel(MunitModel):
             # encoded_styles (d, 1, 8)
 
             decoded_images = [self.decoders[d](
-                self.gen_supplier(encoded_styles[d], encoded_contents, palette), training=True
+                self.gen_supplier(encoded_styles[d], encoded_contents, palette)
             )["output_image"]
                               for d in range(number_of_domains)]
 
@@ -592,21 +593,21 @@ class RemicModel(MunitModel):
             visible_source_images = batch[i] * keep_mask
             # visible_source_images (d, s, s, c)
 
-            content_code = self.unified_content_encoder(visible_source_images[tf.newaxis, ...])
+            content_code = self.unified_content_encoder(visible_source_images[tf.newaxis, ...], training=True)
             random_style_code = tf.random.normal([1, 8])
             fake_image = self.decoders[target_domains[i]](
                 self.gen_supplier(
                     random_style_code,
                     content_code,
-                    palette[i][tf.newaxis, ...])
+                    palette[i][tf.newaxis, ...]), training=True
             )["output_image"]
             fake_images.append(fake_image)
         fake_images = tf.concat(fake_images, axis=0)
 
         # gets the result of discriminating the real and fake (translated) images
-        real_patches = [self.discriminators[target_domains[i]](real_images[i][tf.newaxis, ...])
+        real_patches = [self.discriminators[target_domains[i]](real_images[i][tf.newaxis, ...], training=True)
                         for i in range(batch_size)]
-        fake_patches = [self.discriminators[target_domains[i]](fake_images[i][tf.newaxis, ...])
+        fake_patches = [self.discriminators[target_domains[i]](fake_images[i][tf.newaxis, ...], training=True)
                         for i in range(batch_size)]
         # if discriminator_scales == 1:
         #     real_patches = [[real_patches[i]] for i in range(batch_size)]
