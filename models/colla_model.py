@@ -50,11 +50,6 @@ class CollaGANModel(S2SModel):
         self.generator = self.inference_networks["generator"]
         self.discriminator = self.training_only_networks["discriminator"]
 
-        if config.palette_quantization and config.annealing != "none":
-            self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, [self.generator.quantization])
-        else:
-            self.annealing_scheduler = NoopAnnealingScheduler()
-
     def create_inference_networks(self):
         config = self.config
         if config.generator in ["colla", "affluent", ""]:
@@ -85,6 +80,9 @@ class CollaGANModel(S2SModel):
             }
         else:
             raise ValueError(f"The provided {config.discriminator} type for discriminator has not been implemented.")
+
+    def get_annealing_layers(self):
+        return [self.generator.quantization]
 
     def generator_loss(self, fake_predicted_patches, cycled_predicted_patches, fake_image, real_image,
                        cycled_images, source_images_5d,

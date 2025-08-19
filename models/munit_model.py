@@ -34,14 +34,10 @@ class MunitModel(S2SModel):
         else:
             raise ValueError(
                 f"The provided {config.adv} type of adversarial loss has not been implemented for {type(self)}")
-        if config.lambda_gp > 0:
+        if config.adv == "r3gan" and config.lambda_gp > 0:
             self.gradient_penalty = ZeroCenteredGradientPenalty()
         else:
             self.gradient_penalty = NoopGradientPenalty()
-        if config.palette_quantization and config.annealing != "none":
-            self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, [d.quantization for d in self.decoders])
-        else:
-            self.annealing_scheduler = NoopAnnealingScheduler()
 
     def create_inference_networks(self):
         config = self.config
@@ -93,6 +89,9 @@ class MunitModel(S2SModel):
             }
         else:
             raise ValueError(f"The provided {config.discriminator} type of discriminator has not been implemented")
+
+    def get_annealing_layers(self):
+        return [d.quantization for d in self.decoders]
 
     def generator_loss(self, predicted_patches_fake, predicted_patches_real, reconstructed_images,
                        original_images, recoded_style, original_random_style, recoded_content, original_content,

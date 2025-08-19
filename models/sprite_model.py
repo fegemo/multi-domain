@@ -8,7 +8,7 @@ from utility import keras_utils, palette_utils, io_utils
 from utility.functional_utils import listify
 from utility.keras_utils import LinearAnnealingScheduler, NoopAnnealingScheduler, create_random_inpaint_mask, \
     NoopInpaintMaskGenerator, ConstantInpaintMaskGenerator, RandomInpaintMaskGenerator, CurriculumInpaintMaskGenerator
-from .networks import resblock, munit_discriminator_multi_scale
+from .networks import resblock, munit_discriminator_multi_scale, sprite_r3gan_generator
 from .remic_model import RemicModel
 
 
@@ -29,11 +29,6 @@ class SpriteEditorModel(RemicModel):
 
         # the third param is the target palette, so we skip it if we're not using palette quantization
         self.gen_supplier = keras_utils.SkipParamsSupplier([2] if not config.palette_quantization else None)
-
-        if config.palette_quantization and config.annealing != "none":
-            self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, [self.generator.quantization])
-        else:
-            self.annealing_scheduler = NoopAnnealingScheduler()
 
         if config.inpaint_mask == "none":
             self.mask_creator = NoopInpaintMaskGenerator()
@@ -61,7 +56,7 @@ class SpriteEditorModel(RemicModel):
                 "diversity-encoder": diversity_encoder
             }
         elif config.generator in ["r3gan"]:
-            generator = build_r3gan_generator(config)
+            generator = sprite_r3gan_generator(config)
             diversity_encoder = build_diversity_encoder(config)
 
             # call the generator with fake data so it is built (necessary for model.summary as it uses lots of
@@ -96,6 +91,9 @@ class SpriteEditorModel(RemicModel):
             }
         else:
             raise ValueError(f"The provided {config.discriminator} type of discriminator has not been implemented")
+
+    def get_annealing_layers(self):
+        return [self.generator.quantization]
 
     def encode(self, images, domain_availability, training=True):
         """

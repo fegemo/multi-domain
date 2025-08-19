@@ -9,7 +9,8 @@ import time
 from configuration import OptionParser
 from utility import io_utils, frechet_inception_distance as fid
 from utility.functional_utils import listify
-from utility.keras_utils import ConstantThenLinearDecay, count_network_parameters
+from utility.keras_utils import ConstantThenLinearDecay, count_network_parameters, NoopAnnealingScheduler, \
+    LinearAnnealingScheduler, CosineAnnealingScheduler
 
 
 def show_eta(training_start_time, step_start_time, current_step, training_starting_step, total_steps,
@@ -90,6 +91,18 @@ class S2SModel(ABC):
             for group in inference_parameters.keys():
                 logging.debug(f"\t{group}: {inference_parameters[group]:,} parameters")
 
+        # if config.palette_quantization, initialize the proper annealing scheduler
+        if config.palette_quantization:
+            if config.annealing == "linear":
+                self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, self.get_annealing_layers())
+            elif config.annealing == "cosine":
+                # cycles: at least 4 cycles, but can be 60 cycles if steps == 240000
+                cycles = max(4, config.steps // 4000)
+                self.annealing_scheduler = CosineAnnealingScheduler(config.temperature, cycles,
+                                                                    self.get_annealing_layers())
+            else:
+                self.annealing_scheduler = NoopAnnealingScheduler()
+
         # initializes training checkpoint information
         io_utils.ensure_folder_structure(self.checkpoint_dir)
         self.best_generator_checkpoint = tf.train.Checkpoint(**self.inference_networks)
@@ -113,6 +126,17 @@ class S2SModel(ABC):
 
         Returns:
             A dictionary containing the inference networks.
+        """
+        pass
+
+    @abstractmethod
+    def get_annealing_layers(self):
+        """
+        Returns the layers that will be used for palette quantization annealing.
+
+        Returns:
+            A list of layers that will be used for palette quantization annealing. They should have
+            a `temperature` attribute
         """
         pass
 
@@ -352,6 +376,12 @@ class S2SModel(ABC):
             # actually TRAIN
             t = tf.cast(step / steps, tf.float32)
             self.train_step(batch, step, evaluate_steps, t)
+
+            # log temperature if palette quantization is used
+            if self.config.palette_quantization:
+                with self.summary_writer.as_default():
+                    tf.summary.scalar(f"generator/temperature", self.get_annealing_layers()[0].temperature,
+                                      step=step)
 
             # dot feedback for every 10 training steps
             if (step + 1) % 10 == 0 and step - starting_step < steps - 1:
