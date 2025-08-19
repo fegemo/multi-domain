@@ -390,56 +390,100 @@ class RemicModel(MunitModel):
 
     def preview_generated_images_during_training(self, examples, save_name, step):
         number_of_domains = self.config.number_of_domains
-        image_size = self.config.image_size
-        channels = self.config.inner_channels
         domains = self.config.domains_capitalized
-        titles = domains + [f"Gener. {d}" for d in domains]
+        titles = (["Source Images"] +
+                  [f"Gener. {d}" for d in domains] +
+                  [f"Gener. {d} (t=0)" for d in domains] +
+                  ["Rnd. Style (t=0)"])
         num_rows = len(examples)
         num_cols = len(titles)
 
-        if step is not None:
-            if step == 1:
-                step = 0
-            for d in range(1, number_of_domains + 1):
-                titles[-1 * d] += f" ({step / 1000}k)"
+        # unpacks the list of tuples into two lists:
+        source_images, keep_masks = map(list, zip(*examples))
+        source_images = tf.stack(source_images, axis=0)
+        keep_masks = tf.stack(keep_masks, axis=0)
+        # source_images (shape=[b, d, s, s, c])
+        # keep_masks (shape=[b, d])
+        visible_source_images = source_images * keep_masks[..., tf.newaxis, tf.newaxis, tf.newaxis]
+        # visible_source_images (shape=[b, d, s, s, c])
+        palettes = palette_utils.batch_extract_palette(source_images)
+        # palettes (shape=[b, max_n, c])
 
-        figure = plt.figure(figsize=(4 * num_cols, 4 * num_rows))
-        for i, example in enumerate(examples):
-            source_images, keep_mask = example
-            # source_images (d, s, s, c)
-            # keep_mask (d)
+        encoded_contents = self.unified_content_encoder(visible_source_images, training=False)
+        encoded_styles = [self.style_encoders[d](visible_source_images[:, d], training=False)
+                            for d in range(number_of_domains)]
+        # encoded_contents (shape=[b, 16, 16, 256])
+        # encoded_styles ([d] x shape=[b, 8])
 
-            keep_mask = keep_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
-            # keep_mask (d, 1, 1, 1)
+        decoded_images_t_curr = [self.decoders[d](
+            self.gen_supplier(encoded_styles[d], encoded_contents, palettes), training=True)["output_image"]
+            for d in range(number_of_domains)]
+        decoded_images_t_0 = [self.decoders[d](
+            self.gen_supplier(encoded_styles[d], encoded_contents, palettes), training=False)["output_image"]
+            for d in range(number_of_domains)]
+        decoded_images_with_random_style = [self.decoders[d](
+            self.gen_supplier(tf.random.normal([num_rows, 8]), encoded_contents, palettes), training=False)["output_image"]
+            for d in range(number_of_domains)]
+        # decoded_images_xxxxxxxxxxxxx ([d] x shape=[b, s, s, c])
+        decoded_images_t_curr = tf.transpose(decoded_images_t_curr, [1, 0, 2, 3, 4])
+        decoded_images_t_0 = tf.transpose(decoded_images_t_0, [1, 0, 2, 3, 4])
+        decoded_images_with_random_style = tf.transpose(decoded_images_with_random_style, [1, 0, 2, 3, 4])
+        # decoded_images_xxxxxxxxxxxxx (shape=[b, d, s, s, c])
 
-            visible_source_images = source_images * keep_mask
-            # visible_source_images (d, s, s, c)
+        figure = plt.figure(figsize=(4 * num_cols, 4 * num_rows+2), layout="constrained")
+        sub_figs = figure.subfigures(num_rows, num_cols)
+        for i in range(num_rows):
+            # columns:
+            # - j==0, source images in 2x2 subgrid
+            # - 1 < j < 5, generated images with current temperature, original style
+            # - 5 < j < 9, generated images with temperature=0, original style
+            # - j==10, generated images t=0 with random style in a 2x2 subgrid
+            #
+            # col: [0]: source images in 2x2 subgrid
+            sub_fig = sub_figs[i, 0]
+            if i == 0:
+                sub_fig.suptitle(titles[0], fontsize=18)
+            # 2x2 subplots, content (shape=[d, s, s, c])
+            axes = sub_fig.subplots(2, 2)
+            for i_d in range(2):
+                for j_d in range(2):
+                    ax = axes[i_d, j_d]
+                    ax.imshow(tf.clip_by_value(visible_source_images[i, i_d * 2 + j_d] * 0.5 + 0.5, 0., 1.))
+                    ax.axis("off")
 
-            palette = palette_utils.batch_extract_palette_ragged(tf.stack(source_images)[tf.newaxis, ...])
-            # palette (1, (n), c)
-
-            encoded_contents = self.unified_content_encoder(visible_source_images[tf.newaxis, ...])
-            encoded_styles = [self.style_encoders[d](visible_source_images[d][tf.newaxis, ...])
-                              for d in range(number_of_domains)]
-            # encoded_contents (1, 16, 16, 256)
-            # encoded_styles (d, 1, 8)
-
-            decoded_images = [self.decoders[d](
-                self.gen_supplier(encoded_styles[d], encoded_contents, palette)
-            )["output_image"]
-                              for d in range(number_of_domains)]
-
-            contents = [*tf.squeeze(visible_source_images), *tf.squeeze(decoded_images)]
-
-            for j in range(num_cols):
-                idx = i * num_cols + j + 1
-                plt.subplot(num_rows, num_cols, idx)
+            # cols: [1, 4]: generated images with current temperature, original style
+            for j in range(1, number_of_domains + 1):
+                sub_fig = sub_figs[i, j]
                 if i == 0:
-                    plt.title(titles[j], fontdict={"fontsize": 24})
-                plt.imshow(tf.clip_by_value(contents[j] * 0.5 + 0.5, 0., 1.))
-                plt.axis("off")
+                    sub_fig.suptitle(titles[j], fontsize=18)
+                ax = sub_fig.subplots(1, 1)
+                ax.imshow(tf.clip_by_value(decoded_images_t_curr[i, j - 1] * 0.5 + 0.5, 0., 1.))
+                ax.axis("off")
 
-        figure.tight_layout()
+            # cols: [5, 8]: generated images with temperature=0, original style
+            for j in range(number_of_domains + 1, number_of_domains * 2 + 1):
+                sub_fig = sub_figs[i, j]
+                if i == 0:
+                    sub_fig.suptitle(titles[j], fontsize=18)
+                ax = sub_fig.subplots(1, 1)
+                ax.imshow(tf.clip_by_value(decoded_images_t_0[i, j - number_of_domains - 1] * 0.5 + 0.5, 0., 1.))
+                ax.axis("off")
+
+            # cols: [9]: generated images t=0 with random style in a 2x2 subgrid
+            sub_fig = sub_figs[i, num_cols - 1]
+            if i == 0:
+                sub_fig.suptitle(titles[-1], fontsize=18)
+            # 2x2 subplots, content (shape=[d, s, s, c])
+            axes = sub_fig.subplots(2, 2)
+            for i_d in range(2):
+                for j_d in range(2):
+                    ax = axes[i_d, j_d]
+                    ax.imshow(tf.clip_by_value(
+                        decoded_images_with_random_style[i, i_d * 2 + j_d] * 0.5 + 0.5, 0., 1.))
+                    ax.axis("off")
+
+
+        # figure.tight_layout()
         if save_name is not None:
             plt.savefig(save_name, transparent=True)
 

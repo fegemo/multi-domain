@@ -4,8 +4,14 @@ from tensorflow import RaggedTensorSpec
 from . import dataset_utils
 
 
+possible_colors = [
+    tf.constant([0], dtype=tf.uint8),
+    tf.constant([0, 0], dtype=tf.uint8),
+    tf.constant([0, 0, 0], dtype=tf.uint8),
+    tf.constant([0, 0, 0, 0], dtype=tf.uint8)
+]
 def get_invalid_color(channels):
-    return tf.constant([32768] * channels)
+    return possible_colors[channels-1]
 
 
 def extract_palette(image):
