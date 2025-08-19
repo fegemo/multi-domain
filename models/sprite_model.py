@@ -939,7 +939,8 @@ def build_monolith_generator(config):
     noise_length = config.noise
     film_length = config.film
     generator_scales = config.generator_scales
-    quantize_to_palette = config.palette_quantization
+    palette_quantization = config.palette_quantization
+    initial_temperature = config.temperature
     capacity = config.capacity
 
     # define the inputs
@@ -1012,12 +1013,13 @@ def build_monolith_generator(config):
     pre_output = layers.Conv2D(domains * channels, kernel_size=4, padding="same", kernel_initializer=init)(x)
     pre_output = layers.Activation("tanh")(pre_output)
 
-    if quantize_to_palette:
+    if palette_quantization:
         # quantize to the palette
         # change the dimensions so the domains come first, then height, width and channels
         pre_output = layers.Reshape((domains, image_size, image_size, channels),
                                     name=f"pre-quantization-{image_size}x{image_size}")(pre_output)
-        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized-images")
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(
+            initial_temperature, name="quantized-images")
         final_output = quantization_layer([pre_output, target_palette_input])
         inputs = [masked_images_input, inpaint_mask_input, target_palette_input, domain_availability_input, noise_input]
     else:
@@ -1032,10 +1034,10 @@ def build_monolith_generator(config):
     model = models.Model(
         inputs=inputs,
         outputs=outputs,
-        name=f"SpriteMonolithGenerator{'_Quantized' if quantize_to_palette else ''}"
+        name=f"SpriteMonolithGenerator{'_Quantized' if palette_quantization else ''}"
     )
 
-    if quantize_to_palette:
+    if palette_quantization:
         model.quantization = quantization_layer
 
     return model

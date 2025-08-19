@@ -62,14 +62,16 @@ class CollaGANModel(S2SModel):
                 "generator": collagan_affluent_generator(config.number_of_domains, config.image_size,
                                                          config.output_channels,
                                                          config.capacity,
-                                                         config.palette_quantization)
+                                                         config.palette_quantization,
+                                                         config.temperature)
             }
         elif config.generator in ["palette-transformer"]:
             return {
                 "generator": collagan_palette_conditioned_with_transformer_generator(
                     config.number_of_domains, config.image_size,
                     config.output_channels,
-                    config.capacity)
+                    config.capacity,
+                    config.temperature)
             }
         else:
             raise ValueError(f"The provided {config.generator} type for generator has not been implemented.")

@@ -47,6 +47,7 @@ class RemicModel(MunitModel):
         image_size = config.image_size
         inner_channels = config.inner_channels
         palette_quantization = config.palette_quantization
+        temperature = config.temperature
         number_of_domains = config.number_of_domains
         domain_letters = [name[0].upper() for name in config.domains]
         if config.generator in ["", "remic", "r3gan"]:
@@ -54,7 +55,7 @@ class RemicModel(MunitModel):
                                                                     number_of_domains)
             style_encoders = [remic_style_encoder(s, image_size, inner_channels) for s in domain_letters]
             if config.generator in ["", "remic"]:
-                decoders = [remic_generator(s, inner_channels, palette_quantization) for s in domain_letters]
+                decoders = [remic_generator(s, inner_channels, palette_quantization, temperature) for s in domain_letters]
             elif config.generator == "r3gan":
                 decoders = [remic_r3gan_generator(s, config) for s in domain_letters]
             else:
@@ -251,16 +252,16 @@ class RemicModel(MunitModel):
 
             # 5. discriminates the images generated with random style
             # this is for ReMIC's "adversarial loss"
-            predicted_patches_real = [self.discriminators[i](visible_source_images[:, i], training=True)
-                                      for i in range(number_of_domains)]
-            predicted_patches_fake = [self.discriminators[i](decoded_images_with_random_style[i], training=True)
-                                      for i in range(number_of_domains)]
+            predicted_patches_real = [self.discriminators[d](visible_source_images[:, d], training=True)
+                                      for d in range(number_of_domains)]
+            predicted_patches_fake = [self.discriminators[d](decoded_images_with_random_style[d], training=True)
+                                      for d in range(number_of_domains)]
             # predicted_patches_xxxx (shape=[d, ds, b, ?, ?, 1]) where ds are the discriminator scales and
             # ?, ? are the dimensions of the patches (different for each scale)
 
-            r1_penalty = [self.gradient_penalty(self.discriminators[i], batch[i]) for i in range(number_of_domains)]
-            r2_penalty = [self.gradient_penalty(self.discriminators[i], decoded_images_with_random_style[i])
-                          for i in range(number_of_domains)]
+            r1_penalty = [self.gradient_penalty(self.discriminators[d], batch[d]) for d in range(number_of_domains)]
+            r2_penalty = [self.gradient_penalty(self.discriminators[d], decoded_images_with_random_style[d])
+                          for d in range(number_of_domains)]
 
             # calculates the loss functions
             d_loss = self.discriminator_loss(predicted_patches_real, predicted_patches_fake, r1_penalty, r2_penalty)

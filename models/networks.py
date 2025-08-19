@@ -107,7 +107,8 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
     return tf.keras.Model(inputs=inputs, outputs=activation, name="StarGANGenerator")
 
 
-def collagan_affluent_generator(number_of_domains, image_size, output_channels, capacity=1, palette_quantization=False):
+def collagan_affluent_generator(number_of_domains, image_size, output_channels, capacity=1, palette_quantization=False,
+                                initial_temperature=1.0):
     # UnetINDiv4 extracted from:
     # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L941
     def conv_block(block_input, filters, regularizer="l2"):
@@ -218,7 +219,7 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels, 
         palettes = palette_input
         inputs += [palette_input]
 
-        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized_image")
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(initial_temperature, name="quantized_image")
         quantized_output = quantization_layer((output, palettes))
 
         model = tf.keras.Model(inputs=inputs, outputs=quantized_output, name="CollaGANPaletteGenerator")
@@ -267,7 +268,8 @@ def collagan_original_discriminator(number_of_domains, image_size, output_channe
     return tf.keras.Model(inputs=inputs, outputs=(patches, classification), name="CollaGANDiscriminator")
 
 
-def collagan_palette_conditioned_with_transformer_generator(number_of_domains, image_size, output_channels, capacity=1):
+def collagan_palette_conditioned_with_transformer_generator(number_of_domains, image_size, output_channels, capacity=1,
+    initial_temperature=1.0):
     # UnetINDiv4 extracted from:
     # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L941
     def conv_block(block_input, filters, regularizer="l2"):
@@ -384,7 +386,7 @@ def collagan_palette_conditioned_with_transformer_generator(number_of_domains, i
     pre_output = conv_1x1__(up_conv_0_2____, output_channels)
 
     # quantize to the palette
-    quantization_layer = keras_utils.DifferentiablePaletteQuantization()
+    quantization_layer = keras_utils.DifferentiablePaletteQuantization(initial_temperature)
     quantized_output = quantization_layer((pre_output, palette_input))
 
     model = tf.keras.Model(inputs=inputs, outputs=quantized_output, name="CollaGANPaletteTransformerGenerator")
@@ -489,7 +491,7 @@ def munit_style_encoder(domain_letter, image_size, channels):
     return tf.keras.Model(input_layer, style_code, name=f"StyleEncoder{domain_letter.upper()}")
 
 
-def munit_decoder(domain_letter, channels, palette_quantization=False):
+def munit_decoder(domain_letter, channels, palette_quantization=False, initial_temperature=1.0):
     """
     From the reference pytorch implementation:
     https://github.com/NVlabs/MUNIT/blob/master/networks.py#L223
@@ -592,7 +594,9 @@ def munit_decoder(domain_letter, channels, palette_quantization=False):
         palette_input = layers.Input(shape=[None, channels], name="desired_palette")
         inputs += [palette_input]
 
-        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name=f"quantized_image{domain_letter.upper()}")
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(
+            initial_temperature,
+            name=f"quantized_image{domain_letter.upper()}")
         quantized_output = quantization_layer((output_image, palette_input))
         outputs["output_image"] = quantized_output
 
@@ -728,13 +732,19 @@ def remic_style_encoder(domain_letter, image_size, channels):
     return tf.keras.Model(inputs=input_layer, outputs=style_code, name=f"StyleEncoder{domain_letter.upper()}")
 
 
-def remic_generator(domain_letter, channels, palette_quantization=False):
-    return munit_decoder(domain_letter, channels, palette_quantization)
+def remic_generator(domain_letter, channels, palette_quantization=False, initial_temperature=1.0):
+    return munit_decoder(domain_letter, channels, palette_quantization, initial_temperature)
 
 
 def remic_discriminator(domain_letter, image_size, channels, scales):
     return munit_discriminator_multi_scale(domain_letter, image_size, channels, scales)
 
+
+def debug_layer(debug_text):
+    def debug(inputs):
+        tf.print(debug_text, inputs.shape if hasattr(inputs, "shape") else len(inputs))
+        return inputs
+    return debug
 
 def remic_r3gan_generator(domain_letter, config):
     """
@@ -760,6 +770,7 @@ def remic_r3gan_generator(domain_letter, config):
     film_length = config.film
     generator_scales = config.generator_scales
     palette_quantization = config.palette_quantization
+    initial_temperature = config.temperature
     capacity = config.capacity
 
     input_style = layers.Input(shape=(8,), name="input_style")
@@ -770,12 +781,13 @@ def remic_r3gan_generator(domain_letter, config):
     style_embedding = layers.Dense(film_length)(input_style)
 
     initializer = keras_utils.MSRInitializer(1.0)
-    variance_scaling = 4
+    variance_scaling = 6
     x = input_content
+    x = keras_utils.UpsampleStage(1024, variance_scaling, True)(x)
     x = keras_utils.FiLMLayer()([x, style_embedding])
-    x = keras_utils.UpsampleStage(768, 768, 16, variance_scaling, True)(x)
+    x = keras_utils.UpsampleStage(1024, variance_scaling)(x)
     x = keras_utils.FiLMLayer()([x, style_embedding])
-    x = keras_utils.UpsampleStage(768, 768, 32, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(1024, variance_scaling)(x)
     x = keras_utils.FiLMLayer()([x, style_embedding])
 
     output_image = layers.Conv2D(channels, 7, strides=1, padding="same",
@@ -793,11 +805,12 @@ def remic_r3gan_generator(domain_letter, config):
     else:
         # quantize to the palette
         palette_input = layers.Input(shape=[None, channels], name="desired_palette")
-        palettes = palette_input
         inputs += [palette_input]
 
-        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name=f"quantized_image{domain_letter.upper()}")
-        quantized_output = quantization_layer((output_image, palettes))
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(
+            initial_temperature,
+            name=f"quantized_image{domain_letter.upper()}")
+        quantized_output = quantization_layer((output_image, palette_input))
         outputs["output_image"] = quantized_output
 
         model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"R3GANDecoder{domain_letter.upper()}_quantized")
@@ -818,7 +831,8 @@ def sprite_r3gan_generator(config):
     noise_length = config.noise
     film_length = config.film
     generator_scales = config.generator_scales
-    quantize_to_palette = config.palette_quantization
+    palette_quantization = config.palette_quantization
+    initial_temperature = config.temperature
     capacity = config.capacity
 
     # define the inputs
@@ -845,31 +859,33 @@ def sprite_r3gan_generator(config):
     variance_scaling = 10 + 1 + 10
     initial_stage = keras_utils.DownsampleStage(channels * domains + 1 + domains, 384, image_size, variance_scaling)
     x = initial_stage(encoder_input)
-    x = keras_utils.DownsampleStage(768, 768, image_size // 2, variance_scaling)(x)
-    x = keras_utils.DownsampleStage(768, 768, image_size // 4, variance_scaling)(x)
-    x = keras_utils.DownsampleStage(768, 768, image_size // 8, variance_scaling)(x)
-    x = keras_utils.DownsampleStage(768, 768, image_size // 16, variance_scaling)(x)
-    x = keras_utils.DownsampleStage(768, 768, image_size // 32, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(768, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(768, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(768, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(768, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(768, variance_scaling)(x)
 
     bottleneck = keras_utils.R3GANResidualBlock(768, variance_scaling)(x)
 
-    x = keras_utils.UpsampleStage(768, 768, image_size // 64, variance_scaling)(bottleneck)
-    x = keras_utils.UpsampleStage(768, 768, image_size // 32, variance_scaling)(x)
-    x = keras_utils.UpsampleStage(768, 768, image_size // 16, variance_scaling)(x)
-    x = keras_utils.UpsampleStage(768, 768, image_size // 8, variance_scaling)(x)
-    x = keras_utils.UpsampleStage(768, 768, image_size // 4, variance_scaling)(x)
-    x = keras_utils.UpsampleStage(768, 384, image_size // 2, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(768, variance_scaling)(bottleneck)
+    x = keras_utils.UpsampleStage(768, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(768, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(768, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(768, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(384, variance_scaling)(x)
 
     pre_output = layers.Conv2D(domains * channels, kernel_size=1, padding="same", use_bias=False,
                                kernel_initializer=initializer, name="pre-output")(x)
     # pre_output = layers.Activation("tanh")(pre_output)
 
-    if quantize_to_palette:
+    if palette_quantization:
         # quantize to the palette
         # change the dimensions so the domains come first, then height, width and channels
         pre_output = layers.Reshape((domains, image_size, image_size, channels),
                                     name=f"pre-quantization-{image_size}x{image_size}")(pre_output)
-        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized-images")
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(
+            initial_temperature,
+            name="quantized-images")
         final_output = quantization_layer([pre_output, target_palette_input])
         inputs = [masked_images_input, inpaint_mask_input, target_palette_input, domain_availability_input, noise_input]
     else:
@@ -881,10 +897,10 @@ def sprite_r3gan_generator(config):
     model = tf.keras.models.Model(
         inputs=inputs,
         outputs=final_output,
-        name=f"SpriteR3GANGenerator{'_Quantized' if quantize_to_palette else ''}"
+        name=f"SpriteR3GANGenerator{'_Quantized' if palette_quantization else ''}"
     )
 
-    if quantize_to_palette:
+    if palette_quantization:
         model.quantization = quantization_layer
 
     return model

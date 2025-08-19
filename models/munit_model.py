@@ -48,11 +48,12 @@ class MunitModel(S2SModel):
         image_size = config.image_size
         inner_channels = config.inner_channels
         palette_quantization = config.palette_quantization
+        temperature = config.temperature
         domain_letters = [name[0].upper() for name in config.domains]
         if config.generator in ["munit", ""]:
             content_encoders = [munit_content_encoder(s, image_size, inner_channels) for s in domain_letters]
             style_encoders = [munit_style_encoder(s, image_size, inner_channels) for s in domain_letters]
-            decoders = [munit_decoder(s, inner_channels, palette_quantization) for s in domain_letters]
+            decoders = [munit_decoder(s, inner_channels, palette_quantization, temperature) for s in domain_letters]
 
             input_layer = tf.keras.layers.Input(shape=(config.image_size, config.image_size, config.output_channels))
             palette_input_layer = tf.keras.layers.Input(shape=(None, config.output_channels))
@@ -150,7 +151,7 @@ class MunitModel(S2SModel):
         l2_regularization = [tf.reduce_sum(self.discriminators[i].losses) for i in range(number_of_domains)]
 
         # r1/r2 regularization
-        gp_loss = (r1_penalty + r2_penalty)  / 2.
+        gp_loss = [(r1_penalty[d] + r2_penalty[d])  / 2. for d in range(number_of_domains)]
         # gp_loss (shape=[d])
 
         total_loss = [adversarial_loss[i] +

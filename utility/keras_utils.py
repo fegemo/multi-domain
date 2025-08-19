@@ -156,9 +156,10 @@ def count_network_parameters(network):
 # ------ layer in which each palette can have a different number of colors ------
 # this refrains from using vectorized operations, which make it slower for longer batches
 class DifferentiablePaletteQuantization(Layer):
-    def __init__(self, **kwargs):
+    def __init__(self, initial_temperature, **kwargs):
         super().__init__(**kwargs)
-        self.temperature = self.add_weight(shape=(), name="temperature", trainable=False)
+        self.temperature = self.add_weight(shape=(), name="temperature", trainable=False,
+                                           initializer=tf.constant_initializer(initial_temperature))
 
     def call(self, inputs, training=None):
         """
@@ -218,7 +219,8 @@ class DifferentiablePaletteQuantization(Layer):
             )  # [H, W, K]
 
             if training:
-                weights = tf.nn.softmax(-distances / self.temperature, axis=-1)
+                temperature = tf.maximum(self.temperature, 1e-8)
+                weights = tf.nn.softmax(-distances / temperature, axis=-1)
                 return tf.einsum('...k,kc->...c', weights, palette)  # [H, W, C]
             else:
                 indices = tf.argmin(distances, axis=-1)
@@ -830,6 +832,8 @@ class RelativisticLoss(AdversarialLoss):
 
     def calculate_discriminator_loss(self, fake_logits, real_logits):
         relativistic_logits = [[0. for _ in range(self.discriminator_scales)] for _ in range(self.number_of_domains)]
+        new_real_logits = [[[] for _ in range(self.discriminator_scales)] for _ in range(self.number_of_domains)]
+        new_fake_logits = [[[] for _ in range(self.discriminator_scales)] for _ in range(self.number_of_domains)]
         for d in range(self.number_of_domains):
             for ds in range(self.discriminator_scales):
                 relativistic_logits[d][ds] = real_logits[d][ds] - fake_logits[d][ds]
@@ -837,23 +841,23 @@ class RelativisticLoss(AdversarialLoss):
                 relativistic_logits[d][ds] = tf.reduce_mean(relativistic_logits[d][ds])
                 # relativistic_logits ([d] x [ds])
 
-                real_logits[d][ds] = tf.reduce_mean(real_logits[d][ds])
-                fake_logits[d][ds] = tf.reduce_mean(fake_logits[d][ds])
+                new_real_logits[d][ds] = tf.reduce_mean(real_logits[d][ds])
+                new_fake_logits[d][ds] = tf.reduce_mean(fake_logits[d][ds])
                 # xxxx_logits ([d] x [ds])
 
         relativistic_logits = tf.reduce_mean(relativistic_logits, axis=1)
         # relativistic_logits ([d])
-        real_logits = tf.reduce_mean(real_logits, axis=1)
-        fake_logits = tf.reduce_mean(fake_logits, axis=1)
+        new_real_logits = tf.reduce_mean(new_real_logits, axis=1)
+        new_fake_logits = tf.reduce_mean(new_fake_logits, axis=1)
         # xxxx_logits ([d])
 
         relativistic_logits = self.domain_reductor(relativistic_logits)
         # relativistic_logits (shape=[d] if domain_specific_discriminators else [])
-        real_logits = self.domain_reductor(real_logits)
-        fake_logits = self.domain_reductor(fake_logits)
+        new_real_logits = self.domain_reductor(new_real_logits)
+        new_fake_logits = self.domain_reductor(new_fake_logits)
         # xxxx_logits (shape=[d] if domain_specific_discriminators else [])
         adversarial_loss = tf.math.softplus(-relativistic_logits)
-        return adversarial_loss, real_logits, fake_logits
+        return adversarial_loss, new_real_logits, new_fake_logits
 
 
 class GradientPenalty(ABC):
@@ -870,7 +874,7 @@ class NoopGradientPenalty(GradientPenalty):
         :param discriminators_input: Input images to the discriminator with shape [d] x [b, s, s, c]
         :return: List of zeros for each discriminator
         """
-        return [tf.constant(0.0) for _ in range(len(listify(discriminators)))]
+        return tf.constant(0.0)
 
 
 class ZeroCenteredGradientPenalty(GradientPenalty):
@@ -954,7 +958,7 @@ class R3GANResidualBlock(layers.Layer):
 
 
 class UpsampleLayer(layers.Layer):
-    def __init__(self, current_size, input_channels, output_channels):
+    def __init__(self, output_channels):
         super().__init__()
         self.output_channels = output_channels
         self.resampler = None
@@ -977,7 +981,7 @@ class UpsampleLayer(layers.Layer):
 
 
 class DownsampleLayer(layers.Layer):
-    def __init__(self, current_size, input_channels, output_channels):
+    def __init__(self, output_channels):
         super().__init__()
         self.output_channels = output_channels
         self.resampler = None
@@ -1005,14 +1009,24 @@ class DownsampleLayer(layers.Layer):
 
 
 class GenerativeBasis(layers.Layer):
-    def __init__(self, output_channels):
+    def __init__(self, output_channels, use_1x1=False):
         super().__init__()
         self.output_channels = output_channels
-        self.basis = self.add_weight(shape=(4, 4, output_channels), initializer="random_normal", trainable=True)
-        self.linear = layers.Dense(output_channels, use_bias=False, kernel_initializer=MSRInitializer(1.0))
+        if use_1x1:
+            self.linear = layers.Conv2D(output_channels, 1, strides=1, padding="same",
+                                        kernel_initializer=MSRInitializer(1.0))
+        else:
+            self.linear = layers.Dense(output_channels, use_bias=False, kernel_initializer=MSRInitializer(1.0))
+        self.basis = None
+
+    def build(self, input_shape):
+        spatial_shape = input_shape[-2]
+        self.basis = self.add_weight(shape=(spatial_shape, spatial_shape, self.output_channels), initializer="random_normal",
+                                     trainable=True)
 
     def call(self, x):
-        return self.basis * tf.reshape(self.linear(x), (-1, 1, 1, self.output_channels))
+        linear_output = self.linear(x)
+        return self.basis[tf.newaxis, ...] * linear_output
 
 
 class DiscriminativeBasis(layers.Layer):
@@ -1032,11 +1046,10 @@ class DiscriminativeBasis(layers.Layer):
 
 
 class UpsampleStage(layers.Layer):
-    def __init__(self, input_channels, output_channels, current_size, variance_scaling_parameter,
+    def __init__(self, output_channels, variance_scaling_parameter,
                  is_initial_stage=False):
         super().__init__()
         self.output_channels = output_channels
-        # self.current_size = current_size
         self.variance_scaling_parameter = variance_scaling_parameter
         self.is_initial_stage = is_initial_stage
         self.transition_layer = None
@@ -1044,12 +1057,10 @@ class UpsampleStage(layers.Layer):
         self.resblock_2 = None
 
     def build(self, input_shape):
-        input_channels = input_shape[-1]
-        current_size = input_shape[-2]
         if self.is_initial_stage:
             self.transition_layer = GenerativeBasis(self.output_channels)
         else:
-            self.transition_layer = UpsampleLayer(current_size, input_channels, self.output_channels)
+            self.transition_layer = UpsampleLayer(self.output_channels)
 
         self.resblock_1 = R3GANResidualBlock(self.output_channels, self.variance_scaling_parameter)
         self.resblock_2 = R3GANResidualBlock(self.output_channels, self.variance_scaling_parameter)
@@ -1070,11 +1081,10 @@ class UpsampleStage(layers.Layer):
 
 
 class DownsampleStage(layers.Layer):
-    def __init__(self, input_channels, output_channels, current_size, variance_scaling_parameter,
+    def __init__(self, output_channels, variance_scaling_parameter,
                  is_last_stage=False):
         super().__init__()
         self.output_channels = output_channels
-        self.current_size = current_size
         self.variance_scaling_parameter = variance_scaling_parameter
         self.is_last_stage = is_last_stage
         self.transition_layer = None
@@ -1086,7 +1096,7 @@ class DownsampleStage(layers.Layer):
         if self.is_last_stage:
             self.transition_layer = DiscriminativeBasis(input_channels, self.output_channels)
         else:
-            self.transition_layer = DownsampleLayer(self.current_size, input_channels, self.output_channels)
+            self.transition_layer = DownsampleLayer(self.output_channels)
 
         self.resblock_1 = R3GANResidualBlock(self.output_channels, self.variance_scaling_parameter)
         self.resblock_2 = R3GANResidualBlock(self.output_channels, self.variance_scaling_parameter)
