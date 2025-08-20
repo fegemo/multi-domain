@@ -394,7 +394,7 @@ class RemicModel(MunitModel):
         titles = (["Source Images"] +
                   [f"Gener. {d}" for d in domains] +
                   [f"Gener. {d} (t=0)" for d in domains] +
-                  ["Rnd. Style (t=0)"])
+                  [f"Rnd. Style {domains[-1]} (t=0)"])
         num_rows = len(examples)
         num_cols = len(titles)
 
@@ -421,14 +421,14 @@ class RemicModel(MunitModel):
         decoded_images_t_0 = [self.decoders[d](
             self.gen_supplier(encoded_styles[d], encoded_contents, palettes), training=False)["output_image"]
             for d in range(number_of_domains)]
-        decoded_images_with_random_style = [self.decoders[d](
+        decoded_images_with_random_style = self.decoders[-1](
             self.gen_supplier(tf.random.normal([num_rows, 8]), encoded_contents, palettes), training=False)["output_image"]
-            for d in range(number_of_domains)]
-        # decoded_images_xxxxxxxxxxxxx ([d] x shape=[b, s, s, c])
+        # decoded_images_xxxxxxxxxxxxxxxxx ([d] x shape=[b, s, s, c])
+        # decoded_images_with_random_style (shape=[b, s, s, c]) <-- only the last domain, to illustrate
+
         decoded_images_t_curr = tf.transpose(decoded_images_t_curr, [1, 0, 2, 3, 4])
         decoded_images_t_0 = tf.transpose(decoded_images_t_0, [1, 0, 2, 3, 4])
-        decoded_images_with_random_style = tf.transpose(decoded_images_with_random_style, [1, 0, 2, 3, 4])
-        # decoded_images_xxxxxxxxxxxxx (shape=[b, d, s, s, c])
+        # decoded_images_xxxxxxxxxxxxxxxxx (shape=[b, d, s, s, c])
 
         figure = plt.figure(figsize=(4 * num_cols, 4 * num_rows+2), layout="constrained")
         sub_figs = figure.subfigures(num_rows, num_cols)
@@ -442,7 +442,7 @@ class RemicModel(MunitModel):
             # col: [0]: source images in 2x2 subgrid
             sub_fig = sub_figs[i, 0]
             if i == 0:
-                sub_fig.suptitle(titles[0], fontsize=18)
+                sub_fig.suptitle(titles[0], fontsize=24)
             # 2x2 subplots, content (shape=[d, s, s, c])
             axes = sub_fig.subplots(2, 2)
             for i_d in range(2):
@@ -455,7 +455,7 @@ class RemicModel(MunitModel):
             for j in range(1, number_of_domains + 1):
                 sub_fig = sub_figs[i, j]
                 if i == 0:
-                    sub_fig.suptitle(titles[j], fontsize=18)
+                    sub_fig.suptitle(titles[j], fontsize=24)
                 ax = sub_fig.subplots(1, 1)
                 ax.imshow(tf.clip_by_value(decoded_images_t_curr[i, j - 1] * 0.5 + 0.5, 0., 1.))
                 ax.axis("off")
@@ -464,23 +464,19 @@ class RemicModel(MunitModel):
             for j in range(number_of_domains + 1, number_of_domains * 2 + 1):
                 sub_fig = sub_figs[i, j]
                 if i == 0:
-                    sub_fig.suptitle(titles[j], fontsize=18)
+                    sub_fig.suptitle(titles[j], fontsize=24)
                 ax = sub_fig.subplots(1, 1)
                 ax.imshow(tf.clip_by_value(decoded_images_t_0[i, j - number_of_domains - 1] * 0.5 + 0.5, 0., 1.))
                 ax.axis("off")
 
-            # cols: [9]: generated images t=0 with random style in a 2x2 subgrid
+            # cols: [9]: generated images t=0 with random style (only the last domain, to illustrate)
             sub_fig = sub_figs[i, num_cols - 1]
             if i == 0:
-                sub_fig.suptitle(titles[-1], fontsize=18)
-            # 2x2 subplots, content (shape=[d, s, s, c])
-            axes = sub_fig.subplots(2, 2)
-            for i_d in range(2):
-                for j_d in range(2):
-                    ax = axes[i_d, j_d]
-                    ax.imshow(tf.clip_by_value(
-                        decoded_images_with_random_style[i, i_d * 2 + j_d] * 0.5 + 0.5, 0., 1.))
-                    ax.axis("off")
+                sub_fig.suptitle(titles[-1], fontsize=24)
+            ax = sub_fig.subplots(1, 1)
+            ax.imshow(tf.clip_by_value(
+                decoded_images_with_random_style[i] * 0.5 + 0.5, 0., 1.))
+            ax.axis("off")
 
 
         # figure.tight_layout()
