@@ -13,38 +13,30 @@ if __name__ == "__main__":
             "model": "remic",
             "adhoc": [
                 "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
-                "save-model"
+                "save-model",
+                "palette-quantization",
             ],
             "log-folder": config.output if config.output is not None else "output",
             "steps": 240000,
             "evaluate-steps": 1000,
-            "lr": 0.00011,
-            "batch": 4,
-            "lr-decay": "none",
+            "lr": 0.0001,
+            "batch": 8,
+            "lr-decay": "constant-then-linear",
             "input-dropout": "original",
             "discriminator-scales": 3,
+            "temperature": 4.0,
+            "annealing": "cosine",
             "model-name": "@model",
-            "experiment": "@dataset,&lambda-l1,&lambda-latent-reconstruction,&lambda-cyclic-reconstruction",
+            "experiment": "palette,&lambda-l1,&lambda-latent-reconstruction,&lambda-cyclic-reconstruction,&lambda-palette",
+            "vram": -1,
         }, {
             "lambda-l1": [10],
-            "lambda-latent-reconstruction": [1],
-            "lambda-cyclic-reconstruction": [0, 1, 10, 100],
+            "lambda-latent-reconstruction": [1, 10],
+            "lambda-cyclic-reconstruction": [1, 10, 100],
+            "lambda-palette": [0, 1, 10]
         }, {
-            # "tiny": {
-            #     "adhoc": ["no-aug"],
-            # },
-            # "rm2k": {
-            #     "adhoc": ["no-tran"]
-            # },
-            # "rmxp": {
-            #     "adhoc": []
-            # },
-            # "rmvx": {
-            #     "adhoc": ["no-tran"]
-            # },
             "all": {
                 "adhoc": ["no-aug"],
-                # "steps": 80000
             }
         })
 
