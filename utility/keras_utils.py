@@ -526,7 +526,7 @@ class CosineAnnealingScheduler(AnnealingScheduler):
         sigma = self.amplitude_variance
         lamb = self.cycles
         CYC = self.FULL_CYCLE
-        return (1 - t) * ((1 - sigma) * t0 + (t0 * sigma) * tf.math.cos(t * lamb * CYC))
+        return tf.math.pow(1 - t, 2) * ((1 - sigma) * t0 + (t0 * sigma) * tf.math.cos(t * lamb * CYC))
 
 class NoopAnnealingScheduler(AnnealingScheduler):
     def get_value(self, t):
