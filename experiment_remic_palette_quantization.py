@@ -20,7 +20,7 @@ if __name__ == "__main__":
             "steps": 240000,
             "evaluate-steps": 1000,
             "lr": 0.0001,
-            "batch": 4,
+            "batch": 16,
             "lr-decay": "constant-then-linear",
             "lambda-l1": 10,
             "lambda-latent-reconstruction": 1,
