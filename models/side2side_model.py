@@ -101,7 +101,9 @@ class S2SModel(ABC):
                 self.annealing_scheduler = CosineAnnealingScheduler(config.temperature, cycles,
                                                                     self.get_annealing_layers())
             else:
-                self.annealing_scheduler = NoopAnnealingScheduler()
+                raise ValueError(f"Unknown annealing method: {config.annealing}")
+        else:
+            self.annealing_scheduler = NoopAnnealingScheduler()
 
         # initializes training checkpoint information
         io_utils.ensure_folder_structure(self.checkpoint_dir)

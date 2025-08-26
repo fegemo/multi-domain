@@ -141,6 +141,9 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--film", type=int, help="the length of the FiLM layers that condition "
                                                           "the generation on noise and on the domain in SpriteGAN",
                                  default=FILM_LENGTH)
+        self.parser.add_argument("--domain_availability_embedding", type=int, default=0,
+                                 help="the size of the embedding used to represent which domains are available in the "
+                                      "input for remic (r3mic generator)")
         self.parser.add_argument("--d-steps", type=int,
                                  help="number of discriminator updates for each generator in stargan",
                                  default=DISCRIMINATOR_STEPS)

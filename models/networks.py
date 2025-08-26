@@ -3,7 +3,7 @@ from tensorflow.keras import layers
 from tensorflow.keras.ops import concatenate
 
 from utility import keras_utils
-from utility.keras_utils import PaletteTransformerEncoder, PaletteConditioner
+from utility.keras_utils import PaletteTransformerEncoder, PaletteConditioner, MSRInitializer
 
 
 def resblock(x, filters, kernel_size, init):
@@ -740,11 +740,176 @@ def remic_discriminator(domain_letter, image_size, channels, scales):
     return munit_discriminator_multi_scale(domain_letter, image_size, channels, scales)
 
 
+
+def r3mic_unified_content_encoder(config):
+    domains = config.number_of_domains
+    image_size = config.image_size
+    channels = config.inner_channels
+    domain_availability_embedding = config.domain_availability_embedding
+
+    input_layer = layers.Input(shape=(domains, image_size, image_size, channels))
+    x = layers.Permute((2, 3, 4, 1))(input_layer)
+    x = layers.Reshape((image_size, image_size, domains * channels))(x)
+
+    dae_embedding = None
+    if domain_availability_embedding > 0:
+        # we want to find embeddings that represent which domains are made available to the content encoder
+        # first, we find out which images were provided... then we train some embeddings
+        dae = keras_utils.DetectAbsentImages()(input_layer)
+        # dae (b, d) where b is the batch size and d is the number of domains
+        dae_embedding = layers.Dense(domain_availability_embedding, activation="leaky_relu")(dae)
+        dae_embedding = layers.Dense(domain_availability_embedding, activation="leaky_relu")(dae_embedding)
+
+        repeated_domain_availability = keras_utils.TileLayer(image_size)(dae)
+        repeated_domain_availability = keras_utils.TileLayer(image_size)(repeated_domain_availability)
+        x = layers.Concatenate(axis=-1)([x, repeated_domain_availability])
+
+    initializer = keras_utils.MSRInitializer(1.0)
+    x = layers.Conv2D(64, 7, strides=1, padding="same", kernel_initializer=initializer,
+                      use_bias=False)(x)
+
+    variance_scaling = 2*2 + 4
+    # 2x downsampling blocks
+    if domain_availability_embedding > 0:
+        x = keras_utils.DownsampleStage(512, variance_scaling, is_conditional=True)([x, dae_embedding])
+        x = keras_utils.DownsampleStage(512, variance_scaling, is_conditional=True)([x, dae_embedding])
+    else:
+        x = keras_utils.DownsampleStage(512, variance_scaling)(x)
+        x = keras_utils.DownsampleStage(512, variance_scaling)(x)
+
+    # 4x residual blocks
+    if domain_availability_embedding > 0:
+        x = keras_utils.R3GANResidualBlockConditional(variance_scaling)([x, dae_embedding])
+        x = keras_utils.R3GANResidualBlockConditional(variance_scaling)([x, dae_embedding])
+        x = keras_utils.R3GANResidualBlockConditional(variance_scaling)([x, dae_embedding])
+        x = keras_utils.R3GANResidualBlockConditional(variance_scaling)([x, dae_embedding])
+    else:
+        x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+        x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+        x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+        x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+
+    x = layers.Conv2D(256, 1, strides=1, padding="same", kernel_initializer=initializer,
+                        use_bias=False)(x)
+    content_code = x
+    return tf.keras.Model(inputs=input_layer, outputs=content_code, name=f"R3MICContentEncoder")
+
+def r3mic_style_encoder(domain_letter, config):
+    image_size = config.image_size
+    channels = config.inner_channels
+
+    input_layer = layers.Input(shape=(image_size, image_size, channels))
+    not_zero_mask = keras_utils.AnyNonZeroPixelDetector()(input_layer)
+    initializer = MSRInitializer(1.0)
+
+    x = input_layer
+    x = layers.Conv2D(64, 7, strides=1, padding="same", kernel_initializer=initializer,
+                      activation="leaky_relu")(x)
+
+    variance_scaling = 2*4 + 4
+    # 4x downscale blocks
+    x = keras_utils.DownsampleStage(128, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(256, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(256, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(256, variance_scaling)(x)
+
+    # 4x resblocks
+    x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+    x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+    x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+    x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+
+    x = layers.GlobalAvgPool2D(keepdims=True)(x)
+    style_code = layers.Conv2D(8, kernel_size=1, strides=1, kernel_initializer=initializer)(x)
+
+    style_code = layers.Multiply()([style_code, not_zero_mask])
+    style_code = layers.Reshape((8,))(style_code)
+
+    return tf.keras.Model(inputs=input_layer, outputs=style_code, name=f"R3MICStyleEncoder{domain_letter.upper()}")
+
+def r3mic_decoder(domain_letter, config):
+    channels = config.inner_channels
+    film_length = config.film
+    palette_quantization = config.palette_quantization
+    initial_temperature = config.temperature
+
+    input_style = layers.Input(shape=(8,), name="input_style")
+    input_content = layers.Input(shape=(16, 16, 256), name="input_content")
+    style_code = input_style
+    content_code = input_content
+
+    style_embedding = layers.Dense(film_length, activation="leaky_relu")(input_style)
+    style_embedding = layers.Dense(film_length, activation="leaky_relu")(style_embedding)
+
+    initializer = keras_utils.MSRInitializer(1.0)
+    variance_scaling = 2 + 2 * 3
+    x = input_content
+    x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+    x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+    x = keras_utils.UpsampleStage(256, variance_scaling, True,
+                                  is_conditional=True)([x, style_embedding])
+    x = keras_utils.UpsampleStage(512, variance_scaling, is_conditional=True)([x, style_embedding])
+    x = keras_utils.UpsampleStage(512, variance_scaling, is_conditional=True)([x, style_embedding])
+
+    output_image = layers.Conv2D(channels, 7, strides=1, padding="same", kernel_initializer=initializer)(x)
+
+    inputs = [input_style, input_content]
+    outputs = dict({
+        "output_image": output_image,
+        "style_code": style_code,
+        "content_code": content_code
+    })
+
+    if not palette_quantization:
+        model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"R3MICDecoder{domain_letter.upper()}")
+    else:
+        # quantize to the palette
+        palette_input = layers.Input(shape=[None, channels], name="desired_palette")
+        inputs += [palette_input]
+
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(
+            initial_temperature,
+            name=f"quantized_image{domain_letter.upper()}")
+        quantized_output = quantization_layer((output_image, palette_input))
+        outputs["output_image"] = quantized_output
+
+        model = tf.keras.Model(inputs=inputs, outputs=outputs, name=f"R3MICDecoder{domain_letter.upper()}_quantized")
+        model.quantization = quantization_layer
+
+    return model
+
+def r3mic_discriminator(domain_letter, config):
+    image_size = config.image_size
+    channels = config.inner_channels
+    scales = config.discriminator_scales
+    initializer = MSRInitializer(1.0)
+
+    def conv2d_blocks(input_tensor, variance_scaling):
+        x = input_tensor
+        x = keras_utils.DownsampleStage( 128, variance_scaling)(x)
+        x = keras_utils.DownsampleStage( 256, variance_scaling)(x)
+        x = keras_utils.DownsampleStage( 256, variance_scaling)(x)
+        x = keras_utils.DownsampleStage( 512, variance_scaling)(x)
+        x = layers.Conv2D(1, kernel_size=1, kernel_initializer=initializer, padding="valid")(x)
+        return x
+
+    input_layer = layers.Input(shape=(image_size, image_size, channels))
+    x = input_layer
+    x = layers.Conv2D(64, kernel_size=7, strides=1, padding="same", kernel_initializer=initializer)(x)
+    outputs = []
+    variance_scaling = 2*4 * scales
+    for i in range(scales):
+        outputs.append(conv2d_blocks(x, variance_scaling))
+        x = layers.AveragePooling2D(pool_size=(2, 2), strides=2)(x)
+
+    return tf.keras.Model(inputs=input_layer, outputs=outputs, name=f"R3MICDiscriminator{domain_letter.upper()}")
+
 def debug_layer(debug_text):
     def debug(inputs):
         tf.print(debug_text, inputs.shape if hasattr(inputs, "shape") else len(inputs))
         return inputs
     return debug
+
 
 def remic_r3gan_generator(domain_letter, config):
     """
@@ -764,14 +929,11 @@ def remic_r3gan_generator(domain_letter, config):
     :param palette_quantization: whether to use palette quantization
     :return: model that decodes the image, outputing a 64x64x4 tensor
     """
-    domains = config.number_of_domains
-    image_size = config.image_size
     channels = config.inner_channels
     film_length = config.film
-    generator_scales = config.generator_scales
     palette_quantization = config.palette_quantization
     initial_temperature = config.temperature
-    capacity = config.capacity
+    # capacity = config.capacity
 
     input_style = layers.Input(shape=(8,), name="input_style")
     input_content = layers.Input(shape=(16, 16, 256), name="input_content")
@@ -781,8 +943,10 @@ def remic_r3gan_generator(domain_letter, config):
     style_embedding = layers.Dense(film_length)(input_style)
 
     initializer = keras_utils.MSRInitializer(1.0)
-    variance_scaling = 6
+    variance_scaling = 2 + 2 * 3
     x = input_content
+    x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+    x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
     x = keras_utils.UpsampleStage(1024, variance_scaling, True)(x)
     x = keras_utils.FiLMLayer()([x, style_embedding])
     x = keras_utils.UpsampleStage(1024, variance_scaling)(x)
@@ -818,6 +982,59 @@ def remic_r3gan_generator(domain_letter, config):
 
     return model
 
+
+def remic_r3gan_content_encoder(config):
+    # number_of_input_images = config.number_of_domains
+    # image_size = config.image_size
+    # channels = config.inner_channels
+    # domain_availability_embedding = config.domain_availability_embedding
+    #
+    # # we permute the input images to the last dimension and reshape the tensor to have the images
+    # # concatenated in the last dimension
+    # input_layer = layers.Input(shape=(number_of_input_images, image_size, image_size, channels))
+    # x = layers.Permute((2, 3, 4, 1))(input_layer)
+    # x = layers.Reshape((image_size, image_size, channels * number_of_input_images))(x)
+    #
+    # if domain_availability_embedding:
+    #     # we want to find embeddings that represent which domains are made available to the content encoder
+    #     # first, we find out which images were provided... then we train some embeddings
+    #     dae = keras_utils.DetectAbsentImages()(input_layer)
+    #     # dae (b, d) where b is the batch size and d is the number of domains
+    #
+    # variance_scaling = 10 + 1 + 10
+    # initial_stage = keras_utils.DownsampleStage(channels * domains + 1 + domains, 384, image_size, variance_scaling)
+    # x = initial_stage(encoder_input)
+    # x = keras_utils.DownsampleStage(768, variance_scaling)(x)
+    # x = keras_utils.DownsampleStage(768, variance_scaling)(x)
+    # x = keras_utils.DownsampleStage(768, variance_scaling)(x)
+    #
+    #
+    #
+    # x = keras_utils.ReflectPadding(3)(x)
+    # x = layers.Conv2D(64, 7, strides=1, padding="valid", kernel_initializer="he_normal",
+    #                   kernel_regularizer=tf.keras.regularizers.l2(1e-4), use_bias=False)(x)
+    # x = layers.GroupNormalization(groups=64)(x)
+    # x = layers.ReLU()(x)
+    #
+    # # 2x downsampling blocks
+    # x = munit_conv_block(x, 128, 4, 2, True)
+    # x = munit_conv_block(x, 256, 4, 2, True)
+    #
+    # # 4x residual blocks
+    # x = resblock_content(x, 256)
+    # x = resblock_content(x, 256)
+    # x = resblock_content(x, 256)
+    # x = resblock_content(x, 256)
+    #
+    # content_code = x
+    # return tf.keras.Model(inputs=input_layer, outputs=content_code, name="R3GANContentEncoder")
+    pass
+
+def remic_r3gan_style_encoder(domain_letter, config):
+    pass
+
+def remic_r3gan_discriminator(domain_letter, config):
+    pass
 
 def sprite_r3gan_generator(config):
     """
@@ -865,7 +1082,7 @@ def sprite_r3gan_generator(config):
     x = keras_utils.DownsampleStage(768, variance_scaling)(x)
     x = keras_utils.DownsampleStage(768, variance_scaling)(x)
 
-    bottleneck = keras_utils.R3GANResidualBlock(768, variance_scaling)(x)
+    bottleneck = keras_utils.R3GANResidualBlock(variance_scaling)(x)
 
     x = keras_utils.UpsampleStage(768, variance_scaling)(bottleneck)
     x = keras_utils.UpsampleStage(768, variance_scaling)(x)

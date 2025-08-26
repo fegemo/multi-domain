@@ -6,10 +6,10 @@ import tensorflow as tf
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from utility import dataset_utils, io_utils, palette_utils
+from utility import dataset_utils, io_utils, palette_utils, keras_utils
 from .munit_model import MunitModel
 from .networks import remic_generator, remic_discriminator, remic_style_encoder, remic_unified_content_encoder, \
-    remic_r3gan_generator
+    remic_r3gan_generator, r3mic_unified_content_encoder, r3mic_style_encoder, r3mic_decoder, r3mic_discriminator
 
 
 class RemicModel(MunitModel):
@@ -45,26 +45,26 @@ class RemicModel(MunitModel):
     def create_inference_networks(self):
         config = self.config
         image_size = config.image_size
-        inner_channels = config.inner_channels
+        channels = config.inner_channels
         palette_quantization = config.palette_quantization
         temperature = config.temperature
         number_of_domains = config.number_of_domains
         domain_letters = [name[0].upper() for name in config.domains]
         if config.generator in ["", "remic", "r3gan"]:
-            unified_content_encoder = remic_unified_content_encoder("Unified", image_size, inner_channels,
+            unified_content_encoder = remic_unified_content_encoder("Unified", image_size, channels,
                                                                     number_of_domains)
-            style_encoders = [remic_style_encoder(s, image_size, inner_channels) for s in domain_letters]
+            style_encoders = [remic_style_encoder(s, image_size, channels) for s in domain_letters]
             if config.generator in ["", "remic"]:
-                decoders = [remic_generator(s, inner_channels, palette_quantization, temperature) for s in domain_letters]
+                decoders = [remic_generator(s, channels, palette_quantization, temperature) for s in domain_letters]
             elif config.generator == "r3gan":
                 decoders = [remic_r3gan_generator(s, config) for s in domain_letters]
             else:
                 raise ValueError(f"The generator {config.generator} has not been implemented.")
-            single_image_input = tf.keras.layers.Input(shape=(image_size, image_size, inner_channels))
-            all_images_input = tf.keras.layers.Input(shape=(number_of_domains, image_size, image_size, inner_channels))
+            single_image_input = tf.keras.layers.Input(shape=(image_size, image_size, channels))
+            all_images_input = tf.keras.layers.Input(shape=(number_of_domains, image_size, image_size, channels))
             x = single_image_input
             x_all = all_images_input
-            palette_input = tf.keras.layers.Input((None, inner_channels))
+            palette_input = tf.keras.layers.Input((None, channels))
             generators = [tf.keras.Model(inputs=(x, x_all),
                                          outputs=decoders[d](
                                              self.gen_supplier(style_encoders[d](x),
@@ -80,17 +80,59 @@ class RemicModel(MunitModel):
             self.decoders = decoders
             self.generators = generators
 
-            if self.config.verbose:
-                tf.keras.utils.plot_model(generators[0], to_file="remic_generators[0].png", expand_nested=True,
-                                          show_layer_names=True, show_trainable=True, show_shapes=True)
+        elif config.generator == "r3mic":
+            unified_content_encoder = r3mic_unified_content_encoder(config)
+            style_encoders = [r3mic_style_encoder(s, config) for s in domain_letters]
+            decoders = [r3mic_decoder(s, config) for s in domain_letters]
 
-            return {
-                "unified_content_encoder": unified_content_encoder,
-                "style_encoders": style_encoders,
-                "decoders": decoders
-            }
+            single_image_input = tf.keras.layers.Input(shape=(image_size, image_size, channels))
+            all_images_input = tf.keras.layers.Input(shape=(number_of_domains, image_size, image_size, channels))
+            x = single_image_input
+            x_all = all_images_input
+            palette_input = tf.keras.layers.Input((None, channels))
+            generators = [tf.keras.Model(inputs=(x, x_all),
+                                         outputs=decoders[d](
+                                             self.gen_supplier(style_encoders[d](x),
+                                                               unified_content_encoder(x_all),
+                                                               palette_input)
+                                         ),
+                                         name=f"Generator{domain_letters[d]}")
+                          for d in range(number_of_domains)]
+            # generators is a list of "virtual" models, as in MUNIT (see MunitModel implementation)
+
+            self.unified_content_encoder = unified_content_encoder
+            self.style_encoders = style_encoders
+            self.decoders = decoders
+            self.generators = generators
+
         else:
             raise ValueError(f"The provided {config.generator} type of generator has not been implemented")
+
+        if config.generator == "r3mic":
+            # call the generator with fake data so it is built (necessary for model.summary as it uses lots of
+            # subclassing
+            dec_input = self.gen_supplier(
+                    tf.zeros((1, 8)),
+                    tf.zeros((1, 16, 16, 256)),
+                    tf.zeros((1, 41, channels))
+                )
+            unified_content_encoder(tf.zeros((1, number_of_domains, image_size, image_size, channels)), training=True)
+            for d in range(number_of_domains):
+                style_encoder = style_encoders[d]
+                style_encoder(tf.zeros((1, image_size, image_size, channels)), training=True)
+                decoder = decoders[d]
+                decoder(dec_input, training=True)
+
+        if config.verbose:
+            tf.keras.utils.plot_model(generators[0], to_file=f"remic_generator0_{config.generators[0]}.png",
+                                      expand_nested=True, show_layer_names=True, show_trainable=True,
+                                      show_shapes=True)
+
+        return {
+            "unified_content_encoder": unified_content_encoder,
+            "style_encoders": style_encoders,
+            "decoders": decoders
+        }
 
     def create_training_only_networks(self):
         config = self.config
@@ -102,6 +144,17 @@ class RemicModel(MunitModel):
             discriminators = [remic_discriminator(s, image_size, inner_channels, scales)
                               for s in domain_letters]
             self.discriminators = discriminators
+            return {
+                "discriminators": discriminators
+            }
+        elif config.discriminator == "r3mic":
+            discriminators = [r3mic_discriminator(s, config) for s in domain_letters]
+            self.discriminators = discriminators
+
+            disc_input = tf.random.normal((1, image_size, image_size, inner_channels))
+            for disc in discriminators:
+                disc(disc_input, training=True)
+
             return {
                 "discriminators": discriminators
             }
@@ -663,9 +716,9 @@ class RemicModel(MunitModel):
 
         # lsgan yields an unbounded real number, which should be 1 for real images and 0 for fake
         # but, we need to provide them in the [0, 1] range
-        flattened_real_patches = tf.concat([tf.squeeze(tf.reshape(real_patches[i][c], [-1])) for i in range(batch_size)
+        flattened_real_patches = tf.concat([tf.reshape(real_patches[i][c], [-1]) for i in range(batch_size)
                                             for c in range(discriminator_scales)], axis=0)
-        flattened_fake_patches = tf.concat([tf.squeeze(tf.reshape(fake_patches[i][c], [-1])) for i in range(batch_size)
+        flattened_fake_patches = tf.concat([tf.reshape(fake_patches[i][c], [-1]) for i in range(batch_size)
                                             for c in range(discriminator_scales)], axis=0)
         concatenated_predictions = tf.concat([flattened_real_patches, flattened_fake_patches], axis=0)
         min_value = tf.reduce_min(concatenated_predictions)
@@ -694,12 +747,12 @@ class RemicModel(MunitModel):
                 if j == 0:
                     image = real_images[i] * 0.5 + 0.5
                 elif 0 < j < discriminator_scales + 1:
-                    image = tf.squeeze(real_predicted[i][j - 1])
+                    image = tf.squeeze(real_predicted[i][j - 1], axis=[0, 3])
                     imshow_args = {"cmap": "gray", "vmin": 0.0, "vmax": 1.0}
                 elif j == discriminator_scales + 1:
                     image = fake_images[i] * 0.5 + 0.5
                 elif j > discriminator_scales + 1:
-                    image = tf.squeeze(fake_predicted[i][j - discriminator_scales - 2])
+                    image = tf.squeeze(fake_predicted[i][j - discriminator_scales - 2], axis=[0, 3])
                     imshow_args = {"cmap": "gray", "vmin": 0.0, "vmax": 1.0}
                 else:
                     raise ValueError(f"Invalid column index {j}")
@@ -819,3 +872,11 @@ class NoDropoutSampler(ExampleSampler):
         input_keep_mask = tf.one_hot(missing_domains, number_of_domains, on_value=0., off_value=1.)
 
         return batch, input_keep_mask
+
+
+
+# TESTANDO gerador e discriminator R3MIC, baseados na R3GAN
+#  python train.py remic --log-folder output --steps 10000 --evaluate-steps 250 --lr 0.0001 --batch 4
+#  --lr-decay constant-then-linear --lambda-l1 10 --lambda-latent-reconstruction 1 --input-dropout original --model-name remic --experiment np,r3mic --vram 4096 --lambda-cyclic-recon
+# struction 100 --callback-evaluate-fid --callback-evaluate-l1 --callback-debug-discriminator --rm2k --no-tran --generator r3mic --discriminator r3mic --adv r3gan --beta1 0 --lambda-gp 10
+

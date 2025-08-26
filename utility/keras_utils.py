@@ -49,11 +49,12 @@ class TileLayer(keras.layers.Layer):
 
 
 class NParamsSupplier:
-    def __init__(self, supply_first_n_params):
+    def __init__(self, supply_first_n_params, delistify=False):
         self.n = supply_first_n_params
+        self.select_params = lambda args: args[0] if supply_first_n_params == 1 and delistify else args[0:supply_first_n_params]
 
     def __call__(self, *args, **kwargs):
-        return [*args[:self.n]]
+        return self.select_params(args)
 
 
 class SkipParamsSupplier:
@@ -930,6 +931,16 @@ class FiLMLayer(layers.Layer):
         return gamma * x + beta
 
 
+class AnyNonZeroPixelDetector(layers.Layer):
+    """
+    A layer that checks whether each image in the input batch is composed of all zeros. In
+    case it is, it returns a zero scalar; otherwise, it returns a one scalar.
+    The output has the same rank as the input, with shape (input_shape[0], 1, 1...)
+    """
+    def call(self, inputs):
+        mask = tf.reduce_all(tf.equal(inputs, 0.0), axis=[1, 2, 3], keepdims=True)
+        return 1. - tf.cast(mask, tf.float32)
+
 # Lots of layers and code related to R3GAN, used by Sprite and ReMIC
 # BiasActivation is a way to fuse the bias addition with the LeakyReLU activation, which improves performance
 # especially in pytorch, which might have more trouble fusing it as an optimization compared to TensorFlow (as TF has
@@ -938,7 +949,7 @@ class FiLMLayer(layers.Layer):
 class R3GANResidualBlock(layers.Layer):
     LeakyReLUGain = tf.math.sqrt(2. / (1. + 0.2 ** 2.))
 
-    def __init__(self, input_channels, variance_scaling_parameter):
+    def __init__(self, variance_scaling_parameter):
         super().__init__()
         num_linear_layers = 3
         activation_gain = self.LeakyReLUGain * variance_scaling_parameter ** (-1 / (2 * num_linear_layers - 2))
@@ -977,6 +988,119 @@ class R3GANResidualBlock(layers.Layer):
         return layers.Conv2D(filters, kernel_size=kernel_size, strides=1, padding="same", use_bias=use_bias,
                              kernel_initializer=self.kernel_initializer, bias_initializer="zeros", groups=groups)
 
+class R3GANResidualBlockConditional(layers.Layer):
+    LeakyReLUGain = tf.math.sqrt(2. / (1. + 0.2 ** 2.))
+
+    def __init__(self, variance_scaling_parameter):
+        super().__init__()
+        num_linear_layers = 3
+        activation_gain = self.LeakyReLUGain * variance_scaling_parameter ** (-1 / (2 * num_linear_layers - 2))
+        self.kernel_initializer = MSRInitializer(activation_gain)
+        self.linear1 = None
+        self.linear2 = None
+        self.linear3 = None
+        self.activation = None
+        self.film = None
+
+    def build(self, input_shape):
+        input_channels = input_shape[0][-1]
+        cardinality = input_channels // 8
+        expanded_channels = input_channels * 2
+
+        # 1x1 convolution from input_channels to expanded_channels
+        self.linear1 = self.create_convolution(expanded_channels, 1)
+        # 3x3 convolution from expanded_channels to expanded_channels (reverse bottleneck),
+        # with groups equal to cardinality
+        self.linear2 = self.create_convolution(expanded_channels, 3, groups=cardinality)
+        # 1x1 convolution from expanded_channels back to input_channels
+        self.linear3 = self.create_convolution(input_channels, 1, use_bias=False)
+
+        self.film = FiLMLayer()
+
+        # plain 0.2 lre
+        self.activation = layers.LeakyReLU(negative_slope=0.2)
+
+    def call(self, inputs):
+        x, condition = inputs
+        y = self.linear1(x)
+        y = self.activation(y)
+        y = self.linear2(y)
+        y = self.film([y, condition])
+        y = self.activation(y)
+        y = self.linear3(y)
+        return x + y
+
+    def compute_output_shape(self, input_shape):
+        return input_shape[0]
+
+    def create_convolution(self, filters, kernel_size, groups=1, use_bias=True):
+        return layers.Conv2D(filters, kernel_size=kernel_size, strides=1, padding="same", use_bias=use_bias,
+                             kernel_initializer=self.kernel_initializer, bias_initializer="zeros", groups=groups)
+
+
+def create_lowpass_kernel():
+    w = [1., 2., 1.]
+    w_padded = tf.pad(w, [[1, 1]], constant_values=0)
+    kernel_1d = w_padded[:-1] + w_padded[1:]
+    kernel_1d = tf.reshape(kernel_1d, [1, -1])
+    kernel_2d = tf.matmul(tf.transpose(kernel_1d), kernel_1d)
+    kernel_2d = kernel_2d / tf.reduce_sum(kernel_2d)
+    return kernel_2d
+
+class InterpolativeUpsampler(layers.Layer):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.lowpass_kernel = create_lowpass_kernel()
+        self.built_kernel = None
+
+    def build(self, input_shape):
+        in_channels = input_shape[-1]
+        kernel = self.lowpass_kernel[..., tf.newaxis, tf.newaxis]
+        kernel = tf.repeat(kernel, repeats=in_channels, axis=-1)
+        kernel = tf.repeat(kernel, repeats=in_channels, axis=-2)
+        self.built_kernel = kernel
+        super().build(input_shape)
+
+    def call(self, inputs):
+        x = inputs
+
+        input_shape = tf.shape(x)
+        batch_size, image_size, channels = input_shape[0], input_shape[-2], input_shape[-1]
+        new_size = image_size * 2
+        y = tf.nn.conv2d_transpose(
+            x,
+            filters=self.built_kernel,
+            output_shape=[batch_size, new_size, new_size, channels],
+            strides=[1, 2, 2, 1],
+        )
+        y = y * 4.0
+        return y
+
+class InterpolativeDownsampler(layers.Layer):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.lowpass_kernel = create_lowpass_kernel()
+        self.built_kernel = None
+
+    def build(self, input_shape):
+        in_channels = input_shape[-1]
+        kernel = tf.expand_dims(self.lowpass_kernel, axis=-1)
+        kernel = tf.repeat(kernel, repeats=in_channels, axis=-1)
+        kernel = tf.expand_dims(kernel, axis=-1)
+        self.built_kernel = kernel
+        super().build(input_shape)
+
+    def call(self, inputs):
+        x = inputs
+        y = tf.nn.depthwise_conv2d(
+            x,
+            filter=self.built_kernel,
+            strides=[1, 2, 2, 1],
+            padding="SAME",
+            data_format="NHWC"
+        )
+        return y
+
 
 class UpsampleLayer(layers.Layer):
     def __init__(self, output_channels):
@@ -987,9 +1111,10 @@ class UpsampleLayer(layers.Layer):
 
     def build(self, input_shape):
         input_channels = input_shape[-1]
-        current_size = input_shape[-2]
-        new_size = current_size * 2
-        self.resampler = layers.Resizing(new_size, new_size, interpolation="bilinear")
+        # current_size = input_shape[-2]
+        # new_size = current_size * 2
+        # self.resampler = layers.Resizing(new_size, new_size, interpolation="bilinear")
+        self.resampler = InterpolativeUpsampler()
         if input_channels != self.output_channels:
             self.linear = layers.Conv2D(self.output_channels, 1, strides=1, padding="same",
                                         use_bias=False, kernel_initializer=MSRInitializer(1.0))
@@ -1010,9 +1135,10 @@ class DownsampleLayer(layers.Layer):
 
     def build(self, input_shape):
         input_channels = input_shape[-1]
-        current_size = input_shape[-2]
-        new_size = current_size // 2
-        self.resampler = layers.Resizing(new_size, new_size, interpolation="bilinear")
+        # current_size = input_shape[-2]
+        # new_size = current_size // 2
+        # self.resampler = layers.Resizing(new_size, new_size, interpolation="bilinear")
+        self.resampler = InterpolativeDownsampler()
         if input_channels != self.output_channels:
             self.linear = layers.Conv2D(self.output_channels, 1, strides=1, padding="same", use_bias=False,
                                         kernel_initializer=MSRInitializer(1.0))
@@ -1068,14 +1194,18 @@ class DiscriminativeBasis(layers.Layer):
 
 class UpsampleStage(layers.Layer):
     def __init__(self, output_channels, variance_scaling_parameter,
-                 is_initial_stage=False):
+                 is_initial_stage=False, is_conditional=False):
         super().__init__()
         self.output_channels = output_channels
         self.variance_scaling_parameter = variance_scaling_parameter
         self.is_initial_stage = is_initial_stage
+        self.is_conditional = is_conditional
         self.transition_layer = None
         self.resblock_1 = None
         self.resblock_2 = None
+        self.ResidualBlockConstructor = R3GANResidualBlockConditional if is_conditional else R3GANResidualBlock
+        self.resblock_supplier = NParamsSupplier(2 if is_conditional else 1, delistify=True)
+        self.inputs_padder = lambda inputs: inputs if is_conditional else (inputs, None)
 
     def build(self, input_shape):
         if self.is_initial_stage:
@@ -1083,16 +1213,18 @@ class UpsampleStage(layers.Layer):
         else:
             self.transition_layer = UpsampleLayer(self.output_channels)
 
-        self.resblock_1 = R3GANResidualBlock(self.output_channels, self.variance_scaling_parameter)
-        self.resblock_2 = R3GANResidualBlock(self.output_channels, self.variance_scaling_parameter)
+        self.resblock_1 = self.ResidualBlockConstructor(self.variance_scaling_parameter)
+        self.resblock_2 = self.ResidualBlockConstructor(self.variance_scaling_parameter)
 
     def call(self, x):
+        x, condition = self.inputs_padder(x)
         x = self.transition_layer(x)
-        x = self.resblock_1(x)
-        x = self.resblock_2(x)
+        x = self.resblock_1(self.resblock_supplier(x, condition))
+        x = self.resblock_2(self.resblock_supplier(x, condition))
         return x
 
     def compute_output_shape(self, input_shape):
+        input_shape = input_shape[0] if self.is_conditional else input_shape
         current_size = input_shape[-2]
         new_size = current_size * 2
         if self.is_initial_stage:
@@ -1103,32 +1235,38 @@ class UpsampleStage(layers.Layer):
 
 class DownsampleStage(layers.Layer):
     def __init__(self, output_channels, variance_scaling_parameter,
-                 is_last_stage=False):
+                 is_last_stage=False, is_conditional=False):
         super().__init__()
         self.output_channels = output_channels
         self.variance_scaling_parameter = variance_scaling_parameter
         self.is_last_stage = is_last_stage
+        self.is_conditional = is_conditional
         self.transition_layer = None
         self.resblock_1 = None
         self.resblock_2 = None
+        self.ResidualBlockConstructor = R3GANResidualBlockConditional if is_conditional else R3GANResidualBlock
+        self.resblock_supplier = NParamsSupplier(2 if is_conditional else 1, delistify=True)
+        self.inputs_padder = lambda inputs: inputs if is_conditional else (inputs, None)
 
     def build(self, input_shape):
-        input_channels = input_shape[-1]
+        input_channels = input_shape[0][-1] if self.is_conditional else input_shape[-1]
         if self.is_last_stage:
             self.transition_layer = DiscriminativeBasis(input_channels, self.output_channels)
         else:
             self.transition_layer = DownsampleLayer(self.output_channels)
 
-        self.resblock_1 = R3GANResidualBlock(self.output_channels, self.variance_scaling_parameter)
-        self.resblock_2 = R3GANResidualBlock(self.output_channels, self.variance_scaling_parameter)
+        self.resblock_1 = self.ResidualBlockConstructor(self.variance_scaling_parameter)
+        self.resblock_2 = self.ResidualBlockConstructor(self.variance_scaling_parameter)
 
     def call(self, x):
-        x = self.resblock_1(x)
-        x = self.resblock_2(x)
+        x, condition = self.inputs_padder(x)
+        x = self.resblock_1(self.resblock_supplier(x, condition))
+        x = self.resblock_2(self.resblock_supplier(x, condition))
         x = self.transition_layer(x)
         return x
 
     def compute_output_shape(self, input_shape):
+        input_shape = input_shape[0] if self.is_conditional else input_shape
         current_size = input_shape[-2]
         new_size = current_size // 2
         if self.is_last_stage:
@@ -1141,3 +1279,16 @@ def check_nans(tensor, name):
     # return tensor
     return tf.debugging.check_numerics(tensor, f"NaN in {name}")
 
+
+class DetectAbsentImages(layers.Layer):
+    def __init__(self, **kwargs):
+        super(DetectAbsentImages, self).__init__(**kwargs)
+
+    def call(self, x):
+        # x (shape=[b, d, s, s, c])
+        non_zero = tf.math.not_equal(x, 0.0)
+        has_non_zero = tf.reduce_any(non_zero, axis=[2, 3, 4])
+        return tf.cast(has_non_zero, tf.float32)
+
+    def compute_output_shape(self, input_shape):
+        return input_shape[0], input_shape[1]  # [b, d]
