@@ -2,6 +2,7 @@ import os
 from abc import ABC, abstractmethod
 
 import tensorflow as tf
+import numpy as np
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
@@ -47,26 +48,27 @@ class CollaGANModel(S2SModel):
 
         self.cce = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
         self.gen_supplier = NParamsSupplier(3 if config.palette_quantization else 2)
-        self.generator = self.inference_networks["generator"]
-        self.discriminator = self.training_only_networks["discriminator"]
+
 
     def create_inference_networks(self):
         config = self.config
         if config.generator in ["colla", "affluent", ""]:
-            return {
-                "generator": collagan_affluent_generator(config.number_of_domains, config.image_size,
+            self.generator = collagan_affluent_generator(config.number_of_domains, config.image_size,
                                                          config.output_channels,
                                                          config.capacity,
                                                          config.palette_quantization,
                                                          config.temperature)
+            return {
+                "generator": self.generator
             }
         elif config.generator in ["palette-transformer"]:
-            return {
-                "generator": collagan_palette_conditioned_with_transformer_generator(
+            self.generator = collagan_palette_conditioned_with_transformer_generator(
                     config.number_of_domains, config.image_size,
                     config.output_channels,
                     config.capacity,
                     config.temperature)
+            return {
+                "generator": self.generator
             }
         else:
             raise ValueError(f"The provided {config.generator} type for generator has not been implemented.")
@@ -74,9 +76,10 @@ class CollaGANModel(S2SModel):
     def create_training_only_networks(self):
         config = self.config
         if config.discriminator in ["colla", ""]:
-            return {
-                "discriminator": collagan_original_discriminator(config.number_of_domains, config.image_size,
+            self.discriminator = collagan_original_discriminator(config.number_of_domains, config.image_size,
                                                                  config.output_channels)
+            return {
+                "discriminator": self.discriminator
             }
         else:
             raise ValueError(f"The provided {config.discriminator} type for discriminator has not been implemented.")
@@ -365,25 +368,26 @@ class CollaGANModel(S2SModel):
         self.discriminator_optimizer.apply_gradients(
             zip(discriminator_gradients, self.discriminator.trainable_variables))
 
-        summary_step = step // evaluate_steps
-        with tf.name_scope("generator"):
-            with self.summary_writer.as_default():
-                tf.summary.scalar("total_loss", g_loss["total"], step=summary_step)
-                tf.summary.scalar("adversarial_loss", g_loss["adversarial"], step=summary_step)
-                tf.summary.scalar("domain_loss", g_loss["domain"], step=summary_step)
-                tf.summary.scalar("ssim_loss", g_loss["ssim"], step=summary_step)
-                tf.summary.scalar("l1_forward_loss", g_loss["l1_forward"], step=summary_step)
-                tf.summary.scalar("l1_backward_loss", g_loss["l1_backward"], step=summary_step)
-                tf.summary.scalar("palette_loss", g_loss["palette"], step=summary_step)
-                tf.summary.scalar("histogram_loss", g_loss["histogram"], step=summary_step)
-                tf.summary.scalar("weight_decay", g_loss["weight_decay"], step=summary_step)
+        d_loss_summaries = {
+            "total_loss": d_loss["total"],
+            "real_loss": d_loss["real"],
+            "fake_loss": d_loss["fake"],
+            "domain_loss": d_loss["domain"]
+        }
 
-        with tf.name_scope("discriminator"):
-            with self.summary_writer.as_default():
-                tf.summary.scalar("total_loss", d_loss["total"], step=summary_step)
-                tf.summary.scalar("real_loss", d_loss["real"], step=summary_step)
-                tf.summary.scalar("fake_loss", d_loss["fake"], step=summary_step)
-                tf.summary.scalar("domain_loss", d_loss["domain"], step=summary_step)
+        g_loss_summaries = {
+            "total_loss": g_loss["total"],
+            "adversarial_loss": g_loss["adversarial"],
+            "domain_loss": g_loss["domain"],
+            "ssim_loss": g_loss["ssim"],
+            "l1_forward_loss": g_loss["l1_forward"],
+            "l1_backward_loss": g_loss["l1_backward"],
+            "palette_loss": g_loss["palette"],
+            "histogram_loss": g_loss["histogram"],
+            "weight_decay": g_loss["weight_decay"]
+        }
+        
+        return d_loss_summaries, g_loss_summaries
 
     def select_examples_for_visualization(self, train_ds, test_ds):
         number_of_domains = self.config.number_of_domains
@@ -431,7 +435,7 @@ class CollaGANModel(S2SModel):
             palette = palette_utils.extract_palette(concatenated_images_to_extract_palette)
             palette = dataset_utils.normalize(tf.cast(palette, tf.float32))
 
-            real_image = domain_images[target_domain]
+            real_image = tf.constant(domain_images[target_domain])
             domain_images = tf.constant(domain_images)
 
             # this zeroes out the target image:
@@ -458,7 +462,7 @@ class CollaGANModel(S2SModel):
                 elif j == target_domain:
                     plt.title("Target", fontdict={"fontsize": 24})
 
-                plt.imshow(tf.clip_by_value(images[j] * 0.5 + 0.5, 0, 1))
+                plt.imshow(np.clip(images[j].numpy() * 0.5 + 0.5, 0, 1))
                 plt.axis("off")
 
         figure.tight_layout()
@@ -466,7 +470,11 @@ class CollaGANModel(S2SModel):
         if save_name is not None:
             plt.savefig(save_name, transparent=True)
 
-        return figure
+        # convert to TF image and *close the figure* to release memory:
+        image = io_utils.plot_to_image(figure, self.config.output_channels)
+        # plot_to_image will save the passed figure properly and close it.
+
+        return image
 
     def initialize_random_examples_for_evaluation(self, train_ds, test_ds, num_images):
         number_of_domains = self.config.number_of_domains
@@ -560,13 +568,13 @@ class CollaGANModel(S2SModel):
                         plt.subplot(number_of_domains, number_of_domains, idx)
                         if target_index == source_index:
                             plt.title("Generated", fontdict={"fontsize": 20})
-                            image = tf.squeeze(fake_image)
+                            image = tf.squeeze(fake_image).numpy()
                         else:
                             if source_index in selected_to_drop:
                                 plt.title("Dropped", fontdict={"fontsize": 20})
                             image = domain_images[source_index]
 
-                        plt.imshow(tf.clip_by_value(image * 0.5 + 0.5, 0, 1))
+                        plt.imshow(np.clip(image * 0.5 + 0.5, 0, 1))
                         plt.axis("off")
 
                 plt.savefig(image_path, transparent=True)
@@ -578,12 +586,10 @@ class CollaGANModel(S2SModel):
         # batch (shape=(b, d, s, s, c))
         batch_transpose = tf.transpose(batch, [1, 0, 2, 3, 4])
         # batch_transpose (shape=(d, b, s, s, c))
-        batch_shape = tf.shape(batch_transpose)
-        number_of_domains, batch_size, image_size, channels = batch_shape[0], batch_shape[1], batch_shape[2], \
-            batch_shape[4]
+        batch_shape = tf.shape(batch)
+        number_of_domains, batch_size, image_size = batch_shape[0], batch_shape[1], batch_shape[2]
 
-        palettes = palette_utils.batch_extract_palette_ragged(
-            tf.reshape(tf.constant(batch), [batch_size, -1, image_size, channels]))
+        palettes = palette_utils.batch_extract_palette_ragged(batch)
         domain_images, target_domain, _ = self.sampler.sample(batch_transpose, 0.5)
         # domain_images (shape=[b, d, s, s, c])
         # target_domain (shape=[b,])
@@ -719,9 +725,10 @@ class CollaGANModel(S2SModel):
                     image = back_predicted[i]
                     imshow_args = {"cmap": "gray", "vmin": 0.0, "vmax": 1.0}
 
-                plt.imshow(image, **imshow_args)
+                plt.imshow(image.numpy(), **imshow_args)
                 plt.axis("off")
 
+        fig.tight_layout()
         plt.savefig(image_path, transparent=True)
         plt.close(fig)
 
@@ -959,25 +966,26 @@ class CollaGANModelShuffledBatches(CollaGANModel):
         self.discriminator_optimizer.apply_gradients(
             zip(discriminator_gradients, self.discriminator.trainable_variables))
 
-        summary_step = step // evaluate_steps
-        with tf.name_scope("generator"):
-            with self.summary_writer.as_default():
-                tf.summary.scalar("total_loss", g_loss["total"], step=summary_step)
-                tf.summary.scalar("adversarial_loss", g_loss["adversarial"], step=summary_step)
-                tf.summary.scalar("domain_loss", g_loss["domain"], step=summary_step)
-                tf.summary.scalar("ssim_loss", g_loss["ssim"], step=summary_step)
-                tf.summary.scalar("l1_forward_loss", g_loss["l1_forward"], step=summary_step)
-                tf.summary.scalar("l1_backward_loss", g_loss["l1_backward"], step=summary_step)
-                tf.summary.scalar("palette_loss", g_loss["palette"], step=summary_step)
-                tf.summary.scalar("histogram_loss", g_loss["histogram"], step=summary_step)
-                tf.summary.scalar("weight_decay", g_loss["weight_decay"], step=summary_step)
+        d_loss_summaries = {
+            "total_loss": d_loss["total"],
+            "real_loss": d_loss["real"],
+            "fake_loss": d_loss["fake"],
+            "domain_loss": d_loss["domain"],
+        }
 
-        with tf.name_scope("discriminator"):
-            with self.summary_writer.as_default():
-                tf.summary.scalar("total_loss", d_loss["total"], step=summary_step)
-                tf.summary.scalar("real_loss", d_loss["real"], step=summary_step)
-                tf.summary.scalar("fake_loss", d_loss["fake"], step=summary_step)
-                tf.summary.scalar("domain_loss", d_loss["domain"], step=summary_step)
+        g_loss_summaries = {
+            "total_loss": g_loss["total"],
+            "adversarial_loss": g_loss["adversarial"],
+            "domain_loss": g_loss["domain"],
+            "ssim_loss": g_loss["ssim"],
+            "l1_forward_loss": g_loss["l1_forward"],
+            "l1_backward_loss": g_loss["l1_backward"],
+            "palette_loss": g_loss["palette"],
+            "histogram_loss": g_loss["histogram"],
+            "weight_decay": g_loss["weight_decay"]
+        }
+
+        return d_loss_summaries, g_loss_summaries
 
     def mix_and_discriminate(self, real_image, fake_image, half_batch_size):
         batch_size = half_batch_size * 2
