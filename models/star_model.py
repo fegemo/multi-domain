@@ -177,13 +177,13 @@ class UnpairedStarGANModel(S2SModel):
         self.discriminator_optimizer.apply_gradients(
             zip(discriminator_gradients, self.discriminator.trainable_variables))
 
-        with tf.name_scope("discriminator"):
-            with self.summary_writer.as_default():
-                tf.summary.scalar("total_loss", c_loss["total"], step=step // evaluate_steps)
-                tf.summary.scalar("real_loss", c_loss["real"], step=step // evaluate_steps)
-                tf.summary.scalar("fake_loss", c_loss["fake"], step=step // evaluate_steps)
-                tf.summary.scalar("real_domain_loss", c_loss["domain"], step=step // evaluate_steps)
-                tf.summary.scalar("gradient_penalty", c_loss["gp"], step=step // evaluate_steps)
+        d_loss_summaries = {
+            "total_loss": c_loss["total"],
+            "real_loss": c_loss["real"],
+            "fake_loss": c_loss["fake"],
+            "real_domain_loss": c_loss["domain"],
+            "gradient_penalty": c_loss["gp"],
+        }
 
         # TRAINING THE GENERATOR
         # ======================
@@ -212,22 +212,28 @@ class UnpairedStarGANModel(S2SModel):
             generator_gradients = gen_tape.gradient(g_loss["total"], self.generator.trainable_variables)
             self.generator_optimizer.apply_gradients(zip(generator_gradients, self.generator.trainable_variables))
 
-            with tf.name_scope("generator"):
-                with self.summary_writer.as_default():
-                    tf.summary.scalar("total_loss", g_loss["total"], step=step // evaluate_steps)
-                    tf.summary.scalar("adversarial_loss", g_loss["adversarial"], step=step // evaluate_steps)
-                    tf.summary.scalar("domain_loss", g_loss["domain"], step=step // evaluate_steps)
-                    tf.summary.scalar("recreation_loss", g_loss["recreation"], step=step // evaluate_steps)
-                    tf.summary.scalar("palette_loss", g_loss["palette"], step=step // evaluate_steps)
-                    tf.summary.scalar("tv_loss", g_loss["total_variation"], step=step // evaluate_steps)
-            g_loss["l1"] = tf.constant(0.)
-
+            g_loss_summaries = {
+                "total_loss": g_loss["total"],
+                "adversarial_loss": g_loss["adversarial"],
+                "domain_loss": g_loss["domain"],
+                "recreation_loss": g_loss["recreation"],
+                "l1_loss": tf.constant(0.),
+                "palette_loss": g_loss["palette"],
+                "total_variation_loss": g_loss["total_variation"],
+            }
         else:
             dummy = tf.constant(0.)
-            g_loss = {"total": dummy, "adversarial": dummy, "domain": dummy, "recreation": dummy, "l1": dummy,
-                      "palette": dummy, "total_variation": dummy}
+            g_loss_summaries = {
+                "total_loss": dummy, 
+                "adversarial_loss": dummy, 
+                "domain_loss": dummy,
+                "recreation_loss": dummy, 
+                "l1_loss": dummy,
+                "palette_loss": dummy, 
+                "total_variation_loss": dummy
+            }
 
-        return c_loss, g_loss
+        return d_loss_summaries, g_loss_summaries
 
     def preview_generated_images_during_training(self, examples, save_name, step):
         title = ["Input", "Target", "Generated", "Reconstructed"]
@@ -274,12 +280,9 @@ class UnpairedStarGANModel(S2SModel):
         if save_name is not None:
             plt.savefig(save_name, transparent=True)
 
-        # cannot call show otherwise it flushes and empties the figure, sending to tensorboard
-        # only a blank image... hence, let us just display the saved image
-        # display.display(figure)
-        # plt.show()
+        image = io_utils.plot_to_image(figure, self.config.inner_channels)
 
-        return figure
+        return image
 
     def initialize_random_examples_for_evaluation(self, train_ds, test_ds, num_images):
         number_of_domains = self.config.number_of_domains
@@ -584,20 +587,22 @@ class PairedStarGANModel(UnpairedStarGANModel):
         generator_gradients = gen_tape.gradient(g_loss["total"], self.generator.trainable_variables)
         self.generator_optimizer.apply_gradients(zip(generator_gradients, self.generator.trainable_variables))
 
-        with tf.name_scope("discriminator"):
-            with self.summary_writer.as_default():
-                tf.summary.scalar("total_loss", c_loss["total"], step=step // evaluate_steps)
-                tf.summary.scalar("real_loss", c_loss["real"], step=step // evaluate_steps)
-                tf.summary.scalar("fake_loss", c_loss["fake"], step=step // evaluate_steps)
-                tf.summary.scalar("real_domain_loss", c_loss["domain"], step=step // evaluate_steps)
-                tf.summary.scalar("gradient_penalty", c_loss["gp"], step=step // evaluate_steps)
+        c_loss_summaries = {
+            "total_loss": c_loss["total"],
+            "real_loss": c_loss["real"],
+            "fake_loss": c_loss["fake"],
+            "real_domain_loss": c_loss["domain"],
+            "gradient_penalty": c_loss["gp"]
+        }
 
-        with tf.name_scope("generator"):
-            with self.summary_writer.as_default():
-                tf.summary.scalar("total_loss", g_loss["total"], step=step // evaluate_steps)
-                tf.summary.scalar("adversarial_loss", g_loss["adversarial"], step=step // evaluate_steps)
-                tf.summary.scalar("domain_loss", g_loss["domain"], step=step // evaluate_steps)
-                tf.summary.scalar("recreation_loss", g_loss["recreation"], step=step // evaluate_steps)
-                tf.summary.scalar("l1_loss", g_loss["l1"], step=step // evaluate_steps)
-                tf.summary.scalar("palette_loss", g_loss["palette"], step=step // evaluate_steps)
-                tf.summary.scalar("tv_loss", g_loss["total_variation"], step=step // evaluate_steps)
+        g_loss_summaries = {
+            "total_loss": g_loss["total"],
+            "adversarial_loss": g_loss["adversarial"],
+            "domain_loss": g_loss["domain"],
+            "recreation_loss": g_loss["recreation"],
+            "l1_loss": g_loss["l1"],
+            "palette_loss": g_loss["palette"],
+            "tv_loss": g_loss["total_variation"]
+        }
+
+        return c_loss_summaries, g_loss_summaries

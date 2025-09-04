@@ -1,15 +1,18 @@
 import logging
+import sys
 import os
 from abc import ABC, abstractmethod
 import tensorflow as tf
 from tensorboard.plugins.custom_scalar import layout_pb2, summary as cs_summary
+from matplotlib import pyplot as plt
 import time
+import gc
 
+from configuration import OptionParser
 from utility import io_utils, frechet_inception_distance as fid, dataset_utils
 from utility.functional_utils import listify
-from utility.keras_utils import ConstantThenLinearDecay, count_network_parameters
-
-INITIAL_PATIENCE = 30
+from utility.keras_utils import ConstantThenLinearDecay, count_network_parameters, NoopAnnealingScheduler, \
+    LinearAnnealingScheduler, CosineAnnealingScheduler
 
 
 def show_eta(training_start_time, step_start_time, current_step, training_starting_step, total_steps,
@@ -55,11 +58,11 @@ class S2SModel(ABC):
         self.checkpoint_manager = None
         self.summary_writer = None
         self.training_metrics = None
-        self.early_stop_patience = INITIAL_PATIENCE
 
         self.config = config
         self.model_name = config.model_name
         self.experiment = config.experiment
+        self.early_stop_patience = config.patience
         self.checkpoint_dir = self.get_output_folder("training-checkpoints")
         self.layout_summary = S2SModel.create_layout_summary()
 
@@ -90,6 +93,20 @@ class S2SModel(ABC):
             for group in inference_parameters.keys():
                 logging.debug(f"\t{group}: {inference_parameters[group]:,} parameters")
 
+        # if config.palette_quantization, initialize the proper annealing scheduler
+        if config.palette_quantization:
+            if config.annealing == "linear":
+                self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, self.get_annealing_layers())
+            elif config.annealing == "cosine":
+                # cycles: at least 4 cycles, but can be 60 cycles if steps == 240000
+                cycles = max(4, config.steps // 4000)
+                self.annealing_scheduler = CosineAnnealingScheduler(config.temperature, cycles,
+                                                                    self.get_annealing_layers())
+            else:
+                raise ValueError(f"Unknown annealing method: {config.annealing}")
+        else:
+            self.annealing_scheduler = NoopAnnealingScheduler()
+
         # initializes training checkpoint information
         io_utils.ensure_folder_structure(self.checkpoint_dir)
         self.best_generator_checkpoint = tf.train.Checkpoint(**self.inference_networks)
@@ -113,6 +130,17 @@ class S2SModel(ABC):
 
         Returns:
             A dictionary containing the inference networks.
+        """
+        pass
+
+    @abstractmethod
+    def get_annealing_layers(self):
+        """
+        Returns the layers that will be used for palette quantization annealing.
+
+        Returns:
+            A list of layers that will be used for palette quantization annealing. They should have
+            a `temperature` attribute
         """
         pass
 
@@ -209,6 +237,8 @@ class S2SModel(ABC):
         if starting_step == 0:
             # initialize generator and discriminator optimizers
             lr = self.config.lr
+            beta1 = self.config.beta1
+            beta2 = self.config.beta2
             if self.config.lr_decay == "constant-then-linear":
                 # configuration as used by stargan
                 lr_generator = ConstantThenLinearDecay(lr, steps // self.config.d_steps)
@@ -226,15 +256,18 @@ class S2SModel(ABC):
             else:
                 lr_generator = lr
                 lr_discriminator = lr * self.config.ttur
-            self.generator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_generator, beta_1=0.5, beta_2=0.999)
-            self.discriminator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_discriminator, beta_1=0.5,
-                                                                    beta_2=0.999)
+            self.generator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_generator, beta_1=beta1, beta_2=beta2)
+            self.discriminator_optimizer = tf.keras.optimizers.Adam(learning_rate=lr_discriminator, beta_1=beta1,
+                                                                    beta_2=beta2)
 
             # initializes tensorboard utilities for logging training statistics
             self.summary_writer = tf.summary.create_file_writer(self.get_output_folder())
             with self.summary_writer.as_default():
                 tf.summary.experimental.write_raw_pb(
                     self.layout_summary.SerializeToString(), step=0)
+                tf.summary.text("configuration",
+                                f"# Command\n`python {' '.join(sys.argv)}`\n\n# Configuration\n    " + OptionParser.get_description(self.config, "\n    ", "=") + "\n",
+                                step=0)
 
             # initialize training metrics (used for saving the best model according to FID or L1)
             self.training_metrics = dict({
@@ -254,15 +287,23 @@ class S2SModel(ABC):
         finally:
             self.summary_writer.flush()
 
-    def do_fit(self, train_ds, test_ds, steps, evaluate_steps=1000, callbacks=[], starting_step=0):
+    def do_fit(self, train_ds, test_ds, steps, evaluate_steps=1000, callbacks=None, starting_step=0):
+        callbacks = [] if callbacks is None else callbacks
         num_test_images = min(self.config.test_size, 500)
         # num_test_images = self.config.test_size
         examples_for_visualization = self.select_examples_for_visualization(train_ds, test_ds)
         example_indices_for_evaluation = dict()
-        examples_for_evaluation = []
+        examples_for_evaluation = None
+
         if S2SModel.should_evaluate(callbacks):
             example_indices_for_evaluation = self.initialize_random_examples_for_evaluation(train_ds, test_ds,
                                                                                             num_test_images)
+        if "debug_discriminator" in callbacks:
+            # each is (4, domains, size, size, channels)
+            examples_to_debug_discriminator = dict({
+                "train": tf.convert_to_tensor(list(train_ds.shuffle(60).unbatch().take(4).as_numpy_iterator())),
+                "test": tf.convert_to_tensor(list(test_ds.shuffle(60).unbatch().take(4).as_numpy_iterator()))
+            })
 
         training_start_time = time.time()
         step_start_time = training_start_time
@@ -288,7 +329,6 @@ class S2SModel(ABC):
                     logging.info(f"Previewing images generated at step {step + 1} (train + test)...")
                     image_data = self.preview_generated_images_during_training(examples_for_visualization,
                                                                                save_image_name, step + 1)
-                    image_data = io_utils.plot_to_image(image_data, self.config.output_channels)
                     tf.summary.image(save_image_name, image_data, step=(step + 1) // evaluate_steps, max_outputs=5)
 
                 # check if we need to generate images for evaluation (and do it only once before the callback ifs)
@@ -300,9 +340,8 @@ class S2SModel(ABC):
                 # callbacks
                 if "debug_discriminator" in callbacks:
                     logging.info("Showing discriminator output patches (4 train + 4 test)...")
-                    self.show_discriminated_images(train_ds.unbatch(), "train", step + 1, 4)
-                    self.show_discriminated_images(test_ds.unbatch().shuffle(self.config.test_size), "test",
-                                                   step + 1, 4)
+                    self.show_discriminated_images(examples_to_debug_discriminator, step + 1)
+
                 improved_metric = dict()
                 if "evaluate_l1" in callbacks:
                     logging.StreamHandler().terminator = ""
@@ -319,14 +358,23 @@ class S2SModel(ABC):
                     fid_train, fid_test = self.report_fid(examples_for_evaluation, step=(step + 1) // evaluate_steps)
                     logging.info(f"FID: {fid_train:.3f} / {fid_test:.3f} (train/test)")
                     improved_metric["fid"] = self.update_training_metrics("fid", fid_test, step + 1,
-                                                                          "evaluate_l1" not in callbacks)
+                                                                        "evaluate_l1" not in callbacks)
+                if S2SModel.should_evaluate(callbacks):
+                    # free the memory used by the generated examples
+                    del examples_for_evaluation
+                    examples_for_evaluation = None
+                    gc.collect()
 
                 if "early_stop" in callbacks and S2SModel.should_evaluate(callbacks):
-                    # check for the chosen metric and stop if it is not improving
                     if self.training_metrics is not None:
-                        chosen_metric = "l1" if self.training_metrics is not None and "l1" in self.training_metrics else "fid"
-                        if chosen_metric in improved_metric and improved_metric[chosen_metric]:
-                            self.early_stop_patience = INITIAL_PATIENCE
+                        # if any metric improved, we reset the patience to the initial value...
+                        improved_metrics = list(map(lambda m: m[0], filter(lambda m: m[1], improved_metric.items())))
+                        if len(improved_metrics) > 0:
+                            old_patience = self.early_stop_patience
+                            self.early_stop_patience = self.config.patience
+                            logging.debug(f"Patience reset to {self.config.patience} from {old_patience} due to better: "
+                                          f"{', '.join(improved_metrics)}")
+                        # no metric improved, so we deduce the patience
                         else:
                             if self.early_stop_patience > 0:
                                 self.early_stop_patience -= 1
@@ -351,10 +399,29 @@ class S2SModel(ABC):
                                                              self.config.inner_channels, self.config.resizing_factor,
                                                              self.config.batch)
             self.train_step(batch, step, evaluate_steps, t)
+            d_metrics, g_metrics = self.train_step(batch, step, evaluate_steps, t)
 
             # dot feedback for every 10 training steps
             if (step + 1) % 10 == 0 and step - starting_step < steps - 1:
                 print(".", end="", flush=True)
+
+            # logs to tensorboard every 100 steps, in case evaluate_steps is 1000
+            should_log_metrics_to_tensorboard = (step + 1) % (evaluate_steps // 10) == 0
+            if should_log_metrics_to_tensorboard:
+                log_metrics_steps = step // evaluate_steps
+                self.log_training_metrics(d_metrics, g_metrics, log_metrics_steps)
+            del d_metrics
+            del g_metrics
+
+            # log temperature if palette quantization is used
+            if self.config.palette_quantization:
+                with self.summary_writer.as_default():
+                    tf.summary.scalar(f"generator/temperature", self.get_annealing_layers()[0].temperature,
+                                      step=step)
+            self.summary_writer.flush()
+
+            # close possibly images that remained open
+            plt.close('all')
 
         logging.info("About to exit the training loop...")
 
@@ -372,6 +439,16 @@ class S2SModel(ABC):
             if should_save_checkpoint:
                 self.save_generator_checkpoint(step)
         return improved
+
+    def log_training_metrics(self, d_metrics, g_metrics, logging_step):
+        with tf.name_scope("discriminator"):
+            with self.summary_writer.as_default():
+                for name, value in d_metrics.items():
+                    tf.summary.scalar(name, value, step=logging_step)
+        with tf.name_scope("generator"):
+            with self.summary_writer.as_default():
+                for name, value in g_metrics.items():
+                    tf.summary.scalar(name, value, step=logging_step)
 
     def evaluate_l1(self, real_image, fake_image):
         return tf.reduce_mean(tf.abs(fake_image - real_image))
@@ -521,16 +598,15 @@ class S2SModel(ABC):
         """
         pass
 
-    def show_discriminated_images(self, dataset, ds_name, step, num_images=4):
-        if num_images is None:
-            num_images = dataset.cardinality()
-
+    def show_discriminated_images(self, examples, step):
         base_path = self.get_output_folder("discriminated-images")
-        image_path = os.sep.join([base_path, f"discriminated_{ds_name}_at_step_{step}.png"])
         io_utils.ensure_folder_structure(base_path)
 
-        batch = list(dataset.take(num_images).as_numpy_iterator())
-        self.debug_discriminator_output(batch, image_path)
+        train_image_path = os.sep.join([base_path, f"discriminated_train_at_step_{step}.png"])
+        test_image_path = os.sep.join([base_path, f"discriminated_test_at_step_{step}.png"])
+
+        self.debug_discriminator_output(examples["train"], train_image_path)
+        self.debug_discriminator_output(examples["test"], test_image_path)
 
     def get_output_folder(self, sub_folder=None, skip_run=False, run=None):
         log_folder = self.config.log_folder
