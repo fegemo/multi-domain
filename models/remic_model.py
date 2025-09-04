@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 from functools import reduce
 
 import tensorflow as tf
+import numpy as np
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
@@ -82,8 +83,12 @@ class RemicModel(MunitModel):
 
         elif config.generator == "r3mic":
             unified_content_encoder = r3mic_unified_content_encoder(config)
+            # unified_content_encoder = remic_unified_content_encoder("Unified", image_size, channels,
+            #                                                         number_of_domains)
             style_encoders = [r3mic_style_encoder(s, config) for s in domain_letters]
+            # style_encoders = [remic_style_encoder(s, image_size, channels) for s in domain_letters]
             decoders = [r3mic_decoder(s, config) for s in domain_letters]
+            # decoders = [remic_generator(s, channels, palette_quantization, temperature) for s in domain_letters]
 
             single_image_input = tf.keras.layers.Input(shape=(image_size, image_size, channels))
             all_images_input = tf.keras.layers.Input(shape=(number_of_domains, image_size, image_size, channels))
@@ -330,68 +335,50 @@ class RemicModel(MunitModel):
                 decoded_images_with_random_style,
                 palettes, temperature)
 
+            total_d_loss = tf.add_n([d_loss["total"][i] for i in range(number_of_domains)])
+            total_g_loss = tf.add_n([g_loss["total"][i] for i in range(number_of_domains)])
+
         # since the update to keras 3.0 (due to tensorflow 2.18), the optimizer needs to be called with
         # only a single set of gradients and variables. Therefore, we need to concatenate the gradients and
         # variables of all models before calling the optimizer
-        discriminator_gradients = [tape.gradient(d_loss["total"][d], self.discriminators[d].trainable_variables)
-                                   for d in range(number_of_domains)]
-        discriminator_gradients = [g for grad in discriminator_gradients for g in grad]
-        generator_gradients = [tape.gradient(g_loss["total"][d], self.generators[d].trainable_variables)
-                               for d in range(number_of_domains)]
-        generator_gradients = [g for grad in generator_gradients for g in grad]
+        all_discriminator_vars = [
+            v for d in range(number_of_domains) for v in self.discriminators[d].trainable_variables
+        ]
+        all_generator_vars = [
+            v for d in range(number_of_domains) for v in self.generators[d].trainable_variables
+        ]
 
-        all_discriminator_trainable_variables = [v for d in range(number_of_domains)
-                                                 for v in self.discriminators[d].trainable_variables]
-        all_generator_trainable_variables = [v for d in range(number_of_domains)
-                                             for v in self.generators[d].trainable_variables]
-        self.discriminator_optimizer.apply_gradients(
-            zip(discriminator_gradients, all_discriminator_trainable_variables))
-        self.generator_optimizer.apply_gradients(zip(generator_gradients, all_generator_trainable_variables))
+        discriminator_gradients = tape.gradient(total_d_loss, all_discriminator_vars)
+        generator_gradients = tape.gradient(total_g_loss, all_generator_vars)
 
-        # writes statistics of the training step
-        with tf.name_scope("discriminator"):
-            with self.summary_writer.as_default():
-                fake_loss = real_loss = weight_loss = gp_loss = total_loss = 0
-                for i in range(number_of_domains):
-                    fake_loss += d_loss["fake"][i]
-                    real_loss += d_loss["real"][i]
-                    weight_loss += d_loss["l2-regularization"][i]
-                    gp_loss += d_loss["gradient-penalty"][i]
-                    total_loss += d_loss["total"][i]
-                tf.summary.scalar("fake_loss", tf.reduce_mean(fake_loss / number_of_domains),
-                                  step=step // evaluate_steps)
-                tf.summary.scalar("real_loss", tf.reduce_mean(real_loss / number_of_domains),
-                                  step=step // evaluate_steps)
-                tf.summary.scalar("weight_loss", tf.reduce_mean(weight_loss / number_of_domains),
-                                  step=step // evaluate_steps)
-                tf.summary.scalar("gradient_penalty_loss", tf.reduce_mean(gp_loss / number_of_domains),
-                                  step=step // evaluate_steps)
-                tf.summary.scalar("total_loss", tf.reduce_mean(total_loss / number_of_domains),
-                                  step=step // evaluate_steps)
+        # filters out None grads just in case
+        d_pairs = [(g, v) for g, v in zip(discriminator_gradients, all_discriminator_vars) if g is not None]
+        g_pairs = [(g, v) for g, v in zip(generator_gradients, all_generator_vars) if g is not None]
 
-        with tf.name_scope("generator"):
-            with self.summary_writer.as_default():
-                adversarial_loss = image_consistency_loss = style_loss = 0
-                image_reconstruction_loss = palette_loss = weight_loss = total_loss = 0
-                content_loss = g_loss["content-consistency"]
-                for i in range(number_of_domains):
-                    adversarial_loss += g_loss["adversarial"][i]
-                    image_consistency_loss += g_loss["image-consistency"][i]
-                    style_loss += g_loss["style-consistency"][i]
-                    image_reconstruction_loss += g_loss["image-reconstruction"][i]
-                    palette_loss += g_loss["palette"][i]
-                    weight_loss += g_loss["l2-regularization"][i]
-                    total_loss += g_loss["total"][i]
-                tf.summary.scalar("adversarial_loss", tf.reduce_mean(adversarial_loss), step=step // evaluate_steps)
-                tf.summary.scalar("image_consistency_loss", tf.reduce_mean(image_consistency_loss),
-                                  step=step // evaluate_steps)
-                tf.summary.scalar("style_loss", tf.reduce_mean(style_loss), step=step // evaluate_steps)
-                tf.summary.scalar("content_loss", tf.reduce_mean(content_loss), step=step // evaluate_steps)
-                tf.summary.scalar("image_reconstruction_loss", tf.reduce_mean(image_reconstruction_loss),
-                                  step=step // evaluate_steps)
-                tf.summary.scalar("palette_loss", tf.reduce_mean(palette_loss), step=step // evaluate_steps)
-                tf.summary.scalar("weight_loss", tf.reduce_mean(weight_loss), step=step // evaluate_steps)
-                tf.summary.scalar("total_loss", tf.reduce_mean(total_loss), step=step // evaluate_steps)
+        self.discriminator_optimizer.apply_gradients(d_pairs)
+        self.generator_optimizer.apply_gradients(g_pairs)
+
+        # aggregates metrics for summaries
+        d_loss_summaries = {
+            "fake_loss": tf.reduce_mean(d_loss["fake"]),
+            "real_loss": tf.reduce_mean(d_loss["real"]),
+            "weight_loss": tf.add_n(d_loss["l2-regularization"]) / number_of_domains,
+            "gradient_penalty_loss": tf.add_n(d_loss["gradient-penalty"]) / number_of_domains,
+            "total_loss": total_d_loss / number_of_domains,
+        }
+
+        g_loss_summaries = {
+            "adversarial_loss": tf.reduce_mean(g_loss["adversarial"]),
+            "image_consistency_loss": tf.add_n(g_loss["image-consistency"]) / number_of_domains,
+            "style_loss": tf.add_n(g_loss["style-consistency"]) / number_of_domains,
+            "content_loss": g_loss["content-consistency"],  # already scalar across domains
+            "image_reconstruction_loss": tf.add_n(g_loss["image-reconstruction"]) / number_of_domains,
+            "palette_loss": tf.add_n(g_loss["palette"]) / number_of_domains,
+            "weight_loss": tf.add_n(g_loss["l2-regularization"]) / number_of_domains,
+            "total_loss": total_g_loss / number_of_domains,
+        }
+
+        return d_loss_summaries, g_loss_summaries
 
     def select_examples_for_visualization(self, train_ds, test_ds):
         number_of_domains = self.config.number_of_domains
@@ -483,6 +470,12 @@ class RemicModel(MunitModel):
         decoded_images_t_0 = tf.transpose(decoded_images_t_0, [1, 0, 2, 3, 4])
         # decoded_images_xxxxxxxxxxxxxxxxx (shape=[b, d, s, s, c])
 
+        # force the tensors to come to the cpu to avoid potential matplotlib memory leaks
+        decoded_images_t_0 = decoded_images_t_0.numpy()
+        decoded_images_t_curr = decoded_images_t_curr.numpy()
+        decoded_images_with_random_style = decoded_images_with_random_style.numpy()
+        visible_source_images = visible_source_images.numpy()
+
         figure = plt.figure(figsize=(4 * num_cols, 4 * num_rows+2), layout="constrained")
         sub_figs = figure.subfigures(num_rows, num_cols)
         for i in range(num_rows):
@@ -501,7 +494,7 @@ class RemicModel(MunitModel):
             for i_d in range(2):
                 for j_d in range(2):
                     ax = axes[i_d, j_d]
-                    ax.imshow(tf.clip_by_value(visible_source_images[i, i_d * 2 + j_d] * 0.5 + 0.5, 0., 1.))
+                    ax.imshow(np.clip(visible_source_images[i, i_d * 2 + j_d] * 0.5 + 0.5, 0., 1.))
                     ax.axis("off")
 
             # cols: [1, 4]: generated images with current temperature, original style
@@ -510,7 +503,7 @@ class RemicModel(MunitModel):
                 if i == 0:
                     sub_fig.suptitle(titles[j], fontsize=24)
                 ax = sub_fig.subplots(1, 1)
-                ax.imshow(tf.clip_by_value(decoded_images_t_curr[i, j - 1] * 0.5 + 0.5, 0., 1.))
+                ax.imshow(np.clip(decoded_images_t_curr[i, j - 1] * 0.5 + 0.5, 0., 1.))
                 ax.axis("off")
 
             # cols: [5, 8]: generated images with temperature=0, original style
@@ -519,7 +512,7 @@ class RemicModel(MunitModel):
                 if i == 0:
                     sub_fig.suptitle(titles[j], fontsize=24)
                 ax = sub_fig.subplots(1, 1)
-                ax.imshow(tf.clip_by_value(decoded_images_t_0[i, j - number_of_domains - 1] * 0.5 + 0.5, 0., 1.))
+                ax.imshow(np.clip(decoded_images_t_0[i, j - number_of_domains - 1] * 0.5 + 0.5, 0., 1.))
                 ax.axis("off")
 
             # cols: [9]: generated images t=0 with random style (only the last domain, to illustrate)
@@ -527,7 +520,7 @@ class RemicModel(MunitModel):
             if i == 0:
                 sub_fig.suptitle(titles[-1], fontsize=24)
             ax = sub_fig.subplots(1, 1)
-            ax.imshow(tf.clip_by_value(
+            ax.imshow(np.clip(
                 decoded_images_with_random_style[i] * 0.5 + 0.5, 0., 1.))
             ax.axis("off")
 
@@ -536,7 +529,11 @@ class RemicModel(MunitModel):
         if save_name is not None:
             plt.savefig(save_name, transparent=True)
 
-        return figure
+        # convert to TF image and *close the figure* to release memory:
+        image = io_utils.plot_to_image(figure, self.config.output_channels)
+        # plot_to_image will save the passed figure properly and close it.
+
+        return image
 
     def initialize_random_examples_for_evaluation(self, train_ds, test_ds, num_images):
         uniform_sampler = UniformDropoutSampler(self.config)
@@ -559,6 +556,17 @@ class RemicModel(MunitModel):
     def generate_images_for_evaluation(self, example_indices_for_evaluation):
         batch_size = self.config.batch * 2
 
+        def batched_call(model, inputs):
+            n = tf.shape(inputs)[0]
+            outputs = []
+            for i in range(0, int(n), batch_size):
+                batch = inputs[i : i + batch_size]
+                out = model(batch, training=False)
+                # Ensure we only keep a tensor, not the computation graph
+                outputs.append(tf.convert_to_tensor(out))
+                del batch, out  # free references early
+            return tf.concat(outputs, axis=0)
+
         def generate_images_from_example_indices(example_indices):
             domain_images, keep_mask, possible_target_domain = example_indices
             # domain_images (b, d, s, s, c)
@@ -567,23 +575,27 @@ class RemicModel(MunitModel):
             visible_source_images = domain_images * keep_mask
             # visible_source_images (b, d, s, s, c)
 
-            encoded_contents = self.unified_content_encoder.predict(visible_source_images, batch_size=batch_size,
-                                                                    verbose=0)
+            # encoded_contents = self.unified_content_encoder.predict(visible_source_images, batch_size=batch_size,
+            #                                                         verbose=0)
             encoded_styles = [self.style_encoders[d].predict(visible_source_images[:, d], batch_size=batch_size,
                                                              verbose=0)
                               for d in range(self.config.number_of_domains)]
+            encoded_contents = batched_call(self.unified_content_encoder, visible_source_images)
+            encoded_styles = [batched_call(self.style_encoders[d], visible_source_images[:, d])
+                              for d in range(self.config.number_of_domains)]
             # encoded_contents (b, 16, 16, 256)
-            # encoded_styles (d, b, 8)
+            # encoded_styles [d] x (b, 8)
 
             palette = palette_utils.batch_extract_palette_ragged(domain_images)
             palette = palette.to_tensor((-1, -1, -1, -1))
             # palette (b, max_n, c)
 
-            decoded_images = [self.decoders[d].predict(
-                self.gen_supplier(encoded_styles[d], encoded_contents, palette), batch_size=batch_size,
-                verbose=0)["output_image"]
-                              for d in range(self.config.number_of_domains)]
-
+            decoded_images = []
+            for d in range(self.config.number_of_domains):
+                inputs = self.gen_supplier(encoded_styles[d], encoded_contents, palette)
+                decoded = batched_call(self.decoders[d], inputs)
+                decoded_images.append(decoded["output_image"])
+            
             fake_images = tf.gather(tf.transpose(decoded_images, [1, 0, 2, 3, 4]), possible_target_domain, axis=1,
                                     batch_dims=1)
             real_images = tf.gather(domain_images, possible_target_domain, batch_dims=1)
@@ -697,22 +709,14 @@ class RemicModel(MunitModel):
         fake_images = tf.concat(fake_images, axis=0)
 
         # gets the result of discriminating the real and fake (translated) images
-        real_patches = [self.discriminators[target_domains[i]](real_images[i][tf.newaxis, ...], training=True)
+        real_patches = [self.discriminators[target_domains[i]](real_images[i][tf.newaxis, ...], training=False)
                         for i in range(batch_size)]
-        fake_patches = [self.discriminators[target_domains[i]](fake_images[i][tf.newaxis, ...], training=True)
+        fake_patches = [self.discriminators[target_domains[i]](fake_images[i][tf.newaxis, ...], training=False)
                         for i in range(batch_size)]
         # if discriminator_scales == 1:
         #     real_patches = [[real_patches[i]] for i in range(batch_size)]
         #     fake_patches = [[fake_patches[i]] for i in range(batch_size)]
         # [b] x [ds] x shape=[1, x, x, 1]
-
-        real_means = [tf.reduce_mean(real_patches[i][c], axis=[1, 2, 3]) for i in range(batch_size)
-                      for c in range(discriminator_scales)]
-        fake_means = [tf.reduce_mean(fake_patches[i][c], axis=[1, 2, 3]) for i in range(batch_size)
-                      for c in range(discriminator_scales)]
-        # real_means = tf.reshape(real_means, [batch_size, 3])
-        # fake_means = tf.reshape(fake_means, [batch_size, 3])
-        # [b] x [3] x shape=[1]
 
         # lsgan yields an unbounded real number, which should be 1 for real images and 0 for fake
         # but, we need to provide them in the [0, 1] range
@@ -757,7 +761,7 @@ class RemicModel(MunitModel):
                 else:
                     raise ValueError(f"Invalid column index {j}")
                 plt.axis("off")
-                plt.imshow(tf.clip_by_value(image, 0., 1.), **imshow_args)
+                plt.imshow(np.clip(image.numpy(), 0., 1.), **imshow_args)
 
         fig.tight_layout()
         plt.savefig(image_path, transparent=True)

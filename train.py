@@ -1,8 +1,11 @@
-import logging
+import os
 import sys
-from math import ceil
+import logging
 from configuration import OptionParser
 import tensorflow as tf
+
+# instructs matplotlib to use a tmp folder that is outside the network storage on verlab
+os.environ[ 'MPLCONFIGDIR' ] = '/tmp/'
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)-8s %(message)s",
