@@ -158,13 +158,13 @@ def random_crop_5d(images, crop_size, batch_size):
     # gets a random start_x and start_y for each example in the batch
     start_y = tf.random.uniform(
         [batch_size],
-        minval=tf.maximum(0., bounding_boxes[:, 0] - crop_size // 2),
+        minval=tf.maximum(0., tf.minimum(tf.cast(crop_size, tf.float32), bounding_boxes[:, 0] - crop_size // 2)),
         maxval=tf.minimum(tf.cast(height - crop_size, tf.float32), bounding_boxes[:, 1] - crop_size // 2),
         dtype=tf.float32
     )
     start_x = tf.random.uniform(
         [batch_size],
-        minval=tf.maximum(0., bounding_boxes[:, 2] - crop_size // 2),
+        minval=tf.maximum(0., tf.minimum(tf.cast(crop_size, tf.float32), bounding_boxes[:, 2] - crop_size // 2)),
         maxval=tf.minimum(tf.cast(width - crop_size, tf.float32), bounding_boxes[:, 3] - crop_size // 2),
         dtype=tf.float32
     )
