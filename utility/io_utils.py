@@ -64,6 +64,17 @@ def plot_4d_tensor_images(tensor):
     plt.tight_layout()
     plt.show()
 
+def plot_3d_tensor_image(tensor):
+    image_size, _, channels = tensor.shape
+    image = (tensor + 1) / 2
+    if channels == 1:
+        image = tf.squeeze(image, axis=-1)
+    plt.figure(figsize=(image_size / 100, image_size / 100), dpi=100)
+    plt.imshow(image)
+    plt.axis('off')
+    plt.show()
+
+
 # @tf.function
 # def extract_palette(image, palette_ordering, channels=OUTPUT_CHANNELS):
 #     """
