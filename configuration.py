@@ -252,6 +252,8 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--gpu", type=int, help="GPU index to use", default=0)
         self.parser.add_argument("--vram", type=int, help="Amount of VRAM in MB to limit. Use 0 for "
                                                           "default behavior and -1 for on-demand growth", default=0)
+        self.parser.add_argument("--profile", type=int, default=0, help="If > 0, indicates the port to use to profile the code" \
+                                 "using the tensorboard profiler plugin")
 
         self.initialized = True
 

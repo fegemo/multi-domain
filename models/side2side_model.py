@@ -308,6 +308,9 @@ class S2SModel(ABC):
         training_start_time = time.time()
         step_start_time = training_start_time
 
+        if self.config.profile > 0:
+            tf.profiler.experimental.server.start(self.config.profile)
+            
         for step, batch in train_ds.repeat().take(steps).enumerate():
             step += starting_step
 
@@ -390,8 +393,12 @@ class S2SModel(ABC):
                     print("_" * (evaluate_steps // 10))
 
             # actually TRAIN
+            if step == starting_step:
+                logging.info("About to call train_step for the first time...")
             t = tf.cast(step / steps, tf.float32)
-            d_metrics, g_metrics = self.train_step(batch, step, evaluate_steps, t)
+            d_metrics, g_metrics = self.train_step(batch, step, tf.constant(evaluate_steps, dtype=tf.int64), t)        
+            if step == starting_step:
+                logging.info("Just finished the first train_step.")
 
             # dot feedback for every 10 training steps
             if (step + 1) % 10 == 0 and step - starting_step < steps - 1:
