@@ -33,6 +33,9 @@ class UnpairedStarGANModel(S2SModel):
         self.generator = self.inference_networks["generator"]
         self.discriminator = self.training_only_networks["discriminator"]
 
+    def get_annealing_layers(self):
+        return [self.generator.quantization] if self.config.palette_quantization else []
+
     def create_inference_networks(self):
         config = self.config
         if config.generator == "resnet" or config.generator == "":
