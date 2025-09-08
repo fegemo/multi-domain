@@ -31,22 +31,20 @@ class UnpairedStarGANModel(S2SModel):
         self.gen_supplier = SkipParamsSupplier(([2] if not config.source_domain_aware_generator else []) +
                              ([3] if not config.palette_quantization else []))
         self.crit_supplier = NParamsSupplier(2 if config.conditional_discriminator else 1)
-        self.generator = self.inference_networks["generator"]
-        self.discriminator = self.training_only_networks["discriminator"]
-
-        if config.palette_quantization and config.annealing != "none":
-            self.annealing_scheduler = LinearAnnealingScheduler(config.temperature, [self.generator.quantization])
-        else:
-            self.annealing_scheduler = NoopAnnealingScheduler()
 
     def create_inference_networks(self):
         config = self.config
         if config.generator == "resnet" or config.generator == "":
+            self.generator = stargan_resnet_generator(
+                config.image_size,
+                config.output_channels,
+                config.number_of_domains,
+                config.source_domain_aware_generator,
+                config.capacity,
+                config.palette_quantization,
+                config.temperature)
             return {
-                "generator": stargan_resnet_generator(config.image_size, config.output_channels,
-                                                      config.number_of_domains,
-                                                      config.source_domain_aware_generator, config.capacity,
-                                                      config.palette_quantization)
+                "generator": self.generator
             }
         else:
             raise ValueError(f"The provided {config.generator} type for generator has not been implemented.")
@@ -54,13 +52,19 @@ class UnpairedStarGANModel(S2SModel):
     def create_training_only_networks(self):
         config = self.config
         if config.discriminator == "resnet" or config.discriminator == "":
+            self.discriminator = stargan_resnet_discriminator(
+                config.number_of_domains,
+                config.image_size,
+                config.output_channels,
+                config.conditional_discriminator)
             return {
-                "discriminator": stargan_resnet_discriminator(config.number_of_domains, config.image_size,
-                                                              config.output_channels,
-                                                              config.conditional_discriminator)
+                "discriminator": self.discriminator
             }
         else:
             raise ValueError(f"The provided {config.discriminator} type for discriminator has not been implemented.")
+
+    def get_annealing_layers(self):
+        return [self.generator.quantization]
 
     def generator_loss(self, critic_fake_patches, critic_fake_domain, fake_domain, real_image, recreated_image,
                        fake_image, source_image, target_palette, temperature):

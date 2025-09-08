@@ -48,26 +48,27 @@ class CollaGANModel(S2SModel):
 
         self.cce = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
         self.gen_supplier = NParamsSupplier(3 if config.palette_quantization else 2)
-        self.generator = self.inference_networks["generator"]
-        self.discriminator = self.training_only_networks["discriminator"]
 
     def create_inference_networks(self):
         config = self.config
         if config.generator in ["colla", "affluent", ""]:
+            self.generator = collagan_affluent_generator(
+                config.number_of_domains, config.image_size,
+                config.output_channels,
+                config.capacity,
+                config.palette_quantization,
+                config.temperature)
             return {
-                "generator": collagan_affluent_generator(config.number_of_domains, config.image_size,
-                                                         config.output_channels,
-                                                         config.capacity,
-                                                         config.palette_quantization,
-                                                         config.temperature)
+                "generator": self.generator
             }
         elif config.generator in ["palette-transformer"]:
+            self.generator = collagan_palette_conditioned_with_transformer_generator(
+                config.number_of_domains, config.image_size,
+                config.output_channels,
+                config.capacity,
+                config.temperature)
             return {
-                "generator": collagan_palette_conditioned_with_transformer_generator(
-                    config.number_of_domains, config.image_size,
-                    config.output_channels,
-                    config.capacity,
-                    config.temperature)
+                "generator": self.generator
             }
         else:
             raise ValueError(f"The provided {config.generator} type for generator has not been implemented.")
@@ -75,9 +76,12 @@ class CollaGANModel(S2SModel):
     def create_training_only_networks(self):
         config = self.config
         if config.discriminator in ["colla", ""]:
+            self.discriminator = collagan_original_discriminator(
+                config.number_of_domains,
+                config.image_size,
+                config.output_channels)
             return {
-                "discriminator": collagan_original_discriminator(config.number_of_domains, config.image_size,
-                                                                 config.output_channels)
+                "discriminator": self.discriminator
             }
         else:
             raise ValueError(f"The provided {config.discriminator} type for discriminator has not been implemented.")
