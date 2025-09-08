@@ -32,6 +32,9 @@ class UnpairedStarGANModel(S2SModel):
                              ([3] if not config.palette_quantization else []))
         self.crit_supplier = NParamsSupplier(2 if config.conditional_discriminator else 1)
 
+    def get_annealing_layers(self):
+        return [self.generator.quantization] if self.config.palette_quantization else []
+
     def create_inference_networks(self):
         config = self.config
         if config.generator == "resnet" or config.generator == "":
