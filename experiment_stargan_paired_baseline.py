@@ -14,7 +14,6 @@ if __name__ == "__main__":
                 "callback-evaluate-fid", "callback-evaluate-l1", #"callback-debug-discriminator",
                 "conditional-discriminator", "source-domain-aware-generator",
                 "save-model",
-                "palette-quantization"
             ],
             "log-folder": config.output if config.output is not None else "output",
             "steps": 100000,
@@ -26,23 +25,13 @@ if __name__ == "__main__":
             "lambda-domain": 1.0,
             "lambda-gp": 10.0,
             "lambda-l1": 100.0,
-            "lambda-l1_backward": 10.0,
+            "lambda-l1-backward": 10.0,
             "lr-decay": "constant-then-linear",
-            "annealing": "linear",
-            "temperature": 0.1,
-            "lambda-palette": 1.0,
             "model-name": "@model",
-            "experiment": "palette-resizing,@dataset,&adhoc,&resizing-factor",
+            "experiment": "baseline,@dataset",
             "vram": -1
         },
-        {
-            "adhoc": [
-                ["up-preprocessing", "no-up-aug"], #só pre-processamento
-                [], #só augmentation
-                ["up-preprocessing"], #ambos
-            ],
-            "resizing-factor": [2, 3] #escolher o melhor
-        },
+        {},
         {
             "all": {
                 "adhoc": ["no-tran"]

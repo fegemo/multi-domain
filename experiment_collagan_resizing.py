@@ -15,7 +15,6 @@ if __name__ == "__main__":
                 "callback-evaluate-l1",
                 #"callback-debug-discriminator",
                 "save-model",
-                "palette-quantization"
             ],
             "log-folder": config.output if config.output is not None else "output",
             "steps": 100000,
@@ -24,20 +23,17 @@ if __name__ == "__main__":
             "lr": 0.0001,
             "ttur": 1,
             "batch": 4,
-            "annealing": "linear",
-            "temperature": 0.1,
             "lr-decay": "constant-then-linear",
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "model-name": "@model",
-            "experiment": "palette-resizing,@dataset,&adhoc,&resizing-factor",
+            "experiment": "resizing,@dataset,&adhoc,&resizing-factor",
             "generator": "affluent",
             "lambda-adversarial": 10.,
             "lambda-l1": 100.,
             "lambda-ssim": 1.,
             "lambda-domain": 10.,
             "lambda-regularization": 0.001,
-            "lambda-palette": 1.0,
             "vram": -1
         },
         {
@@ -46,7 +42,7 @@ if __name__ == "__main__":
                 [], #só augmentation
                 ["up-preprocessing"], #ambos
             ],
-            "resizing-factor": [2, 3] #escolher o melhor
+            "resizing-factor": [2, 3]
         },
         {
             "all": {

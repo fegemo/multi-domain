@@ -12,29 +12,35 @@ if __name__ == "__main__":
         {
             "model": "collagan",
             "adhoc": [
-                "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
+                "callback-evaluate-fid", "callback-evaluate-l1", #"callback-debug-discriminator",
                 "save-model"
             ],
             "log-folder": config.output if config.output is not None else "output",
-            "steps": 600000,
+            #"steps": 600000,
+            "steps": 100000,
             "evaluate-steps": 1000,
             "capacity": 4,
             "d-steps": 1,
-            "lr": 0.00001,
-            "ttur": 0.1,
-            "batch": 20,
+            #"lr": 0.00001,
+            "lr": 0.0001,
+            #"ttur": 0.1,
+            "ttur": 1,
+            #"batch": 20,
+            "batch": 4,
             "lr-decay": "constant-then-linear",
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "model-name": "@model",
-            "experiment": "baseline",
+            "experiment": "baseline,@dataset",
             "generator": "affluent",
             "lambda-l1": 100.,
-            "lambda-ssim": 10.,
+            #"lambda-ssim": 10.,
+            "lambda-ssim": 1.,
             "lambda-domain": 10.,
             "lambda-regularization": 0.001,
-            "lambda-palette": 0.,
-            "lambda-histogram": 0.
+            #"lambda-histogram": 0.
+            "vram": -1, # new
+            "lambda-adversarial": 10. # new
         }, {
         }, {
             # "tiny": {
