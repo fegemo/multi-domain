@@ -527,7 +527,19 @@ class CosineAnnealingScheduler(AnnealingScheduler):
         sigma = self.amplitude_variance
         lamb = self.cycles
         CYC = self.FULL_CYCLE
-        return tf.math.pow(1 - t, 2) * ((1 - sigma) * t0 + (t0 * sigma) * tf.math.cos(t * lamb * CYC))
+        return (1 - t) * ((1 - sigma) * t0 + (t0 * sigma) * tf.math.cos(t * lamb * CYC))
+
+class ExpCosineAnnealingSchedule(CosineAnnealingScheduler):
+    def __init__(self, initial_temperature, cycles, annealing_layers):
+        super().__init__(initial_temperature, cycles, annealing_layers)
+
+    def get_value(self, t):
+        t0 = self.initial_temperature
+        sigma = self.amplitude_variance
+        lamb = self.cycles
+        CYC = self.FULL_CYCLE
+        return tf.math.pow(1 - t, 4) * ((1 - sigma) * t0 + (t0 * sigma) * tf.math.cos(t * lamb * CYC))
+
 
 class NoopAnnealingScheduler(AnnealingScheduler):
     def get_value(self, t):

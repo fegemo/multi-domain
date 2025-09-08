@@ -12,7 +12,7 @@ from configuration import OptionParser
 from utility import io_utils, frechet_inception_distance as fid
 from utility.functional_utils import listify
 from utility.keras_utils import ConstantThenLinearDecay, count_network_parameters, NoopAnnealingScheduler, \
-    LinearAnnealingScheduler, CosineAnnealingScheduler
+    LinearAnnealingScheduler, CosineAnnealingScheduler, ExpCosineAnnealingSchedule
 
 
 def show_eta(training_start_time, step_start_time, current_step, training_starting_step, total_steps,
@@ -102,6 +102,10 @@ class S2SModel(ABC):
                 cycles = max(4, config.steps // 4000)
                 self.annealing_scheduler = CosineAnnealingScheduler(config.temperature, cycles,
                                                                     self.get_annealing_layers())
+            elif config.annealing == "expcosine":
+                cycles = max(4, config.steps // 4000)
+                self.annealing_scheduler = ExpCosineAnnealingSchedule(config.temperature, cycles,
+                                                                       self.get_annealing_layers())
             else:
                 raise ValueError(f"Unknown annealing method: {config.annealing}")
         else:
