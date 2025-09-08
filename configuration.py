@@ -71,6 +71,7 @@ class OptionParser(metaclass=SingletonMeta):
                           "- the model to train")
         self.parser.add_argument("--generator", help="network from { resnet } for stargan or "
                                                      "{ affluent, palette-transformer } for collagan, "
+                                                     "{ remic, r3mic, r3mic-origdec, r3gan } for remic, "
                                                      "{ monolith, r3gan } for sprite",
                                  default="")
         self.parser.add_argument("--discriminator", help="different network topology, currently an "
@@ -141,7 +142,7 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--film", type=int, help="the length of the FiLM layers that condition "
                                                           "the generation on noise and on the domain in SpriteGAN",
                                  default=FILM_LENGTH)
-        self.parser.add_argument("--domain_availability_embedding", type=int, default=0,
+        self.parser.add_argument("--domain-availability-embedding", type=int, default=0,
                                  help="the size of the embedding used to represent which domains are available in the "
                                       "input for remic (r3mic generator)")
         self.parser.add_argument("--d-steps", type=int,
@@ -208,7 +209,7 @@ class OptionParser(metaclass=SingletonMeta):
                                       "forward generated one when computing the cycled images. Colla's paper does not "
                                       "specify this, but its code shows that it replaces all that have been "
                                       "dropped out", default="dropout")
-        self.parser.add_argument("--annealing", help="one from {none, linear}, used"
+        self.parser.add_argument("--annealing", help="one from {none, linear, cosine, expcosine}, used"
                                                      " to control how the temperature decreases when using"
                                                      " palette quantization", default="linear")
         self.parser.add_argument("--temperature", type=float, help="initial temperature for"

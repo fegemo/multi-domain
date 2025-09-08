@@ -515,7 +515,7 @@ def munit_decoder(domain_letter, channels, palette_quantization=False, initial_t
             input_style_code)
         adain_params_inner = layers.Dense(256, kernel_regularizer=tf.keras.regularizers.l2(1e-4), activation="relu")(
             adain_params_inner)
-        # 4096 = 256 (dense dimension) * 8 (style code) * 2 (weight and bias)
+        # 4096 = 256 (dense dimension) * 8 (convs) * 2 (weight and bias)
         adain_params_inner = layers.Dense(4096, kernel_regularizer=tf.keras.regularizers.l2(1e-4))(
             adain_params_inner)
         return tf.keras.Model(input_style_code, [adain_params_inner])
@@ -771,11 +771,11 @@ def r3mic_unified_content_encoder(config):
     variance_scaling = 2*2 + 4
     # 2x downsampling blocks
     if domain_availability_embedding > 0:
-        x = keras_utils.DownsampleStage(512, variance_scaling, is_conditional=True)([x, dae_embedding])
-        x = keras_utils.DownsampleStage(512, variance_scaling, is_conditional=True)([x, dae_embedding])
+        x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True)([x, dae_embedding])
+        x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True)([x, dae_embedding])
     else:
-        x = keras_utils.DownsampleStage(512, variance_scaling)(x)
-        x = keras_utils.DownsampleStage(512, variance_scaling)(x)
+        x = keras_utils.DownsampleStage(768, variance_scaling)(x)
+        x = keras_utils.DownsampleStage(768, variance_scaling)(x)
 
     # 4x residual blocks
     if domain_availability_embedding > 0:
@@ -799,18 +799,18 @@ def r3mic_style_encoder(domain_letter, config):
     channels = config.inner_channels
 
     input_layer = layers.Input(shape=(image_size, image_size, channels))
-    not_zero_mask = keras_utils.AnyNonZeroPixelDetector()(input_layer)
+    # not_zero_mask = keras_utils.AnyNonZeroPixelDetector()(input_layer)
     initializer = MSRInitializer(1.0)
 
     x = input_layer
-    x = layers.Conv2D(64, 7, strides=1, padding="same", kernel_initializer=initializer,
+    x = layers.Conv2D(16, 7, strides=1, padding="same", kernel_initializer=initializer,
                       activation="leaky_relu")(x)
 
     variance_scaling = 2*4 + 4
     # 4x downscale blocks
+    x = keras_utils.DownsampleStage( 32, variance_scaling)(x)
+    x = keras_utils.DownsampleStage( 64, variance_scaling)(x)
     x = keras_utils.DownsampleStage(128, variance_scaling)(x)
-    x = keras_utils.DownsampleStage(256, variance_scaling)(x)
-    x = keras_utils.DownsampleStage(256, variance_scaling)(x)
     x = keras_utils.DownsampleStage(256, variance_scaling)(x)
 
     # 4x resblocks
@@ -822,14 +822,13 @@ def r3mic_style_encoder(domain_letter, config):
     x = layers.GlobalAvgPool2D(keepdims=True)(x)
     style_code = layers.Conv2D(8, kernel_size=1, strides=1, kernel_initializer=initializer)(x)
 
-    style_code = layers.Multiply()([style_code, not_zero_mask])
+    # style_code = layers.Multiply()([style_code, not_zero_mask])
     style_code = layers.Reshape((8,))(style_code)
 
     return tf.keras.Model(inputs=input_layer, outputs=style_code, name=f"R3MICStyleEncoder{domain_letter.upper()}")
 
 def r3mic_decoder(domain_letter, config):
     channels = config.inner_channels
-    film_length = config.film
     palette_quantization = config.palette_quantization
     initial_temperature = config.temperature
 
@@ -838,18 +837,19 @@ def r3mic_decoder(domain_letter, config):
     style_code = input_style
     content_code = input_content
 
-    style_embedding = layers.Dense(film_length, activation="leaky_relu")(input_style)
-    style_embedding = layers.Dense(film_length, activation="leaky_relu")(style_embedding)
+    style_embedding = layers.Dense(256, activation="relu")(input_style)
+    style_embedding = layers.Dense(256, activation="relu")(style_embedding)
 
     initializer = keras_utils.MSRInitializer(1.0)
-    variance_scaling = 2 + 2 * 3
+    variance_scaling = 4 + 2 * 3
     x = input_content
-    x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
-    x = keras_utils.R3GANResidualBlock(variance_scaling)(x)
-    x = keras_utils.UpsampleStage(256, variance_scaling, True,
-                                  is_conditional=True)([x, style_embedding])
-    x = keras_utils.UpsampleStage(512, variance_scaling, is_conditional=True)([x, style_embedding])
-    x = keras_utils.UpsampleStage(512, variance_scaling, is_conditional=True)([x, style_embedding])
+    x = keras_utils.R3GANResidualBlockConditional(variance_scaling)([x, style_embedding])
+    x = keras_utils.R3GANResidualBlockConditional(variance_scaling)([x, style_embedding])
+    x = keras_utils.R3GANResidualBlockConditional(variance_scaling)([x, style_embedding])
+    x = keras_utils.R3GANResidualBlockConditional(variance_scaling)([x, style_embedding])
+    x = keras_utils.UpsampleStage(256, variance_scaling, is_initial_stage=True)(x)
+    x = keras_utils.UpsampleStage(512, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(768, variance_scaling)(x)
 
     output_image = layers.Conv2D(channels, 7, strides=1, padding="same", kernel_initializer=initializer)(x)
 
@@ -884,12 +884,12 @@ def r3mic_discriminator(domain_letter, config):
     scales = config.discriminator_scales
     initializer = MSRInitializer(1.0)
 
-    def conv2d_blocks(input_tensor, variance_scaling):
+    def conv2d_blocks(input_tensor, variance_scaling, idx):
         x = input_tensor
+        x = keras_utils.DownsampleStage(  32, variance_scaling)(x)
+        x = keras_utils.DownsampleStage(  64, variance_scaling)(x)
         x = keras_utils.DownsampleStage( 128, variance_scaling)(x)
         x = keras_utils.DownsampleStage( 256, variance_scaling)(x)
-        x = keras_utils.DownsampleStage( 256, variance_scaling)(x)
-        x = keras_utils.DownsampleStage( 512, variance_scaling)(x)
         x = layers.Conv2D(1, kernel_size=1, kernel_initializer=initializer, padding="valid")(x)
         return x
 
@@ -899,7 +899,7 @@ def r3mic_discriminator(domain_letter, config):
     outputs = []
     variance_scaling = 2*4 * scales
     for i in range(scales):
-        outputs.append(conv2d_blocks(x, variance_scaling))
+        outputs.append(conv2d_blocks(x, variance_scaling, i))
         x = layers.AveragePooling2D(pool_size=(2, 2), strides=2)(x)
 
     return tf.keras.Model(inputs=input_layer, outputs=outputs, name=f"R3MICDiscriminator{domain_letter.upper()}")

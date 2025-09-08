@@ -1,6 +1,7 @@
 import os
 from abc import ABC, abstractmethod
 from functools import reduce
+import logging
 
 import tensorflow as tf
 import numpy as np
@@ -81,14 +82,13 @@ class RemicModel(MunitModel):
             self.decoders = decoders
             self.generators = generators
 
-        elif config.generator == "r3mic":
+        elif config.generator in ["r3mic", "r3mic-origdec"]:
             unified_content_encoder = r3mic_unified_content_encoder(config)
-            # unified_content_encoder = remic_unified_content_encoder("Unified", image_size, channels,
-            #                                                         number_of_domains)
             style_encoders = [r3mic_style_encoder(s, config) for s in domain_letters]
-            # style_encoders = [remic_style_encoder(s, image_size, channels) for s in domain_letters]
-            decoders = [r3mic_decoder(s, config) for s in domain_letters]
-            # decoders = [remic_generator(s, channels, palette_quantization, temperature) for s in domain_letters]
+            if config.generator == "r3mic":
+                decoders = [r3mic_decoder(s, config) for s in domain_letters]
+            elif config.generator == "r3mic-origdec":
+                decoders = [remic_generator(s, channels, palette_quantization, temperature) for s in domain_letters]
 
             single_image_input = tf.keras.layers.Input(shape=(image_size, image_size, channels))
             all_images_input = tf.keras.layers.Input(shape=(number_of_domains, image_size, image_size, channels))
@@ -116,16 +116,20 @@ class RemicModel(MunitModel):
         if config.generator == "r3mic":
             # call the generator with fake data so it is built (necessary for model.summary as it uses lots of
             # subclassing
+            b = self.config.batch
             dec_input = self.gen_supplier(
-                    tf.zeros((1, 8)),
-                    tf.zeros((1, 16, 16, 256)),
-                    tf.zeros((1, 41, channels))
+                    tf.zeros((b, 8)),
+                    tf.zeros((b, 16, 16, 256)),
+                    tf.zeros((b, 41, channels))
                 )
-            unified_content_encoder(tf.zeros((1, number_of_domains, image_size, image_size, channels)), training=True)
+            logging.info("Heating up the unified_content_encoder type r3mic")
+            unified_content_encoder(tf.zeros((b, number_of_domains, image_size, image_size, channels)), training=True)
             for d in range(number_of_domains):
+                logging.info(f"Heating up the style_encoder type r3mic, domain {d}")
                 style_encoder = style_encoders[d]
-                style_encoder(tf.zeros((1, image_size, image_size, channels)), training=True)
+                style_encoder(tf.zeros((b, image_size, image_size, channels)), training=True)
                 decoder = decoders[d]
+                logging.info(f"Heating up the decoder type r3mic, domain {d}")
                 decoder(dec_input, training=True)
 
         if config.verbose:
@@ -156,8 +160,11 @@ class RemicModel(MunitModel):
             discriminators = [r3mic_discriminator(s, config) for s in domain_letters]
             self.discriminators = discriminators
 
-            disc_input = tf.random.normal((1, image_size, image_size, inner_channels))
-            for disc in discriminators:
+            b = self.config.batch
+            tf.config.run_functions_eagerly(False)
+            disc_input = tf.random.normal((b, image_size, image_size, inner_channels))
+            for d, disc in enumerate(discriminators):
+                logging.info(f"Heating up the discriminator type r3mic, domain {d}")
                 disc(disc_input, training=True)
 
             return {

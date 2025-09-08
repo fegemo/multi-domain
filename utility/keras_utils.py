@@ -961,8 +961,8 @@ class AnyNonZeroPixelDetector(layers.Layer):
 class R3GANResidualBlock(layers.Layer):
     LeakyReLUGain = tf.math.sqrt(2. / (1. + 0.2 ** 2.))
 
-    def __init__(self, variance_scaling_parameter):
-        super().__init__()
+    def __init__(self, variance_scaling_parameter, **kwargs):
+        super().__init__(**kwargs)
         num_linear_layers = 3
         activation_gain = self.LeakyReLUGain * variance_scaling_parameter ** (-1 / (2 * num_linear_layers - 2))
         self.kernel_initializer = MSRInitializer(activation_gain)
@@ -981,6 +981,8 @@ class R3GANResidualBlock(layers.Layer):
         # 3x3 convolution from expanded_channels to expanded_channels (reverse bottleneck),
         # with groups equal to cardinality
         self.linear2 = self.create_convolution(expanded_channels, 3, groups=cardinality)
+        # self.linear2 = self.create_convolution(expanded_channels, 3)
+        # self.linear2 = self.create_convolution(expanded_channels, 3, groups=expanded_channels)
         # 1x1 convolution from expanded_channels back to input_channels
         self.linear3 = self.create_convolution(input_channels, 1, use_bias=False)
 
@@ -1003,8 +1005,8 @@ class R3GANResidualBlock(layers.Layer):
 class R3GANResidualBlockConditional(layers.Layer):
     LeakyReLUGain = tf.math.sqrt(2. / (1. + 0.2 ** 2.))
 
-    def __init__(self, variance_scaling_parameter):
-        super().__init__()
+    def __init__(self, variance_scaling_parameter, **kwargs):
+        super().__init__(**kwargs)
         num_linear_layers = 3
         activation_gain = self.LeakyReLUGain * variance_scaling_parameter ** (-1 / (2 * num_linear_layers - 2))
         self.kernel_initializer = MSRInitializer(activation_gain)
@@ -1024,6 +1026,8 @@ class R3GANResidualBlockConditional(layers.Layer):
         # 3x3 convolution from expanded_channels to expanded_channels (reverse bottleneck),
         # with groups equal to cardinality
         self.linear2 = self.create_convolution(expanded_channels, 3, groups=cardinality)
+        # self.linear2 = self.create_convolution(expanded_channels, 3)
+        # self.linear2 = self.create_convolution(expanded_channels, 3, groups=expanded_channels)
         # 1x1 convolution from expanded_channels back to input_channels
         self.linear3 = self.create_convolution(input_channels, 1, use_bias=False)
 
@@ -1066,11 +1070,14 @@ class InterpolativeUpsampler(layers.Layer):
         self.built_kernel = None
 
     def build(self, input_shape):
-        in_channels = input_shape[-1]
         kernel = self.lowpass_kernel[..., tf.newaxis, tf.newaxis]
-        kernel = tf.repeat(kernel, repeats=in_channels, axis=-1)
-        kernel = tf.repeat(kernel, repeats=in_channels, axis=-2)
-        self.built_kernel = kernel
+        self.built_kernel = self.add_weight(
+            name="lowpass_filter",
+            shape=kernel.shape,
+            initializer=tf.constant_initializer(kernel.numpy()),
+            trainable=False,
+            dtype=tf.float32
+        )
         super().build(input_shape)
 
     def call(self, inputs):
@@ -1081,7 +1088,7 @@ class InterpolativeUpsampler(layers.Layer):
         new_size = image_size * 2
         y = tf.nn.conv2d_transpose(
             x,
-            filters=self.built_kernel,
+            filters=tf.tile(self.built_kernel, [1, 1, channels, channels]),
             output_shape=[batch_size, new_size, new_size, channels],
             strides=[1, 2, 2, 1],
         )
@@ -1095,18 +1102,22 @@ class InterpolativeDownsampler(layers.Layer):
         self.built_kernel = None
 
     def build(self, input_shape):
-        in_channels = input_shape[-1]
-        kernel = tf.expand_dims(self.lowpass_kernel, axis=-1)
-        kernel = tf.repeat(kernel, repeats=in_channels, axis=-1)
-        kernel = tf.expand_dims(kernel, axis=-1)
-        self.built_kernel = kernel
+        kernel = self.lowpass_kernel[..., tf.newaxis, tf.newaxis]
+        self.built_kernel = self.add_weight(
+            name="lowpass_filter",
+            shape=kernel.shape,
+            initializer=tf.constant_initializer(kernel.numpy()),
+            trainable=False,
+            dtype=tf.float32
+        )
         super().build(input_shape)
 
     def call(self, inputs):
         x = inputs
+        channels = tf.shape(x)[-1]
         y = tf.nn.depthwise_conv2d(
             x,
-            filter=self.built_kernel,
+            filter=tf.tile(self.built_kernel, [1, 1, channels, 1]),
             strides=[1, 2, 2, 1],
             padding="SAME",
             data_format="NHWC"
@@ -1123,10 +1134,12 @@ class UpsampleLayer(layers.Layer):
 
     def build(self, input_shape):
         input_channels = input_shape[-1]
-        # current_size = input_shape[-2]
-        # new_size = current_size * 2
+        current_size = input_shape[-2]
+        new_size = current_size * 2
         # self.resampler = layers.Resizing(new_size, new_size, interpolation="bilinear")
-        self.resampler = InterpolativeUpsampler()
+        # self.resampler = InterpolativeUpsampler()
+        # self.resampler = layers.Lambda(lambda x: tf.image.resize(x, (new_size, new_size), method="bilinear"), output_shape=(new_size, new_size, input_channels))
+        self.resampler = layers.UpSampling2D(size=(2, 2), interpolation="bilinear")
         if input_channels != self.output_channels:
             self.linear = layers.Conv2D(self.output_channels, 1, strides=1, padding="same",
                                         use_bias=False, kernel_initializer=MSRInitializer(1.0))
@@ -1147,10 +1160,12 @@ class DownsampleLayer(layers.Layer):
 
     def build(self, input_shape):
         input_channels = input_shape[-1]
-        # current_size = input_shape[-2]
-        # new_size = current_size // 2
+        current_size = input_shape[-2]
+        new_size = current_size // 2
         # self.resampler = layers.Resizing(new_size, new_size, interpolation="bilinear")
         self.resampler = InterpolativeDownsampler()
+        # self.resampler = layers.Lambda(lambda x: tf.image.resize(x, (new_size, new_size), method="bilinear"), output_shape=(new_size, new_size, input_channels))
+        # self.resampler = layers.AveragePooling2D(2)
         if input_channels != self.output_channels:
             self.linear = layers.Conv2D(self.output_channels, 1, strides=1, padding="same", use_bias=False,
                                         kernel_initializer=MSRInitializer(1.0))
@@ -1304,3 +1319,14 @@ class DetectAbsentImages(layers.Layer):
 
     def compute_output_shape(self, input_shape):
         return input_shape[0], input_shape[1]  # [b, d]
+
+
+class ShapeLogger(tf.keras.layers.Layer):
+    def __init__(self, name="shape_logger", **kwargs):
+        super().__init__(name=name, **kwargs)
+
+    def call(self, inputs, training=None):
+        # tf.shape works in graph mode and eager mode
+        tf.print(f"[{self.name}] shape:", tf.shape(inputs))
+        return inputs
+    
