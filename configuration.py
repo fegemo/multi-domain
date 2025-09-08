@@ -95,6 +95,10 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--lr-decay", help="one from {none, constant-then-linear}", default=LR_DECAY)
         self.parser.add_argument("--lr", type=float, help="(initial) learning rate", default=LR)
         self.parser.add_argument("--ttur", type=float, help="multiplier for the discriminator lr", default=1.)
+        self.parser.add_argument("--beta1", type=float, help="beta1 for Adam optimizer", default=0.5)
+        self.parser.add_argument("--beta2", type=float, help="beta2 for Adam optimizer", default=0.999)
+        self.parser.add_argument("--adv", help="one from {lsgan, r3gan} for the adversarial loss of the "
+                                               "MUNIT subtree", default="lsgan")
         self.parser.add_argument(
             "--lambda-gp", type=float, help="value for λgradient_penalty used in stargan", default=LAMBDA_GP)
         self.parser.add_argument("--lambda-domain", type=float,
@@ -144,6 +148,9 @@ class OptionParser(metaclass=SingletonMeta):
                                                                     "to wait until an evaluation is done", default=1000)
         self.parser.add_argument("--pretrain-epochs", type=int, help="number of epochs pretraining (used by collagan)",
                                  default=PRETRAIN_EPOCHS)
+
+        self.parser.add_argument("--patience", help="How many evaluations to wait before early stopping",
+                                 type=int, default=10)
         self.parser.add_argument("--no-aug", action="store_true", help="Disables all augmentation", default=False)
         self.parser.add_argument("--no-hue", action="store_true", help="Disables hue augmentation", default=False)
         self.parser.add_argument("--no-tran", action="store_true", help="Disables translation augmentation",
@@ -239,6 +246,8 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--tiny-validation", action="store_true", default=False,
                                  help="Uses only tiny (136 test examples) for validation and to generate images in "
                                       "the end")
+
+        self.parser.add_argument("--gpu", type=int, help="GPU index to use", default=0)
         self.parser.add_argument("--vram", type=int, help="Amount of VRAM in MB to limit. Use 0 for "
                                                           "default behavior and -1 for on-demand growth", default=0)
 
@@ -325,14 +334,17 @@ class OptionParser(metaclass=SingletonMeta):
         else:
             return self.values
 
-    def get_description(self, param_separator=",", key_value_separator="-"):
-        sorted_args = sorted(vars(self.values).items())
+
+    @staticmethod
+    def get_description(values, param_separator=",", key_value_separator="-"):
+        sorted_args = sorted(vars(values).items())
         description = param_separator.join(map(lambda p: f"{p[0]}{key_value_separator}{p[1]}", sorted_args))
         return description
+
 
     def save_configuration(self, folder_path, argv):
         from utility.io_utils import ensure_folder_structure
         ensure_folder_structure(folder_path)
         with open(os.sep.join([folder_path, "configuration.txt"]), "w") as file:
             file.write(" ".join(argv) + "\n\n")
-            file.write(self.get_description("\n", ": ") + "\n")
+            file.write(OptionParser.get_description(self.values, "\n", ": ") + "\n")
