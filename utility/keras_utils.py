@@ -154,9 +154,10 @@ def count_network_parameters(network):
 # ------ layer in which each palette can have a different number of colors ------
 # this refrains from using vectorized operations, which make it slower for longer batches
 class DifferentiablePaletteQuantization(Layer):
-    def __init__(self, **kwargs):
+    def __init__(self, initial_temperature, **kwargs):
         super().__init__(**kwargs)
-        self.temperature = self.add_weight(shape=(), name="temperature", trainable=False)
+        self.temperature = self.add_weight(shape=(), name="temperature", trainable=False,
+                                           initializer=tf.constant_initializer(initial_temperature))
 
     def call(self, inputs, training=None):
         """
@@ -216,7 +217,8 @@ class DifferentiablePaletteQuantization(Layer):
             )  # [H, W, K]
 
             if training:
-                weights = tf.nn.softmax(-distances / self.temperature, axis=-1)
+                temperature = tf.maximum(self.temperature, 1e-8)
+                weights = tf.nn.softmax(-distances / temperature, axis=-1)
                 return tf.einsum('...k,kc->...c', weights, palette)  # [H, W, C]
             else:
                 indices = tf.argmin(distances, axis=-1)
@@ -502,6 +504,25 @@ class LinearAnnealingScheduler(AnnealingScheduler):
     def get_value(self, t):
         return tf.maximum(0.0, (1.0 - t) * self.initial_temperature)
 
+class CosineAnnealingScheduler(AnnealingScheduler):
+    """
+    Cosine annealing scheduler for temperature annealing. It reduces the temperature from the initial value to 0
+    following a cosine curve with an amplitude that decreases as it approaches zero.
+    Formula: https://www.google.com.br/search?q=f%28x%29%3D%281-x%29%2810%2B3+cos+%28x%E2%8B%8537.7%29%29&sca_esv=37dc570b99b93daa&hl=pt-BR&sxsrf=AE3TifO9WPcA8DRjJyVbKQiHxldxLgaPxQ%3A1755614259740&ei=M4ykaIfoLNyG1sQP87G1kQs&ved=0ahUKEwjHzcHijJePAxVcg5UCHfNYLbIQ4dUDCBA&uact=5&oq=f%28x%29%3D%281-x%29%2810%2B3+cos+%28x%E2%8B%8537.7%29%29&gs_lp=Egxnd3Mtd2l6LXNlcnAiH2YoeCk9KDEteCkoMTArMyBjb3MgKHjii4UzNy43KSkyBRAAGO8FMggQABiABBiiBDIFEAAY7wUyBRAAGO8FSMgyUOESWNsocAJ4AZABAJgBfqAB5wOqAQMwLjS4AQPIAQD4AQGYAgagAvsDwgIKEAAYsAMY1gQYR5gDAIgGAZAGCJIHAzIuNKAH0gmyBwMwLjS4B_EDwgcFMC40LjLIBxA&sclient=gws-wiz-serp
+    """
+    def __init__(self, initial_temperature, cycles, annealing_layers):
+        super().__init__(annealing_layers)
+        self.initial_temperature = initial_temperature
+        self.cycles = cycles
+        self.amplitude_variance = 0.15
+        self.FULL_CYCLE = 2 * 3.14159
+
+    def get_value(self, t):
+        t0 = self.initial_temperature
+        sigma = self.amplitude_variance
+        lamb = self.cycles
+        CYC = self.FULL_CYCLE
+        return tf.math.pow(1 - t, 2) * ((1 - sigma) * t0 + (t0 * sigma) * tf.math.cos(t * lamb * CYC))
 
 class NoopAnnealingScheduler(AnnealingScheduler):
     def get_value(self, t):

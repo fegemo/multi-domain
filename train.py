@@ -15,7 +15,7 @@ logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("PIL").setLevel(logging.WARNING)
 
 config, parser = OptionParser().parse(sys.argv[1:], True)
-logging.info(f"Running with options: {parser.get_description(', ', ':')}")
+logging.info(f"Running with options: {OptionParser.get_description(config, ', ', ':')}")
 
 # configures GPU VRAM usage according to config.vram (limit, default behavior or allow growth on demand)
 gpus = tf.config.list_physical_devices("GPU")
@@ -35,11 +35,11 @@ if gpus:
 import setup
 from utility.dataset_utils import load_multi_domain_ds
 from models.colla_model import CollaGANModel, CollaGANModelShuffledBatches
-from models.munit_model import MunitModel
-from models.remic_model import RemicModel
-from models.yamata_model import YamataModel
+# from models.munit_model import MunitModel
+# from models.remic_model import RemicModel
+# from models.yamata_model import YamataModel
 from models.star_model import UnpairedStarGANModel, PairedStarGANModel
-from models.sprite_model import SpriteEditorModel
+# from models.sprite_model import SpriteEditorModel
 
 if config.verbose:
     logging.debug(f"Tensorflow version: {tf.__version__}")
@@ -73,14 +73,14 @@ elif config.model == "collagan":
         class_name = CollaGANModel
     else:
         class_name = CollaGANModelShuffledBatches
-elif config.model == "munit":
-    class_name = MunitModel
-elif config.model == "remic":
-    class_name = RemicModel
-elif config.model == "yamata":
-    class_name = YamataModel
-elif config.model == "sprite":
-    class_name = SpriteEditorModel
+# elif config.model == "munit":
+#     class_name = MunitModel
+# elif config.model == "remic":
+#     class_name = RemicModel
+# elif config.model == "yamata":
+#     class_name = YamataModel
+# elif config.model == "sprite":
+#     class_name = SpriteEditorModel
 else:
     raise Exception(f"The asked model of {config.model} was not found.")
 
