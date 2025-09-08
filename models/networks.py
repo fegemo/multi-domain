@@ -55,7 +55,7 @@ def stargan_resnet_discriminator(number_of_domains, image_size, output_channels,
 
 
 def stargan_resnet_generator(image_size, output_channels, number_of_domains, receive_source_domain, capacity=1,
-                             palette_quantization=False):
+                             palette_quantization=False, initial_temperature=1.0):
     init = tf.random_normal_initializer(0., 0.02)
 
     source_image_input = layers.Input(shape=[image_size, image_size, output_channels], name="source_image")
@@ -114,7 +114,7 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
         palettes = palette_input
         inputs += [palette_input]
 
-        quantization_layer = keras_utils.DifferentiablePaletteQuantization()
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(initial_temperature, name="quantized_image")
         quantized_output = quantization_layer((pre_output, palettes))
 
         model = tf.keras.Model(inputs=inputs, outputs=quantized_output, name="StarGANGenerator")
@@ -122,7 +122,8 @@ def stargan_resnet_generator(image_size, output_channels, number_of_domains, rec
 
         return model
 
-def collagan_affluent_generator(number_of_domains, image_size, output_channels, capacity=1, palette_quantization=False):
+def collagan_affluent_generator(number_of_domains, image_size, output_channels, capacity=1, palette_quantization=False,
+                                initial_temperature=1.0):
     # UnetINDiv4 extracted from:
     # https://github.com/jongcye/CollaGAN_CVPR/blob/509cb1dab781ccd4350036968fb3143bba19e1db/model/netUtil.py#L941
     def conv_block(block_input, filters, regularizer="l2"):
@@ -233,7 +234,7 @@ def collagan_affluent_generator(number_of_domains, image_size, output_channels, 
         palettes = palette_input
         inputs += [palette_input]
 
-        quantization_layer = keras_utils.DifferentiablePaletteQuantization(name="quantized_image")
+        quantization_layer = keras_utils.DifferentiablePaletteQuantization(initial_temperature, name="quantized_image")
         quantized_output = quantization_layer((output, palettes))
 
         model = tf.keras.Model(inputs=inputs, outputs=quantized_output, name="CollaGANPaletteGenerator")
