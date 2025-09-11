@@ -40,7 +40,7 @@ if __name__ == "__main__":
             "lambda-regularization": 0.001,
             #"lambda-histogram": 0.
             "vram": -1, # new
-            "lambda-adversarial": 10. # new
+            "lambda-adversarial": 1. # new
         }, {
         }, {
             # "tiny": {

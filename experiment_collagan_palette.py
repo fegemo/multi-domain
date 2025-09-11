@@ -35,7 +35,7 @@ if __name__ == "__main__":
             #"generator": "palette",
             "generator": "affluent",
             "annealing": "linear",
-            "lambda-adversarial": 10.,
+            "lambda-adversarial": 1.,
             #"lambda-l1": 150.,
             "lambda-l1": 100.,
             #"lambda-ssim": 10.,

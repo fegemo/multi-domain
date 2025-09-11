@@ -29,7 +29,7 @@ if __name__ == "__main__":
             "model-name": "@model",
             "experiment": "resizing,@dataset,&adhoc,&resizing-factor",
             "generator": "affluent",
-            "lambda-adversarial": 10.,
+            "lambda-adversarial": 1.,
             "lambda-l1": 100.,
             "lambda-ssim": 1.,
             "lambda-domain": 10.,
