@@ -302,12 +302,12 @@ def load_multi_domain_ds(config):
 
     train_ds = train_ds \
         .map(normalize_all, num_parallel_calls=tf.data.AUTOTUNE) \
-        .batch(batch_size)
+        .batch(batch_size, drop_remainder=True)
 
     test_ds = test_ds.map(create_multi_domain_image_loader(config, "test"),
                           num_parallel_calls=tf.data.AUTOTUNE) \
         .map(normalize_all, num_parallel_calls=tf.data.AUTOTUNE) \
-        .batch(batch_size)
+        .batch(batch_size, drop_remainder=True)
     return train_ds, test_ds
 
 
