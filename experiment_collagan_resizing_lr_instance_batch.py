@@ -26,7 +26,7 @@ if __name__ == "__main__":
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "model-name": "@model",
-            "experiment": "resizing,@dataset,&adhoc,&resizing-factor",
+            "experiment": "resizing-lr-instance-batch,@dataset,&adhoc,&resizing-factor,&lr",
             "generator": "affluent",
             "lambda-adversarial": 1.,
             "lambda-l1": 100.,
