@@ -563,32 +563,20 @@ class RemicModel(MunitModel):
     def generate_images_for_evaluation(self, example_indices_for_evaluation):
         batch_size = self.config.batch * 2
 
-        def batched_call(model, inputs):
-            n = tf.shape(inputs)[0]
-            outputs = []
-            for i in range(0, int(n), batch_size):
-                batch = inputs[i : i + batch_size]
-                out = model(batch, training=False)
-                # Ensure we only keep a tensor, not the computation graph
-                outputs.append(tf.convert_to_tensor(out))
-                del batch, out  # free references early
-            return tf.concat(outputs, axis=0)
 
         def generate_images_from_example_indices(example_indices):
             domain_images, keep_mask, possible_target_domain = example_indices
             # domain_images (b, d, s, s, c)
             # keep_mask (b, d, 1, 1, 1)
+            number_of_examples = tf.shape(domain_images)[0]
 
             visible_source_images = domain_images * keep_mask
             # visible_source_images (b, d, s, s, c)
 
-            # encoded_contents = self.unified_content_encoder.predict(visible_source_images, batch_size=batch_size,
-            #                                                         verbose=0)
+            encoded_contents = self.unified_content_encoder.predict(visible_source_images, batch_size=batch_size,
+                                                                    verbose=0)
             encoded_styles = [self.style_encoders[d].predict(visible_source_images[:, d], batch_size=batch_size,
                                                              verbose=0)
-                              for d in range(self.config.number_of_domains)]
-            encoded_contents = batched_call(self.unified_content_encoder, visible_source_images)
-            encoded_styles = [batched_call(self.style_encoders[d], visible_source_images[:, d])
                               for d in range(self.config.number_of_domains)]
             # encoded_contents (b, 16, 16, 256)
             # encoded_styles [d] x (b, 8)
@@ -596,12 +584,12 @@ class RemicModel(MunitModel):
             palette = self.extract_palette_dense(domain_images)
             # palette (b, max_n, c)
 
-            decoded_images = []
-            for d in range(self.config.number_of_domains):
-                inputs = self.gen_supplier(encoded_styles[d], encoded_contents, palette)
-                decoded = batched_call(self.decoders[d], inputs)
-                decoded_images.append(decoded["output_image"])
-            
+            decoded_images = [self.decoders[d].predict(
+                self.gen_supplier(encoded_styles[d], encoded_contents, palette), batch_size=batch_size,
+                verbose=0)["output_image"]
+                              for d in range(self.config.number_of_domains)]
+            # decoded_images ([d] x shape=[b, s, s, c])
+                        
             fake_images = tf.gather(tf.transpose(decoded_images, [1, 0, 2, 3, 4]), possible_target_domain, axis=1,
                                     batch_dims=1)
             real_images = tf.gather(domain_images, possible_target_domain, batch_dims=1)
