@@ -165,7 +165,7 @@ class OptionParser(metaclass=SingletonMeta):
                                  default=False)
         self.parser.add_argument("--perturb-palette", type=float, default=0.0,
                                  help="The probability with which to perturb the target palette when training CollaGAN")
-        self.parser.add_argument("--inpaint-mask", default="curriculum",
+        self.parser.add_argument("--inpaint-mask", default="none",
                                  help="one from {none, constant, random, curriculum} defining how the inpaint mask "
                                       "is generated in SpriteGAN.")
         self.parser.add_argument("--sampler", help="one from {multi-target, single-target} indicating whether "
