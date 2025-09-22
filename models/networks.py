@@ -746,10 +746,19 @@ def r3mic_unified_content_encoder(config):
     image_size = config.image_size
     channels = config.inner_channels
     domain_availability_embedding = config.domain_availability_embedding
+    feature_augmentation = config.feature_augmentation
 
     input_layer = layers.Input(shape=(domains, image_size, image_size, channels))
-    x = layers.Permute((2, 3, 4, 1))(input_layer)
-    x = layers.Reshape((image_size, image_size, domains * channels))(x)
+    x = input_layer
+
+    if feature_augmentation == "flipY":
+        reshaped_input = layers.Lambda(lambda input_batch: tf.reshape(input_batch, (-1, image_size, image_size, channels)))(input_layer)
+        flipped_input = layers.Lambda(lambda input_batch: tf.image.flip_left_right(input_batch))(reshaped_input)
+        flipped_input = layers.Lambda(lambda input_batch: tf.reshape(input_batch, (-1, domains, image_size, image_size, channels)))(flipped_input)
+        x = layers.Concatenate(axis=1)([x, flipped_input])
+
+    x = layers.Permute((2, 3, 4, 1))(x)
+    x = layers.Reshape((image_size, image_size, -1))(x)
 
     dae_embedding = None
     if domain_availability_embedding > 0:
@@ -1066,30 +1075,32 @@ def sprite_r3gan_generator(config):
     domain_availability_channelized = keras_utils.TileLayer(image_size)(domain_availability_channelized)
     domain_availability_channelized = keras_utils.TileLayer(image_size)(domain_availability_channelized)
 
-    domain_embedding = layers.Dense(film_length)(domain_availability_input)
-    noise_embedding = layers.Dense(film_length)(noise_input)
+    domain_embedding = layers.Dense(film_length, activation="leaky_relu")(domain_availability_input)
+    domain_embedding = layers.Dense(film_length, activation="leaky_relu")(domain_embedding)
+    noise_embedding = layers.Dense(film_length, activation="leaky_relu")(noise_input)
+    noise_embedding = layers.Dense(film_length, activation="leaky_relu")(noise_embedding)
 
     initializer = keras_utils.MSRInitializer(1.0)
     masked_images = layers.Reshape((image_size, image_size, domains * channels))(masked_images_input)
     encoder_input = layers.Concatenate(axis=-1)([masked_images, inpaint_mask_input, domain_availability_channelized])
 
     variance_scaling = 10 + 1 + 10
-    initial_stage = keras_utils.DownsampleStage(channels * domains + 1 + domains, 384, image_size, variance_scaling)
+    initial_stage = keras_utils.DownsampleStage(channels * domains + 1 + domains, variance_scaling)
     x = initial_stage(encoder_input)
-    x = keras_utils.DownsampleStage(768, variance_scaling)(x)
-    x = keras_utils.DownsampleStage(768, variance_scaling)(x)
-    x = keras_utils.DownsampleStage(768, variance_scaling)(x)
-    x = keras_utils.DownsampleStage(768, variance_scaling)(x)
-    x = keras_utils.DownsampleStage(768, variance_scaling)(x)
+    x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
+    x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
+    x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
+    x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
+    x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
 
-    bottleneck = keras_utils.R3GANResidualBlock(variance_scaling)(x)
+    bottleneck = keras_utils.R3GANResidualBlockConditional(variance_scaling)([x, domain_embedding])
 
-    x = keras_utils.UpsampleStage(768, variance_scaling)(bottleneck)
-    x = keras_utils.UpsampleStage(768, variance_scaling)(x)
-    x = keras_utils.UpsampleStage(768, variance_scaling)(x)
-    x = keras_utils.UpsampleStage(768, variance_scaling)(x)
-    x = keras_utils.UpsampleStage(768, variance_scaling)(x)
-    x = keras_utils.UpsampleStage(384, variance_scaling)(x)
+    x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([bottleneck, domain_embedding])
+    x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
+    x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
+    x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, noise_embedding])
+    x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, noise_embedding])
+    x = keras_utils.UpsampleStage(384, variance_scaling, is_conditional=True, condition_layer="film")([x, noise_embedding])
 
     pre_output = layers.Conv2D(domains * channels, kernel_size=1, padding="same", use_bias=False,
                                kernel_initializer=initializer, name="pre-output")(x)

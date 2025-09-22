@@ -87,6 +87,9 @@ class OptionParser(metaclass=SingletonMeta):
                                                                          " besides the target and source image"
                                                                          " (only for stargan-paired)",
                                  action="store_true", default=False)
+        self.parser.add_argument("--feature-augmentation", help="Uses feature augmentation as additional input "
+                                                                "to the generator in R3MIC. One from " \
+                                                                "{ none (default), flipY }", default="", type=str)
         self.parser.add_argument("--image-size", help="size of squared images", default=IMG_SIZE, type=int)
         self.parser.add_argument("--output-channels", help="size of squared images", default=OUTPUT_CHANNELS, type=int)
         self.parser.add_argument("--input-channels", help="size of squared images", default=INPUT_CHANNELS, type=int)
