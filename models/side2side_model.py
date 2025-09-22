@@ -13,7 +13,7 @@ from utility import io_utils, frechet_inception_distance as fid
 from utility.functional_utils import listify
 from utility.keras_utils import ConstantThenLinearDecay, count_network_parameters, NoopAnnealingScheduler, \
     LinearAnnealingScheduler, CosineAnnealingScheduler, ExpCosineAnnealingSchedule
-
+from utility.palette_utils import NoopPaletteLossCalculator, PaletteExtractor, NoopPaletteExtractor, PaletteExtractorDense, PaletteLossCalculator, PaletteLossCalculatorDense
 
 def show_eta(training_start_time, step_start_time, current_step, training_starting_step, total_steps,
              update_steps):
@@ -65,6 +65,12 @@ class S2SModel(ABC):
         self.early_stop_patience = config.patience
         self.checkpoint_dir = self.get_output_folder("training-checkpoints")
         self.layout_summary = S2SModel.create_layout_summary()
+
+        # initializes palette extractor and loss calculator, which might be no-ops if not using palette quantization
+        self.palette_extractor = PaletteExtractor() if config.palette_quantization else NoopPaletteExtractor()
+        self.palette_extractor_dense = PaletteExtractorDense() if config.palette_quantization else NoopPaletteExtractor()
+        self.palette_loss_calculator = PaletteLossCalculator() if config.palette_quantization else NoopPaletteLossCalculator()
+        self.palette_loss_calculator_dense = PaletteLossCalculatorDense() if config.palette_quantization else NoopPaletteLossCalculator()
 
         # initializes networks inside two dicts: one for training only and another for inference (e.g., generator)
         # each dict has keys for the network type (e.g., generator) and values as the network itself (or network list)
@@ -236,6 +242,66 @@ class S2SModel(ABC):
             (real_images, fake_images) where real_images are the target images and fake_images are the generated images.
         """
         pass
+
+    def extract_palette(self, images):
+        """
+        Extracts the palette from a batch of images. It assumes the images are in [-1, 1] range.
+
+        Args:
+            images (tf.Tensor): A batch of images of shape (batch, height, width, channels) 
+            or (batch, domains, height, width, channels).
+
+        Returns:
+            A tensor of shape (batch, num_colors, channels) containing the extracted palettes, 
+            or one with a single zero color, in case we're not using palette quantization.
+
+        """
+        return self.palette_extractor.extract(images)
+    
+    def extract_palette_dense(self, images):
+        """
+        Extracts the palette from a batch of images. It assumes the images are in [-1, 1] range.
+
+        Args:
+            images (tf.Tensor): A batch of images of shape (batch, height, width, channels) 
+            or (batch, domains, height, width, channels).
+
+        Returns:
+            A tensor of shape (batch, num_colors, channels) containing the extracted palettes, 
+            or one with a single zero color, in case we're not using palette quantization.
+
+        """
+        return self.palette_extractor_dense.extract(images)
+
+    def calculate_palette_loss(self, images, palettes, temperature):
+        """
+        Calculates the palette loss between a batch of images and their corresponding palettes.
+
+        Args:
+            images (tf.Tensor): A batch of images of shape (batch, height, width, channels) 
+            or (batch, domains, height, width, channels).
+            palettes (tf.Tensor): A batch of palettes of shape (batch, num_colors, channels).
+            temperature (tf.Tensor): A scalar tensor representing the current temperature for annealing.
+
+        Returns:
+            A scalar tensor representing the palette loss, or zero if not using palette quantization.
+        """
+        return self.palette_loss_calculator.calculate(images, palettes, temperature)
+
+    def calculate_palette_loss_dense(self, images, palettes, temperature):
+        """
+        Calculates the palette loss between a batch of images and their corresponding palettes.
+
+        Args:
+            images (tf.Tensor): A batch of images of shape (batch, height, width, channels) 
+            or (batch, domains, height, width, channels).
+            palettes (tf.Tensor): A batch of palettes of shape (batch, num_colors, channels).
+            temperature (tf.Tensor): A scalar tensor representing the current temperature for annealing.
+
+        Returns:
+            A scalar tensor representing the palette loss, or zero if not using palette quantization.
+        """
+        return self.palette_loss_calculator_dense.calculate(images, palettes, temperature)
 
     def fit(self, train_ds, test_ds, steps, update_steps, callbacks=[], starting_step=0):
         if starting_step == 0:

@@ -177,8 +177,7 @@ class SpriteEditorModel(RemicModel):
         latent_reconstruction_loss = tf.reduce_mean(tf.abs(random_codes - recovered_codes_mean))
 
         # 4. calculates the palette coverage loss
-        palette_coverage_loss = palette_utils.calculate_palette_coverage_loss(generated_images[0], target_palettes,
-                                                                              temperature)
+        palette_coverage_loss = self.calculate_palette_loss_dense(generated_images[0], target_palettes, temperature)
 
         # 5. kullback leibler divergence loss for the extracted codes
         kl_loss = -0.5 * tf.reduce_mean(1 + ec_log_var - tf.square(ec_mean) - tf.exp(ec_log_var))
@@ -267,8 +266,7 @@ class SpriteEditorModel(RemicModel):
         # inpaint_mask (shape=[b, s, s, 1])
 
         # 1. extracts the palette from the source images
-        source_palette = palette_utils.batch_extract_palette_ragged(source_images)
-        source_palette = source_palette.to_tensor(default_value=(-1., -1., -1., -1.))
+        source_palette = self.extract_palette_dense(source_images)
         # source_palette (shape=[b, n, c]) as an ex-ragged, dense tensor
 
         # 5. prepares the ground truth for the generator
@@ -458,6 +456,7 @@ class SpriteEditorModel(RemicModel):
         # fake_predicted_patches ([ds] x shape=[b, ?, ?, 1])
         return real_predicted_patches, fake_predicted_patches
 
+
     def select_examples_for_visualization(self, train_ds, test_ds):
         """
         Selects examples from the training and test datasets for visualization.
@@ -490,7 +489,7 @@ class SpriteEditorModel(RemicModel):
             # example_masks (list of tuples with: masked source images, inpaint mask)
 
         # extract the source palettes and make them the target palettes
-        source_palettes = [palette_utils.batch_extract_palette_ragged(tf.stack(ex[0])[tf.newaxis, ...])[0]
+        source_palettes = [self.extract_palette(tf.stack(ex[0])[tf.newaxis, ...])[0]
                            for ex in examples]
         # source_palettes ([examples] x shape=[(n), c])
 
@@ -596,8 +595,7 @@ class SpriteEditorModel(RemicModel):
 
             visible_source_images = domain_images * keep_mask
             # visible_source_images (b, d, s, s, c)
-            source_palettes = palette_utils.batch_extract_palette_ragged(domain_images)
-            source_palettes = source_palettes.to_tensor(default_value=(-1., -1., -1., -1.))
+            source_palettes = self.extract_palette_dense(domain_images)
 
             keep_mask_oh = tf.reshape(keep_mask, [num_examples, number_of_domains])
             extracted_codes_mean, _ = self.diversity_encoder.predict([visible_source_images, keep_mask_oh],
@@ -699,8 +697,7 @@ class SpriteEditorModel(RemicModel):
             # visible_source_images (shape=[num_rows, d, s, s, c])
 
             # 2. extracts the source palettes
-            source_palettes = palette_utils.batch_extract_palette_ragged(visible_source_images)
-            source_palettes = source_palettes.to_tensor(default_value=(-1., -1., -1., -1.))
+            source_palettes = self.extract_palette_dense(visible_source_images)
             # source_palettes (shape=[num_rows, max_colors, c])
 
             # 3. creates the inpaint mask for the third group of columns
@@ -828,8 +825,7 @@ class SpriteEditorModel(RemicModel):
             masked_source_images, inpaint_mask = keras_utils.create_random_inpaint_mask(visible_source_images, 2)
             # masked_source_images (shape=[1, d, s, s, c])
             # inpaint_mask (shape=[1, s, s, 1])
-            source_palette = palette_utils.batch_extract_palette_ragged(visible_source_images)
-            source_palette = source_palette.to_tensor(default_value=(-1., -1., -1., -1.))
+            source_palette = self.extract_palette_dense(visible_source_images)
             # source_palette (shape=[1, n, c])
 
             fake_image = self.generator.predict(

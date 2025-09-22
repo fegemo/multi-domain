@@ -203,8 +203,7 @@ class RemicModel(MunitModel):
                                      for d in range(number_of_domains)]
 
         # palette loss
-        palette_loss = [palette_utils.calculate_palette_coverage_loss_ragged(decoded_images[:, d], palettes,
-                                                                             temperature)
+        palette_loss = [self.calculate_palette_loss(decoded_images[:, d], palettes, temperature)
                         for d in range(number_of_domains)]
 
         # l2 regularization loss
@@ -279,7 +278,8 @@ class RemicModel(MunitModel):
         # random_style_codes (shape=[d, b, 8])
 
         # extract the palettes of the input images
-        palettes = palette_utils.batch_extract_palette_ragged(tf.transpose(batch, [1, 0, 2, 3, 4]))
+        # palettes = palette_utils.batch_extract_palette_ragged(tf.transpose(batch, [1, 0, 2, 3, 4]))
+        palettes = self.extract_palette(tf.transpose(batch, [1, 0, 2, 3, 4]))
         # palettes (d x shape=[b, (n), c])
 
         with tf.GradientTape(persistent=True) as tape:
@@ -453,7 +453,7 @@ class RemicModel(MunitModel):
         # keep_masks (shape=[b, d])
         visible_source_images = source_images * keep_masks[..., tf.newaxis, tf.newaxis, tf.newaxis]
         # visible_source_images (shape=[b, d, s, s, c])
-        palettes = palette_utils.batch_extract_palette(source_images)
+        palettes = self.extract_palette(source_images)
         # palettes (shape=[b, max_n, c])
 
         encoded_contents = self.unified_content_encoder(visible_source_images, training=False)
@@ -593,8 +593,7 @@ class RemicModel(MunitModel):
             # encoded_contents (b, 16, 16, 256)
             # encoded_styles [d] x (b, 8)
 
-            palette = palette_utils.batch_extract_palette_ragged(domain_images)
-            palette = palette.to_tensor((-1, -1, -1, -1))
+            palette = self.extract_palette_dense(domain_images)
             # palette (b, max_n, c)
 
             decoded_images = []
@@ -649,7 +648,7 @@ class RemicModel(MunitModel):
                     keep_mask = tf.cast(domain_permutation, dtype="float32")
                     visible_domain_images = domain_images * keep_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
                     content_code = self.unified_content_encoder(visible_domain_images[tf.newaxis, ...])
-                    palette = palette_utils.batch_extract_palette_ragged(tf.stack(domain_images)[tf.newaxis, ...])
+                    palette = self.extract_palette(tf.stack(domain_images)[tf.newaxis, ...])
 
                     # generates the image using the original style code
                     style_code = self.style_encoders[j](domain_images[j][tf.newaxis, ...])
@@ -697,7 +696,7 @@ class RemicModel(MunitModel):
         target_domains = [ensure_inside_range(x) for x in range(batch_size)]
         real_images = tf.gather(batch, target_domains, axis=1, batch_dims=1)
         fake_images = []
-        palette = palette_utils.batch_extract_palette_ragged(batch)
+        palette = self.extract_palette(batch)
         for i in range(batch_size):
             keep_mask = tf.one_hot(target_domains[i], number_of_domains, on_value=0.0, off_value=1.0)
             keep_mask = keep_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]

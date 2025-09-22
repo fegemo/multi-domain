@@ -1,3 +1,4 @@
+from abc import abstractmethod
 import tensorflow as tf
 from tensorflow import RaggedTensorSpec
 
@@ -293,3 +294,74 @@ def batch_perturb_palette(images_5d):
 
     # 5. returns the perturbed images and the palettes
     return perturbed_images, perturbed_palettes
+
+
+class AbstractPaletteExtractor:
+    @abstractmethod
+    def extract(self, images):
+        raise NotImplementedError("This is an abstract class")
+
+
+class PaletteExtractor(AbstractPaletteExtractor):
+    def __init__(self):
+        pass
+
+    @tf.function
+    def extract(self, images):
+        return batch_extract_palette_ragged(images)
+    
+
+class NoopPaletteExtractor(AbstractPaletteExtractor):
+    def __init__(self):
+        pass
+
+    @tf.function
+    def extract(self, images):
+        images_shape = tf.shape(images)
+        batch_size, channels = images_shape[0], images_shape[-1]
+        return tf.zeros([batch_size, 1, channels], dtype=images.dtype)
+
+
+class PaletteExtractorDense(PaletteExtractor):
+    def __init__(self, default_component=-1.0):
+        self.default_component = default_component
+        
+    @tf.function
+    def extract(self, images):
+        palettes_ragged = super().extract(images)
+        channels = tf.shape(images)[-1]
+        return palettes_ragged.to_tensor(default_value=tf.ones(shape=[channels,], dtype=images.dtype) * self.default_component)
+
+
+class AbstractPaletteLossCalculator:
+    @abstractmethod
+    def calculate(self, images, palettes, temperature):
+        raise NotImplementedError("This is an abstract class")
+
+
+class PaletteLossCalculator(AbstractPaletteLossCalculator):
+    def __init__(self):
+        pass
+
+    @tf.function
+    def calculate(self, images, palettes, temperature):
+        return calculate_palette_coverage_loss_ragged(images, palettes, temperature)
+
+
+class PaletteLossCalculatorDense(AbstractPaletteLossCalculator):
+    def __init__(self):
+        pass
+
+    @tf.function
+    def calculate(self, images, palettes, temperature):
+        return calculate_palette_coverage_loss(images, palettes, temperature)
+
+
+class NoopPaletteLossCalculator(AbstractPaletteLossCalculator):
+    def __init__(self):
+        pass
+
+    @tf.function
+    def calculate(self, images, palettes, temperature):
+        return tf.constant(0.0, dtype=images.dtype)
+    
