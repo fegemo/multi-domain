@@ -26,6 +26,7 @@ if __name__ == "__main__":
             "model-name": "@model",
             "experiment": "&lambda-l1,&lambda-latent-reconstruction,&lambda-cyclic-reconstruction",
             "vram": -1,
+            "patience": 20,
         }, {
             "lambda-l1": [10],
             "lambda-latent-reconstruction": [1],
