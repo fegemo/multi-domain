@@ -140,6 +140,8 @@ class OptionParser(metaclass=SingletonMeta):
                                  default=LAMBDA_ADVERSARIAL)
         self.parser.add_argument("--lambda-kl", type=float, help="value for λkl used in SpriteGAN's "
                                                                  "encoder", default=LAMBDA_KL)
+        self.parser.add_argument("--lambda-cohesion", type=float, help="value for λcohesion used in SpriteGAN's "
+                                                                      "cohesion evaluator", default=0)
         self.parser.add_argument("--noise", type=int, help="the length of the noise to add to the "
                                                            "input images in SpriteGAN", default=NOISE_LENGTH)
         self.parser.add_argument("--film", type=int, help="the length of the FiLM layers that condition "

@@ -1,12 +1,13 @@
+from abc import abstractmethod
 import os
 
 import tensorflow as tf
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 
-from utility import keras_utils, palette_utils, io_utils
+from utility import keras_utils, io_utils
 from utility.functional_utils import listify
-from utility.keras_utils import LinearAnnealingScheduler, NoopAnnealingScheduler, create_random_inpaint_mask, \
+from utility.keras_utils import create_random_inpaint_mask, \
     NoopInpaintMaskGenerator, ConstantInpaintMaskGenerator, RandomInpaintMaskGenerator, CurriculumInpaintMaskGenerator
 from .networks import resblock, munit_discriminator_multi_scale, sprite_r3gan_generator
 from .remic_model import RemicModel
@@ -22,13 +23,13 @@ class SpriteEditorModel(RemicModel):
         self.lambda_reconstruction = config.lambda_reconstruction
         self.lambda_palette = config.lambda_palette
         self.lambda_regularization = config.lambda_regularization
-
-        self.generator = self.inference_networks["generator"]
-        self.discriminators = self.training_only_networks["discriminators"]
-        self.diversity_encoder = self.inference_networks["diversity-encoder"]
+        self.lambda_cohesion = config.lambda_cohesion
 
         # the third param is the target palette, so we skip it if we're not using palette quantization
         self.gen_supplier = keras_utils.SkipParamsSupplier([2] if not config.palette_quantization else None)
+
+        self.cohesion_evaluator = CohesionEvaluator(config, self.cohesion_discriminator) \
+            if hasattr(self, "cohesion_discriminator")  else NoopCohesionEvaluator()
 
         if config.inpaint_mask == "none":
             self.mask_creator = NoopInpaintMaskGenerator()
@@ -49,29 +50,30 @@ class SpriteEditorModel(RemicModel):
     def create_inference_networks(self):
         config = self.config
         if config.generator in ["monolith", ""]:
-            generator = build_monolith_generator(config)
-            diversity_encoder = build_diversity_encoder(config)
+            self.generator = build_monolith_generator(config)
+            self.diversity_encoder = build_diversity_encoder(config)
             return {
-                "generator": generator,
-                "diversity-encoder": diversity_encoder
+                "generator": self.generator,
+                "diversity-encoder": self.diversity_encoder
             }
         elif config.generator in ["r3gan"]:
-            generator = sprite_r3gan_generator(config)
-            diversity_encoder = build_diversity_encoder(config)
+            self.generator = sprite_r3gan_generator(config)
+            self.diversity_encoder = build_diversity_encoder(config)
 
             # call the generator with fake data so it is built (necessary for model.summary as it uses lots of
             # subclassing
+            b = self.config.batch
             gen_supplier = keras_utils.SkipParamsSupplier([2] if not config.palette_quantization else None)
-            generator(gen_supplier(
-                tf.zeros([1, config.number_of_domains, config.image_size, config.image_size, config.inner_channels]),
-                tf.zeros([1, config.image_size, config.image_size, 1]),
-                tf.zeros([1, 1, config.inner_channels]),
-                tf.zeros([1, config.number_of_domains]),
-                tf.zeros([1, config.noise]))
+            self.generator(gen_supplier(
+                tf.zeros([b, config.number_of_domains, config.image_size, config.image_size, config.inner_channels]),
+                tf.zeros([b, config.image_size, config.image_size, 1]),
+                tf.zeros([b, 1, config.inner_channels]),
+                tf.zeros([b, config.number_of_domains]),
+                tf.zeros([b, config.noise]))
             )
             return {
-                "generator": generator,
-                "diversity-encoder": diversity_encoder
+                "generator": self.generator,
+                "diversity-encoder": self.diversity_encoder
             }
         else:
             raise ValueError(f"The provided {config.generator} type of generator has not been implemented")
@@ -82,13 +84,17 @@ class SpriteEditorModel(RemicModel):
         inner_channels = config.inner_channels
         scales = config.discriminator_scales
         domain_letters = [name[0].upper() for name in config.domains]
+        has_cohesion_discriminator = config.lambda_cohesion > 0
         if config.discriminator in ["munit", ""]:
-            discriminators = [build_munitlike_discriminator(s, image_size, inner_channels, scales)
+            self.discriminators = [build_munitlike_discriminator(s, image_size, inner_channels, scales)
                               for s in domain_letters]
-            self.discriminators = discriminators
-            return {
-                "discriminators": discriminators
+            networks = {
+                "discriminators": self.discriminators
             }
+            if has_cohesion_discriminator:
+                self.cohesion_discriminator = build_cohesion_discriminator(config)
+                networks["cohesion-discriminator"] = self.cohesion_discriminator
+            return networks
         else:
             raise ValueError(f"The provided {config.discriminator} type of discriminator has not been implemented")
 
@@ -131,8 +137,8 @@ class SpriteEditorModel(RemicModel):
             "total": total_loss
         }
 
-    def generator_loss(self, fake_predicted_patches, real_predicted_patches, generated_images, target_images,
-                       input_dropout_mask, ec_mean, ec_log_var, random_codes, recovered_codes_mean, target_palettes,
+    def generator_loss(self, fake_predicted_patches, real_predicted_patches, fake_cohesion_evaluation, generated_images, 
+                       target_images, input_dropout_mask, ec_mean, ec_log_var, random_codes, recovered_codes_mean, target_palettes,
                        temperature, batch_shape):
         """
         Calculates the generator loss for the Sprite Editor model.
@@ -140,6 +146,7 @@ class SpriteEditorModel(RemicModel):
             of domains and discriminator scales: [d, ds] x [b, ?, ?, 1] where d is the number of domains,
             ds is the number of discriminator scales, b is the batch size, and ? is the size of discriminated patches.
         :param real_predicted_patches: discriminator outputs for the real images. Similar to the fake_predicted_patches.
+        :param fake_cohesion_evaluation: discriminator output for the cohesion discriminator. The shape is [b, 1].
         :param generated_images: the fake images generated by the generator. The shape depends on the number of
             generator scales: [gs] x [b, d, ?, ?, c] where gs is the generator scales, b is the batch size, d is
             the number of domains, ? is the size of the generated images, and c is the number of channels.
@@ -158,9 +165,7 @@ class SpriteEditorModel(RemicModel):
         :return: a dictionary with keys for each loss term and the total loss.
         """
         generator_scales = self.config.generator_scales
-        discriminator_scales = self.config.discriminator_scales
-        number_of_domains = self.config.number_of_domains
-        batch_size, image_size, channels = batch_shape[1], batch_shape[2], batch_shape[4]
+        batch_size = batch_shape[1]
         half_batch_size = batch_size // 2
 
         # 1. calculates the adversarial loss
@@ -182,17 +187,22 @@ class SpriteEditorModel(RemicModel):
         # 5. kullback leibler divergence loss for the extracted codes
         kl_loss = -0.5 * tf.reduce_mean(1 + ec_log_var - tf.square(ec_mean) - tf.exp(ec_log_var))
 
-        # 6. calculate the total weighted loss
+        # 6. cohesion loss
+        cohesion_loss = self.cohesion_evaluator.calculate_generator_loss(fake_cohesion_evaluation) 
+
+        # 7. calculate the total weighted loss
         total_loss = self.lambda_adversarial * adversarial_loss + \
                      self.lambda_reconstruction * reconstruction_loss + \
                      self.lambda_latent_reconstruction * latent_reconstruction_loss + \
                      self.lambda_kl * kl_loss + \
+                     self.lambda_cohesion * cohesion_loss + \
                      self.lambda_palette * palette_coverage_loss
 
         # returns the weighted total generator loss and the individual terms
         return {"adversarial": adversarial_loss, "reconstruction": reconstruction_loss,
                 "latent-reconstruction": latent_reconstruction_loss, "palette-coverage": palette_coverage_loss,
                 "kl": kl_loss,
+                "cohesion": cohesion_loss,
                 "total": total_loss}
 
     @tf.function
@@ -212,11 +222,13 @@ class SpriteEditorModel(RemicModel):
           3. loss: l1 between target and images generated with extracted_code
           4. loss: adv of images generated with extracted_code
           5. loss: adv of images generated with random_code
+          6. loss: adv of full examples with the cohesion discriminator
 
         discriminator:
           1. discriminates images generated with extracted_code
           2. discriminates images generated with random_code
           3. discriminates target images
+          4. discriminates full examples with the cohesion discriminator
 
 
         A) gen_tape(persistent):
@@ -324,9 +336,13 @@ class SpriteEditorModel(RemicModel):
                               for d in range(number_of_domains)]
             # xxxx_predicted ([d] x [ds] x shape=[b, ?, ?, 1]) where ds is the number of discriminator scales
 
+            fake_cohesion_evaluation = self.cohesion_evaluator.evaluate(generated_images_full_size)
+            # cohesion_evaluation (shape=[b, 1]) - discriminator output for the cohesion discriminator
+
             # A.6. calculates the generator loss
             g_loss = self.generator_loss(
                 fake_predicted, real_predicted,
+                fake_cohesion_evaluation,
                 generated_images, real_images,
                 input_keep_mask,
                 ec_mean, ec_log_var, random_codes, recovered_codes_mean,
@@ -379,47 +395,46 @@ class SpriteEditorModel(RemicModel):
             # xxxx_predicted_all_discriminators ([d] x [ds] x [b, ?, ?, 1])
             d_loss = self.discriminator_loss(real_predicted_all_discriminators, fake_predicted_all_discriminators,
                                              r1_penalty, r2_penalty)
+            
+            # trains the cohesion discriminator
+            real_cohesion_evaluation = self.cohesion_evaluator.evaluate(source_images)
+            fake_cohesion_evaluation = self.cohesion_evaluator.evaluate(generated_images)
+
+            cohesion_loss = self.cohesion_evaluator.calculate_discriminator_loss(real_cohesion_evaluation,
+                                                                                fake_cohesion_evaluation)
 
         # 4. calculates the gradients and applies them, then releases the persistent tape
         discriminator_gradients = [disc_tape.gradient(d_loss["total"][d], self.discriminators[d].trainable_variables)
-                                   for d in range(number_of_domains)]
+                                   for d in range(number_of_domains)] + [self.cohesion_evaluator.get_gradients(disc_tape, cohesion_loss)]
         discriminator_gradients = [g for grad in discriminator_gradients for g in grad]
         all_discriminator_trainable_variables = [v for d in range(number_of_domains)
-                                                 for v in self.discriminators[d].trainable_variables]
+                                                 for v in self.discriminators[d].trainable_variables] + self.cohesion_evaluator.get_vars()
         self.discriminator_optimizer.apply_gradients(
             zip(discriminator_gradients, all_discriminator_trainable_variables))
 
         del disc_tape
 
-        summary_step = step // evaluate_steps
-        with tf.name_scope("generator"):
-            with self.summary_writer.as_default():
-                tf.summary.scalar("total_loss", g_loss["total"], step=summary_step)
-                tf.summary.scalar("adversarial_loss", g_loss["adversarial"], step=summary_step)
-                tf.summary.scalar("reconstruction_loss", g_loss["reconstruction"], step=summary_step)
-                tf.summary.scalar("latent_loss", g_loss["latent-reconstruction"], step=summary_step)
-                tf.summary.scalar("kl_loss", g_loss["kl"], step=summary_step)
-                tf.summary.scalar("palette_loss", g_loss["palette-coverage"], step=summary_step)
 
-        with tf.name_scope("discriminator"):
-            with self.summary_writer.as_default():
-                fake_loss = real_loss = weight_loss = gp_loss = total_loss = 0
-                for i in range(number_of_domains):
-                    fake_loss += d_loss["fake"][i]
-                    real_loss += d_loss["real"][i]
-                    weight_loss += d_loss["l2-regularization"][i]
-                    gp_loss += d_loss["gradient-penalty"][i]
-                    total_loss += d_loss["total"][i]
-                tf.summary.scalar("fake_loss", tf.reduce_mean(fake_loss / number_of_domains),
-                                  step=step // evaluate_steps)
-                tf.summary.scalar("real_loss", tf.reduce_mean(real_loss / number_of_domains),
-                                  step=step // evaluate_steps)
-                tf.summary.scalar("weight_loss", tf.reduce_mean(weight_loss / number_of_domains),
-                                  step=step // evaluate_steps)
-                tf.summary.scalar("gradient_penalty_loss", tf.reduce_mean(gp_loss / number_of_domains),
-                                  step=step // evaluate_steps)
-                tf.summary.scalar("total_loss", tf.reduce_mean(total_loss / number_of_domains),
-                                  step=step // evaluate_steps)
+        d_loss_summaries = {
+            "fake_loss": tf.reduce_mean([d_loss["fake"][d] for d in range(number_of_domains)]),
+            "real_loss": tf.reduce_mean([d_loss["real"][d] for d in range(number_of_domains)]),
+            "weight_loss": tf.reduce_mean([d_loss["l2-regularization"][d] for d in range(number_of_domains)]),
+            "gradient_penalty_loss": tf.reduce_mean([d_loss["gradient-penalty"][d] for d in range(number_of_domains)]),
+            "cohesion_loss": cohesion_loss,
+            "total_loss": tf.reduce_mean([d_loss["total"][d] for d in range(number_of_domains)]),
+        }
+
+        g_loss_summaries = {
+            "total_loss": g_loss["total"],
+            "adversarial_loss": g_loss["adversarial"],
+            "reconstruction_loss": g_loss["reconstruction"],
+            "latent_loss": g_loss["latent-reconstruction"],
+            "kl_loss": g_loss["kl"],
+            "cohesion_loss": g_loss["cohesion"],
+            "palette_loss": g_loss["palette-coverage"]
+        }
+
+        return d_loss_summaries, g_loss_summaries
 
     def mix_and_discriminate(self, discriminator, real_image, fake_image, half_batch_size):
         """
@@ -550,7 +565,7 @@ class SpriteEditorModel(RemicModel):
         # - each row is an example
         # - each column is a different image type that uses column_contents[col]. If there rank is 5, each cell in
         # that column should contain a 2x2 grid of images with shape [s, s, c] each
-        fig = plt.figure(figsize=(8 * num_cols, 8 * num_rows))
+        fig = plt.figure(figsize=(8 * num_cols, 8 * num_rows + 2), layout="constrained")
         sub_figs = fig.subfigures(num_rows, num_cols)
         for row in range(num_rows):
             for col in range(num_cols):
@@ -577,11 +592,13 @@ class SpriteEditorModel(RemicModel):
                         ax.imshow(tf.clip_by_value(content * 0.5 + 0.5, 0., 1.))
                     ax.axis("off")
 
-        fig.tight_layout()
+        # fig.tight_layout()
         if save_name is not None:
             plt.savefig(save_name, transparent=True)
 
-        return fig
+        image = io_utils.plot_to_image(fig, self.config.inner_channels)
+
+        return image
 
     def generate_images_for_evaluation(self, example_indices_for_evaluation):
         batch_size = self.config.batch
@@ -924,6 +941,68 @@ class SpriteEditorModel(RemicModel):
         plt.close(fig)
 
 
+class AbstractCohesionEvaluator:
+    @abstractmethod
+    def evaluate(self, images):
+        pass
+
+    @abstractmethod
+    def calculate_generator_loss(self, fake_predicted):
+        pass
+
+    @abstractmethod
+    def calculate_discriminator_loss(self, real_predicted, fake_predicted):
+        pass
+
+    @abstractmethod
+    def get_gradients(self, tape, loss):
+        pass
+
+    @abstractmethod
+    def get_vars(self):
+        pass
+
+
+class CohesionEvaluator(AbstractCohesionEvaluator):
+    def __init__(self, config, discriminator):
+        self.config = config
+        self.discriminator = discriminator
+
+    def evaluate(self, images):
+        return self.discriminator(images, training=True)
+    
+    def calculate_generator_loss(self, fake_predicted):
+        # calculates lsgan loss for the generator
+        # fake_predicted (shape=[b, 1])
+        return tf.reduce_mean(tf.square(fake_predicted - 1))
+
+    def calculate_discriminator_loss(self, real_predicted, fake_predicted):
+        return tf.reduce_mean(tf.square(real_predicted - 1)) + tf.reduce_mean(tf.square(fake_predicted))
+    
+    def get_gradients(self, tape, loss):
+        return tape.gradient(loss, self.discriminator.trainable_variables)
+    
+    def get_vars(self):
+        return [v for v in self.discriminator.trainable_variables]
+
+
+class NoopCohesionEvaluator(AbstractCohesionEvaluator):
+    def evaluate(self, images):
+        return 0.
+
+    def calculate_generator_loss(self, fake_predicted):
+        return 0.
+    
+    def calculate_discriminator_loss(self, real_predicted, fake_predicted):
+        return 0.
+    
+    def get_gradients(self, tape, loss):
+        return []
+    
+    def get_vars(self):
+        return []
+
+
 from tensorflow.keras import layers, models
 
 def build_monolith_generator(config):
@@ -1127,3 +1206,25 @@ def build_cohesion_discriminator(config):
     :param config:
     :return:
     """
+    domains = config.number_of_domains
+    image_size = config.image_size
+    channels = config.inner_channels
+
+    input_images = layers.Input(shape=(domains, image_size, image_size, channels), name="input_images")
+    x = layers.Reshape((image_size, image_size, domains * channels))(input_images)
+    init = tf.random_normal_initializer(0., 0.02)
+    number_of_filters = [32, 64, 128, 256]
+    x = layers.Conv2D(number_of_filters[0], kernel_size=4, strides=1, padding="same", kernel_initializer=init)(x)
+    x = layers.GroupNormalization(groups=number_of_filters[0], epsilon=0.00001)(x)
+    x = layers.LeakyReLU()(x)
+    for filters in number_of_filters:
+        x = resblock(x, filters, 4, init)
+        # downsample
+        x = layers.Conv2D(filters * 2, kernel_size=4, strides=2, padding="same", kernel_initializer=init,
+                          use_bias=False)(x)
+        x = layers.GroupNormalization(groups=filters, epsilon=0.00001)(x)
+        x = layers.LeakyReLU()(x)
+    x = layers.Flatten()(x)
+    x = layers.Dense(1, kernel_initializer=init)(x)
+    # lsgan: unbounded real number, should be 1 for real images and 0 for fake
+    return models.Model(inputs=input_images, outputs=x, name="CohesionDiscriminator")
