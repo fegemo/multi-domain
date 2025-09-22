@@ -1,2 +1,8 @@
+
 def listify(value):
-    return value if isinstance(value, list) else [value]
+    if isinstance(value, list):
+        return value
+    elif isinstance(value, tuple):
+        return [*value]
+    else:
+        return [value]
