@@ -12,9 +12,8 @@ if __name__ == "__main__":
         {
             "model": "remic",
             "adhoc": [
-                "callback-evaluate-fid", "callback-evaluate-l1", "callback-debug-discriminator",
+                "callback-evaluate-fid", "callback-evaluate-l1",
                 "save-model",
-                "palette-quantization",
             ],
             "log-folder": config.output if config.output is not None else "output",
             "steps": 240000,
@@ -24,16 +23,13 @@ if __name__ == "__main__":
             "lr-decay": "constant-then-linear",
             "input-dropout": "original",
             "discriminator-scales": 3,
-            "temperature": 4.0,
-            "annealing": "cosine",
             "model-name": "@model",
-            "experiment": "palette,&lambda-l1,&lambda-latent-reconstruction,&lambda-cyclic-reconstruction,&lambda-palette",
+            "experiment": "&lambda-l1,&lambda-latent-reconstruction,&lambda-cyclic-reconstruction",
             "vram": -1,
         }, {
             "lambda-l1": [10],
-            "lambda-latent-reconstruction": [1, 10],
-            "lambda-cyclic-reconstruction": [1, 10, 100],
-            "lambda-palette": [0, 1, 10]
+            "lambda-latent-reconstruction": [1],
+            "lambda-cyclic-reconstruction": [0, 1, 10, 100]
         }, {
             "all": {
                 "adhoc": ["no-aug"],
