@@ -953,6 +953,46 @@ class AnyNonZeroPixelDetector(layers.Layer):
         mask = tf.reduce_all(tf.equal(inputs, 0.0), axis=[1, 2, 3], keepdims=True)
         return 1. - tf.cast(mask, tf.float32)
 
+class AdaIN(layers.Layer):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    def build(self, input_shape):
+        feature_shape, condition_shape = input_shape
+        num_channels = feature_shape[-1]
+        
+        # Initialize dense layers for gamma and beta with zeros (for kernel) and specific biases
+        self.gamma_dense = layers.Dense(
+            num_channels, 
+            kernel_initializer='zeros',
+            bias_initializer='ones'
+        )
+        self.beta_dense = layers.Dense(
+            num_channels,
+            kernel_initializer='zeros',
+            bias_initializer='zeros'
+        )
+
+    def call(self, inputs):
+        x, condition = inputs
+        
+        # Calculate mean and variance along spatial dimensions (H, W)
+        mean, variance = tf.nn.moments(x, axes=[1, 2], keepdims=True)
+        std = tf.sqrt(variance + 1e-5)
+        
+        # Normalize the input
+        normalized = (x - mean) / std
+        
+        # Project the condition to get gamma and beta
+        gamma = self.gamma_dense(condition)
+        beta = self.beta_dense(condition)
+        
+        # Reshape gamma and beta to [batch_size, 1, 1, num_channels]
+        gamma = gamma[:, tf.newaxis, tf.newaxis, :]
+        beta = beta[:, tf.newaxis, tf.newaxis, :]
+        
+        return gamma * normalized + beta
+
 # Lots of layers and code related to R3GAN, used by Sprite and ReMIC
 # BiasActivation is a way to fuse the bias addition with the LeakyReLU activation, which improves performance
 # especially in pytorch, which might have more trouble fusing it as an optimization compared to TensorFlow (as TF has
@@ -1005,7 +1045,7 @@ class R3GANResidualBlock(layers.Layer):
 class R3GANResidualBlockConditional(layers.Layer):
     LeakyReLUGain = tf.math.sqrt(2. / (1. + 0.2 ** 2.))
 
-    def __init__(self, variance_scaling_parameter, **kwargs):
+    def __init__(self, variance_scaling_parameter, condition_layer="adain", **kwargs):
         super().__init__(**kwargs)
         num_linear_layers = 3
         activation_gain = self.LeakyReLUGain * variance_scaling_parameter ** (-1 / (2 * num_linear_layers - 2))
@@ -1014,7 +1054,8 @@ class R3GANResidualBlockConditional(layers.Layer):
         self.linear2 = None
         self.linear3 = None
         self.activation = None
-        self.film = None
+        self.conditioner = None
+        self.condition_layer = condition_layer
 
     def build(self, input_shape):
         input_channels = input_shape[0][-1]
@@ -1031,7 +1072,12 @@ class R3GANResidualBlockConditional(layers.Layer):
         # 1x1 convolution from expanded_channels back to input_channels
         self.linear3 = self.create_convolution(input_channels, 1, use_bias=False)
 
-        self.film = FiLMLayer()
+        if self.condition_layer not in ["adain", "film"]:
+            raise ValueError(f"Unknown condition_layer: {self.condition_layer}. Supported: 'adain', 'film'")
+        elif self.condition_layer == "adain":
+            self.conditioner = AdaIN()
+        elif self.condition_layer == "film":
+            self.conditioner = FiLMLayer()
 
         # plain 0.2 lre
         self.activation = layers.LeakyReLU(negative_slope=0.2)
@@ -1041,7 +1087,7 @@ class R3GANResidualBlockConditional(layers.Layer):
         y = self.linear1(x)
         y = self.activation(y)
         y = self.linear2(y)
-        y = self.film([y, condition])
+        y = self.conditioner([y, condition])
         y = self.activation(y)
         y = self.linear3(y)
         return x + y
@@ -1053,6 +1099,15 @@ class R3GANResidualBlockConditional(layers.Layer):
         return layers.Conv2D(filters, kernel_size=kernel_size, strides=1, padding="same", use_bias=use_bias,
                              kernel_initializer=self.kernel_initializer, bias_initializer="zeros", groups=groups)
 
+
+def R3GANResidualBlockBuilder(is_conditional, condition_layer="adain"):
+    def builder(variance_scaling_parameter, **kwargs):
+        if is_conditional:
+            return R3GANResidualBlockConditional(variance_scaling_parameter, **kwargs)
+        else:
+            return R3GANResidualBlock(variance_scaling_parameter, **kwargs)
+
+    return builder
 
 def create_lowpass_kernel():
     w = [1., 2., 1.]
@@ -1221,7 +1276,7 @@ class DiscriminativeBasis(layers.Layer):
 
 class UpsampleStage(layers.Layer):
     def __init__(self, output_channels, variance_scaling_parameter,
-                 is_initial_stage=False, is_conditional=False):
+                 is_initial_stage=False, is_conditional=False, condition_layer="adain"):
         super().__init__()
         self.output_channels = output_channels
         self.variance_scaling_parameter = variance_scaling_parameter
@@ -1230,7 +1285,7 @@ class UpsampleStage(layers.Layer):
         self.transition_layer = None
         self.resblock_1 = None
         self.resblock_2 = None
-        self.ResidualBlockConstructor = R3GANResidualBlockConditional if is_conditional else R3GANResidualBlock
+        self.ResidualBlockConstructor = R3GANResidualBlockBuilder(is_conditional, condition_layer)
         self.resblock_supplier = NParamsSupplier(2 if is_conditional else 1, delistify=True)
         self.inputs_padder = lambda inputs: inputs if is_conditional else (inputs, None)
 
@@ -1262,16 +1317,17 @@ class UpsampleStage(layers.Layer):
 
 class DownsampleStage(layers.Layer):
     def __init__(self, output_channels, variance_scaling_parameter,
-                 is_last_stage=False, is_conditional=False):
+                 is_last_stage=False, is_conditional=False, condition_layer="adain"):
         super().__init__()
         self.output_channels = output_channels
         self.variance_scaling_parameter = variance_scaling_parameter
         self.is_last_stage = is_last_stage
         self.is_conditional = is_conditional
+        self.condition_layer = condition_layer
         self.transition_layer = None
         self.resblock_1 = None
         self.resblock_2 = None
-        self.ResidualBlockConstructor = R3GANResidualBlockConditional if is_conditional else R3GANResidualBlock
+        self.ResidualBlockConstructor = R3GANResidualBlockBuilder(is_conditional, condition_layer)
         self.resblock_supplier = NParamsSupplier(2 if is_conditional else 1, delistify=True)
         self.inputs_padder = lambda inputs: inputs if is_conditional else (inputs, None)
 
