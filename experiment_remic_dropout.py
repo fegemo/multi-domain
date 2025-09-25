@@ -26,25 +26,12 @@ if __name__ == "__main__":
             "lambda-cyclic-reconstruction": 100,
             "discriminator-scales": 3,
             "model-name": "@model",
-            "experiment": "@dataset,&input-dropout",
+            "experiment": "&input-dropout",
         }, {
             "input-dropout": ["none", "original", "conservative", "curriculum"]
         }, {
-            # "tiny": {
-            #     "adhoc": ["no-aug"],
-            # },
-            # "rm2k": {
-            #     "adhoc": ["no-tran"]
-            # },
-            # "rmxp": {
-            #     "adhoc": []
-            # },
-            # "rmvx": {
-            #     "adhoc": ["no-tran"]
-            # },
             "all": {
                 "adhoc": ["no-tran"],
-                # "steps": 80000
             }
         })
 
