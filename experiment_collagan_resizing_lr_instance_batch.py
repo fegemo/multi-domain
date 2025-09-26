@@ -15,6 +15,8 @@ if __name__ == "__main__":
                 "callback-evaluate-l1",
                 #"callback-debug-discriminator",
                 "save-model",
+                "up-preprocessing",
+                "no-up-aug"
             ],
             "log-folder": config.output if config.output is not None else "output",
             "steps": 100000,
@@ -36,11 +38,6 @@ if __name__ == "__main__":
             "vram": -1
         },
         {
-            "adhoc": [
-                ["up-preprocessing", "no-up-aug"], #só pre-processamento
-                [], #só augmentation
-                ["up-preprocessing"], #ambos
-            ],
             "resizing-factor": [2, 3],
             "lr": [0.00005, 0.00001]
         },
