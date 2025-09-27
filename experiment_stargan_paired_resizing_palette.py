@@ -28,7 +28,7 @@ if __name__ == "__main__":
             "lambda-domain": 1.0,
             "lambda-gp": 10.0,
             "lambda-l1": 100.0,
-            "lambda-l1_backward": 10.0,
+            "lambda-l1-backward": 10.0,
             "lr-decay": "constant-then-linear",
             "annealing": "linear",
             "temperature": 0.1,
