@@ -15,7 +15,6 @@ if __name__ == "__main__":
                 "callback-evaluate-l1",
                 #"callback-debug-discriminator",
                 "save-model",
-                "resizing-factor": 2
             ],
             "log-folder": config.output if config.output is not None else "output",
             "steps": 100000,
@@ -35,7 +34,8 @@ if __name__ == "__main__":
             "lambda-ssim": 1.,
             "lambda-domain": 10.,
             "lambda-regularization": 0.001,
-            "vram": -1
+            "vram": -1,
+            "resizing-factor": 2
         },
         {},
         {
