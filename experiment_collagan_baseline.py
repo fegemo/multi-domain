@@ -13,7 +13,8 @@ if __name__ == "__main__":
             "model": "collagan",
             "adhoc": [
                 "callback-evaluate-fid", "callback-evaluate-l1", #"callback-debug-discriminator",
-                "save-model"
+                "save-model",
+                "no-up-aug"
             ],
             "log-folder": config.output if config.output is not None else "output",
             #"steps": 600000,
@@ -21,12 +22,12 @@ if __name__ == "__main__":
             "evaluate-steps": 1000,
             "capacity": 4,
             "d-steps": 1,
-            #"lr": 0.00001,
-            "lr": 0.0001,
+            "lr": 0.00001,
+            #"lr": 0.0001,
             #"ttur": 0.1,
             "ttur": 1,
             #"batch": 20,
-            "batch": 4,
+            "batch": 1,
             "lr-decay": "constant-then-linear",
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
