@@ -14,18 +14,19 @@ if __name__ == "__main__":
             "adhoc": [
                 "callback-evaluate-fid", "callback-evaluate-l1", #"callback-debug-discriminator",
                 "save-model",
-                "palette-quantization" #new
+                "palette-quantization",
+                "no-up-aug"
             ],
             "log-folder": config.output if config.output is not None else "output",
             #"steps": 300000,
             "steps": 100000,
             "evaluate-steps": 1000,
             "capacity": 4,
-            "lr": 0.0001,
+            "lr": 0.00001,
             #"ttur": 0.2,
             "ttur": 1,
             "lr-decay": "constant-then-linear",
-            "batch": 4,
+            "batch": 1,
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             #"model-name": "collagan-palette-coverage",
