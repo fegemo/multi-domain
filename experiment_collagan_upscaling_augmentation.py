@@ -20,9 +20,9 @@ if __name__ == "__main__":
             "steps": 100000,
             "evaluate-steps": 1000,
             "capacity": 4,
-            "lr": 0.0001,
+            "lr": 0.00001,
             "ttur": 1,
-            "batch": 4,
+            "batch": 1,
             "lr-decay": "constant-then-linear",
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
@@ -35,7 +35,7 @@ if __name__ == "__main__":
             "lambda-domain": 10.,
             "lambda-regularization": 0.001,
             "vram": -1,
-            "resizing-factor": 2
+            "resizing-factor": 3
         },
         {},
         {
