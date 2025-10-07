@@ -35,6 +35,7 @@ if __name__ == "__main__":
             "lambda-domain": 10.,
             "lambda-regularization": 0.001,
             "vram": -1,
+            "resizing-factor": 3
         },
         {},
         {
