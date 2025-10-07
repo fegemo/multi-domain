@@ -27,7 +27,7 @@ if __name__ == "__main__":
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "model-name": "@model",
-            "experiment": "upscaling-augmentation-2,@dataset,&resizing-factor",
+            "experiment": "upscaling-augmentation,@dataset,&resizing-factor",
             "generator": "affluent",
             "lambda-adversarial": 1.,
             "lambda-l1": 100.,
