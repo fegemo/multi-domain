@@ -27,7 +27,7 @@ if __name__ == "__main__":
             "input-dropout": "conservative",
             "cycled-source-replacer": "forward",
             "model-name": "@model",
-            "experiment": "upscaling-augmentation-3,@dataset",
+            "experiment": "upscaling-augmentation,@dataset,&resizing-factor",
             "generator": "affluent",
             "lambda-adversarial": 1.,
             "lambda-l1": 100.,
@@ -35,9 +35,10 @@ if __name__ == "__main__":
             "lambda-domain": 10.,
             "lambda-regularization": 0.001,
             "vram": -1,
-            "resizing-factor": 3
         },
-        {},
+        {
+            "resizing-factor": [2, 3]
+        },
         {
             "all": {
                 "adhoc": ["no-tran"]
