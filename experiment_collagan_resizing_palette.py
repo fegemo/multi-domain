@@ -16,7 +16,8 @@ if __name__ == "__main__":
                 #"callback-debug-discriminator",
                 "save-model",
                 "palette-quantization",
-                "no-up-aug"
+                "no-up-aug",
+                "up-preprocessing"
             ],
             "log-folder": config.output if config.output is not None else "output",
             "steps": 100000,
