@@ -56,7 +56,7 @@ class SpriteEditorModel(RemicModel):
                 "generator": self.generator,
                 "diversity-encoder": self.diversity_encoder
             }
-        elif config.generator in ["r3gan"]:
+        elif config.generator in ["r3gan", "r3gan-skips"]:
             self.generator = sprite_r3gan_generator(config)
             self.diversity_encoder = build_diversity_encoder(config)
 

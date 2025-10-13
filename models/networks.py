@@ -1051,6 +1051,20 @@ def sprite_r3gan_generator(config):
     :param config: Configuration object containing model parameters.
     :return: A Keras Model representing the R3GAN generator.
     """
+    def possibly_add_skip(x, prev):
+        return layers.Concatenate()([x, prev]) if has_skip_connections else x
+
+    def possibly_add_intermediate_output(x, current_size):
+        if generator_scales > 1 and current_size in {image_size // 4, image_size // 2}:
+            output_layer_name = f"intermediate_output_{current_size}x{current_size}"
+            intermediate_output = layers.Conv2D(domains * channels, kernel_size=2, padding="same", use_bias=False,
+                                                kernel_initializer=initializer)(x)
+            intermediate_output = layers.Reshape((domains, current_size, current_size, channels),
+                                                name=output_layer_name)(intermediate_output)
+            return [intermediate_output]
+        return []
+
+
     domains = config.number_of_domains
     image_size = config.image_size
     channels = config.inner_channels
@@ -1060,6 +1074,10 @@ def sprite_r3gan_generator(config):
     palette_quantization = config.palette_quantization
     initial_temperature = config.temperature
     capacity = config.capacity
+    feature_augmentation = config.feature_augmentation
+    has_skip_connections = "skip" in config.generator
+
+    outputs = []
 
     # define the inputs
     masked_images_input = layers.Input(shape=(domains, image_size, image_size, channels), name="source_images")
@@ -1067,6 +1085,13 @@ def sprite_r3gan_generator(config):
     target_palette_input = layers.Input(shape=(None, channels), name="desired_palette")
     domain_availability_input = layers.Input(shape=(domains,), name="domain_availability")
     noise_input = layers.Input(shape=(noise_length,), name="noise")
+
+    masked_images = masked_images_input
+    if feature_augmentation == "flipY":
+        reshaped_input = layers.Lambda(lambda input_batch: tf.reshape(input_batch, (-1, image_size, image_size, channels)))(masked_images)
+        flipped_input = layers.Lambda(lambda input_batch: tf.image.flip_left_right(input_batch))(reshaped_input)
+        flipped_input = layers.Lambda(lambda input_batch: tf.reshape(input_batch, (-1, domains, image_size, image_size, channels)))(flipped_input)
+        masked_images = layers.Concatenate(axis=1)([masked_images, flipped_input])
 
     # processes the domain availability and the noise to generate embeddings
     # they are used to condition the generator
@@ -1081,30 +1106,40 @@ def sprite_r3gan_generator(config):
     noise_embedding = layers.Dense(film_length, activation="leaky_relu")(noise_embedding)
 
     initializer = keras_utils.MSRInitializer(1.0)
-    masked_images = layers.Reshape((image_size, image_size, domains * channels))(masked_images_input)
+    masked_images = layers.Reshape((image_size, image_size, -1))(masked_images)
     encoder_input = layers.Concatenate(axis=-1)([masked_images, inpaint_mask_input, domain_availability_channelized])
 
-    variance_scaling = 10 + 1 + 10
+    variance_scaling = 10 + 1 + 12
+    initial_conv = layers.Conv2D(32, 7, strides=1, padding="same", kernel_initializer=initializer,
+                                    use_bias=False, name="initial_conv")
     initial_stage = keras_utils.DownsampleStage(channels * domains + 1 + domains, variance_scaling)
-    x = initial_stage(encoder_input)
-    x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
-    x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
-    x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
-    x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
-    x = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
+    x0 = initial_stage(initial_conv(encoder_input))
+    x1 = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x0, domain_embedding])
+    x2 = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x1, domain_embedding])
+    x3 = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x2, domain_embedding])
+    x4 = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x3, domain_embedding])
+    x5 = keras_utils.DownsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x4, domain_embedding])
 
-    bottleneck = keras_utils.R3GANResidualBlockConditional(variance_scaling)([x, domain_embedding])
+    bottleneck = keras_utils.R3GANResidualBlockConditional(variance_scaling)([x5, domain_embedding])
 
-    x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([bottleneck, domain_embedding])
-    x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
-    x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, domain_embedding])
+    x = keras_utils.UpsampleStage(256, variance_scaling, is_conditional=True, condition_layer="film", is_initial_stage=True)([bottleneck, domain_embedding])
+    x = possibly_add_skip(x, x5)
     x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, noise_embedding])
+    x = possibly_add_skip(x, x4)
     x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, noise_embedding])
+    x = possibly_add_skip(x, x3)
+    x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, noise_embedding])
+    x = possibly_add_skip(x, x2)
+    x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, noise_embedding])
+    outputs += possibly_add_intermediate_output(x, image_size // 4)
+    x = possibly_add_skip(x, x1)
+    x = keras_utils.UpsampleStage(768, variance_scaling, is_conditional=True, condition_layer="film")([x, noise_embedding])
+    outputs += possibly_add_intermediate_output(x, image_size // 2)
+    x = possibly_add_skip(x, x0)
     x = keras_utils.UpsampleStage(384, variance_scaling, is_conditional=True, condition_layer="film")([x, noise_embedding])
 
     pre_output = layers.Conv2D(domains * channels, kernel_size=1, padding="same", use_bias=False,
                                kernel_initializer=initializer, name="pre-output")(x)
-    # pre_output = layers.Activation("tanh")(pre_output)
 
     if palette_quantization:
         # quantize to the palette
@@ -1122,9 +1157,12 @@ def sprite_r3gan_generator(config):
                                       name=f"output-images")(pre_output)
         inputs = [masked_images_input, inpaint_mask_input, domain_availability_input, noise_input]
 
+    outputs.append(final_output)
+    outputs.reverse()
+
     model = tf.keras.models.Model(
         inputs=inputs,
-        outputs=final_output,
+        outputs=outputs,
         name=f"SpriteR3GANGenerator{'_Quantized' if palette_quantization else ''}"
     )
 
