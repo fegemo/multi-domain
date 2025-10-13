@@ -46,10 +46,10 @@ from models.sprite_model import SpriteEditorModel
 if config.verbose:
     logging.debug(f"Tensorflow version: {tf.__version__}")
 
-if tf.test.gpu_device_name():
-    logging.info("Default GPU: {}".format(tf.test.gpu_device_name()))
-else:
-    logging.warning("Not using a GPU - it will take long!!")
+# if tf.test.gpu_device_name():
+#     logging.info("Default GPU: {}".format(tf.test.gpu_device_name()))
+# else:
+#     logging.warning("Not using a GPU - it will take long!!")
 
 # check if datasets need unzipping
 if config.verbose:
