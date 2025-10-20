@@ -163,3 +163,47 @@ def show_image_matrix(image_tensor, in_ndc_range=True):
             plt.imshow(image)
     fig.tight_layout()
     plt.show()
+
+def plot_5d_tensor_images(tensor):
+    """
+    Plots a tensor with shape [batch, domains, image_size, image_size, channels] and values in the [-1, 1] domain.
+
+    Args:
+        tensor: A tensor with shape [batch, domains, image_size, image_size, channels].
+    """
+    batch, domains, image_size, _, channels = tensor.shape
+    fig, axes = plt.subplots(batch, domains, figsize=(domains * 2, batch * 2))
+
+    for i in range(batch):
+        for j in range(domains):
+            image = tensor[i, j]
+            image = (image + 1) / 2  # Convert from [-1, 1] to [0, 1] for plotting
+            if channels == 1:
+                image = tf.squeeze(image, axis=-1)  # Remove the channel dimension if it's 1
+            axes[i, j].imshow(image)
+            axes[i, j].axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
+def plot_4d_tensor_images(tensor):
+    """
+    Plots a tensor with shape [batch, image_size, image_size, channels] and values in the [-1, 1] domain.
+
+    Args:
+        tensor: A tensor with shape [batch, image_size, image_size, channels].
+    """
+    batch, image_size, _, channels = tensor.shape
+    fig, axes = plt.subplots(batch, 1, figsize=(1 * 2, batch * 2))
+
+    for i in range(batch):
+        image = tensor[i]
+        image = (image + 1) / 2  # Convert from [-1, 1] to [0, 1] for plotting
+        if channels == 1:
+            image = tf.squeeze(image, axis=-1)  # Remove the channel dimension if it's 1
+        axes[i].imshow(image)
+        axes[i].axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
