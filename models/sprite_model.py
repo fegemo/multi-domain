@@ -786,7 +786,8 @@ class SpriteEditorModel(RemicModel):
             :param idx: the index of the example in the dataset.
             """
             # 1. repeat the domain_images to match the number of rows
-            domain_images = tf.repeat(tf.expand_dims(domain_images, 0), num_rows, axis=0)
+            domain_images = tf.stack(domain_images)
+            domain_images = tf.repeat(domain_images[tf.newaxis, ...], num_rows, axis=0)
             # domain_images (shape=[num_rows, d, s, s, c])
             visible_source_images = domain_images * keep_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
             # visible_source_images (shape=[num_rows, d, s, s, c])
@@ -807,26 +808,40 @@ class SpriteEditorModel(RemicModel):
             random_codes = tf.random.normal((num_rows, noise_length))
             # extracted_codes_mean, random_codes (shape=[num_rows, noise_length])
 
+            input_images = tf.concat([visible_source_images, visible_source_images, masked_source_images], axis=0)
+            input_inpaint_mask = tf.concat([blank_inpaint_mask, blank_inpaint_mask, random_inpaint_masks], axis=0)
+            input_palette = tf.tile(source_palettes, [3, 1, 1])
+            input_keep_mask = tf.tile(keep_mask, [3, 1])
+            input_code = tf.concat([extracted_codes_mean, random_codes, extracted_codes_mean], axis=0)
+
             # 5. generates the images using the generator
             generated_images = self.generator.predict(self.gen_supplier(
                 # source_images: (num_rows x 3 x shape=[d, s, s, c]))
-                tf.concat([visible_source_images, visible_source_images, masked_source_images], axis=0),
+                input_images,
                 # inpaint_mask: (num_rows x 3 x shape=[s, s, 1])
-                tf.concat([blank_inpaint_mask, blank_inpaint_mask, random_inpaint_masks], axis=0),
+                input_inpaint_mask,
                 # source_palettes: (num_rows x 3 x shape=[(n), c])
-                tf.repeat(source_palettes, 3, axis=0),
+                input_palette,
                 # keep_mask: (num_rows x 3 x shape=[d])
-                tf.repeat(keep_mask, 3, axis=0),
+                input_keep_mask,
+                # tf.repeat(keep_mask, 3, axis=0),
                 # codes: (num_rows x 3 x shape=[noise_length])
-                tf.concat([extracted_codes_mean, random_codes, extracted_codes_mean], axis=0)
-            ), verbose=0, batch_size=batch_size)
+                input_code
+            ), verbose=0)
             generated_images = listify(generated_images)[0]
             # generated_images (shape=[num_rows x 3, d, s, s, c])
 
-            # 6. reshapes the generated images to have the shape [num_rows, 3, d, s, s, c]
-            generated_images = tf.reshape(generated_images, (num_rows, 3, number_of_domains,
+            # if idx == 168:
+            #     print("input_keep_mask", input_keep_mask)
+            #     detector = keras_utils.DetectPresentImages()
+            #     print("real_keep_mask", detector(input_images))
+            #     plot_5d_tensor_images(input_images)
+            #     plot_5d_tensor_images(generated_images)
+
+            # 6. reshapes the generated images to have the shape [3, num_rows, d, s, s, c]
+            generated_images = tf.reshape(generated_images, (3, num_rows, number_of_domains,
                                                              image_size, image_size, channels))
-            # generated_images (shape=[num_rows, 3, d, s, s, c])
+            # generated_images (shape=[3, num_rows, d, s, s, c])
 
             # 7. plots the images in a grid format with 14 columns and 6 rows
             # - the first column is the source images in a 2x2 subgrid
@@ -853,7 +868,7 @@ class SpriteEditorModel(RemicModel):
                 for col in range(1, 5):
                     sub_fig = sub_figs[row, col]
                     ax = sub_fig.subplots(1, 1)
-                    ax.imshow(tf.clip_by_value(generated_images[row, 0, col - 1] * 0.5 + 0.5, 0., 1.))
+                    ax.imshow(tf.clip_by_value(generated_images[0, row, col - 1] * 0.5 + 0.5, 0., 1.))
                     ax.axis("off")
                     domain_name = self.config.domains_capitalized[col - 1]
                     if row == 0:
@@ -863,7 +878,7 @@ class SpriteEditorModel(RemicModel):
                 for col in range(5, 9):
                     sub_fig = sub_figs[row, col]
                     ax = sub_fig.subplots(1, 1)
-                    ax.imshow(tf.clip_by_value(generated_images[row, 1, col - 5] * 0.5 + 0.5, 0., 1.))
+                    ax.imshow(tf.clip_by_value(generated_images[1, row, col - 5] * 0.5 + 0.5, 0., 1.))
                     ax.axis("off")
                     domain_name = self.config.domains_capitalized[col - 5]
                     if row == 0:
@@ -881,7 +896,7 @@ class SpriteEditorModel(RemicModel):
                 for col in range(10, num_cols):
                     sub_fig = sub_figs[row, col]
                     ax = sub_fig.subplots(1, 1)
-                    ax.imshow(tf.clip_by_value(generated_images[row, 2, col - 10] * 0.5 + 0.5, 0., 1.))
+                    ax.imshow(tf.clip_by_value(generated_images[2, row, col - 10] * 0.5 + 0.5, 0., 1.))
                     ax.axis("off")
                     domain_name = self.config.domains_capitalized[col - 10]
                     if row == 0:

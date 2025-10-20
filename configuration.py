@@ -265,6 +265,8 @@ class OptionParser(metaclass=SingletonMeta):
                                                           "default behavior and -1 for on-demand growth", default=0)
         self.parser.add_argument("--profile", type=int, default=0, help="If > 0, indicates the port to use to profile the code" \
                                  "using the tensorboard profiler plugin")
+        self.parser.add_argument("--run-string", help="folder path of a specific run to load, used when " \
+                                 "loading a checkpoint instead of training")
 
         self.initialized = True
 
@@ -297,7 +299,8 @@ class OptionParser(metaclass=SingletonMeta):
             in self.values.dataset_names
         ])
         setattr(self.values, "domain_folders", [f"{i}-{name}" for i, name in enumerate(self.values.domains)])
-        setattr(self.values, "run_string", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
+        if "run_string" not in vars(self.values):
+            setattr(self.values, "run_string", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
 
         dataset_mask = list(
             map(lambda opt: 1 if getattr(self.values, opt) else 0, ["tiny", "rm2k", "rmxp", "rmvx", "misc"]))
