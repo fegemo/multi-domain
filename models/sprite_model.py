@@ -370,7 +370,7 @@ class SpriteEditorModel(RemicModel):
                     tf.zeros_like(inpaint_mask[half_batch_size:]), 
                     source_palette[half_batch_size:],
                     backwards_input_keep_mask,
-                    random_codes
+                    extracted_codes
                 ), training=True
             )
             cyclically_generated_images = listify(cyclically_generated_images)
