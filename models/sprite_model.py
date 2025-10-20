@@ -362,11 +362,13 @@ class SpriteEditorModel(RemicModel):
             backwards_batch = tf.transpose(generated_images_with_random_codes[0], [1, 0, 2, 3, 4])
             # backwards_batch (shape=[d, hb, s, s, c])
             backwards_source_images, backwards_input_keep_mask = self.sampler.sample(backwards_batch, t)
+            backwards_visible_source_images = backwards_source_images * \
+                backwards_input_keep_mask[..., tf.newaxis, tf.newaxis, tf.newaxis]
             # backwards_source_images (shape=[hb, d, s, s, c])
             # backwards_input_keep_mask (shape=[hb, d])
             cyclically_generated_images = self.generator(
                 self.gen_supplier(
-                    backwards_source_images,
+                    backwards_visible_source_images,
                     tf.zeros_like(inpaint_mask[half_batch_size:]), 
                     source_palette[half_batch_size:],
                     backwards_input_keep_mask,
@@ -835,8 +837,8 @@ class SpriteEditorModel(RemicModel):
             #     print("input_keep_mask", input_keep_mask)
             #     detector = keras_utils.DetectPresentImages()
             #     print("real_keep_mask", detector(input_images))
-            #     plot_5d_tensor_images(input_images)
-            #     plot_5d_tensor_images(generated_images)
+            #     io_utils.plot_5d_tensor_images(input_images)
+            #     io_utils.plot_5d_tensor_images(generated_images)
 
             # 6. reshapes the generated images to have the shape [3, num_rows, d, s, s, c]
             generated_images = tf.reshape(generated_images, (3, num_rows, number_of_domains,
