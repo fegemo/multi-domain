@@ -819,10 +819,8 @@ class UniformDropoutSampler(ExampleSampler):
                                                                     "float32"))
         random_permutation_index = tf.cast(random_permutation_index, dtype="int32")
 
-        # input_dropout_mask (shape=[b, d])
-        input_dropout_mask = tf.gather(input_dropout_mask_options, random_permutation_index, batch_dims=1)
+        input_keep_mask = tf.gather(input_dropout_mask_options, random_permutation_index, batch_dims=1)
         # input_keep_mask (shape=[b, d])
-        input_keep_mask = 1. - input_dropout_mask
 
         # returns the batch and an input_keep_mask (inverse of the dropout mask)
         # the mask is a 0/1 tensor
