@@ -392,7 +392,8 @@ class SpriteEditorModel(RemicModel):
             # fake_predicted ([d] x [ds] x shape=[3*hb, ?, ?, 1]) where ds is the number of discriminator scales
             # real_predicted ([d] x [ds] x shape=[  hb, ?, ?, 1]) where ds is the number of discriminator scales
 
-            fake_cohesion_evaluation = self.cohesion_evaluator.evaluate(generated_images_full_size)
+            fake_cohesion_evaluation = self.cohesion_evaluator.evaluate([
+                generated_images_full_size[half_batch_size:], masked_source_images, inpaint_mask])
             # cohesion_evaluation (shape=[b, 1]) - discriminator output for the cohesion discriminator
 
             fake_predicted_extracted, fake_predicted_random, fake_predicted_cyclic = self.split_fake_predictions(fake_predicted)
@@ -455,8 +456,8 @@ class SpriteEditorModel(RemicModel):
                                              r1_penalty, r2_penalty)
             
             # trains the cohesion discriminator
-            real_cohesion_evaluation = self.cohesion_evaluator.evaluate(source_images)
-            fake_cohesion_evaluation = self.cohesion_evaluator.evaluate(generated_images)
+            real_cohesion_evaluation = self.cohesion_evaluator.evaluate([source_images, masked_source_images, inpaint_mask])
+            fake_cohesion_evaluation = self.cohesion_evaluator.evaluate([generated_images, masked_source_images, inpaint_mask])
 
             cohesion_loss = self.cohesion_evaluator.calculate_discriminator_loss(real_cohesion_evaluation,
                                                                                 fake_cohesion_evaluation)
@@ -781,7 +782,7 @@ class SpriteEditorModel(RemicModel):
         def generate_images_for_example(domain_images, idx):
             """
             Generates and plots an image for a single example.
-            :param domain_images: the source images for the example, shape=[d, s, s, c]
+            :param domain_images: the source images for the example, [d] x shape=[s, s, c]
             :param idx: the index of the example in the dataset.
             """
             # 1. repeat the domain_images to match the number of rows
@@ -1045,8 +1046,8 @@ class CohesionEvaluator(AbstractCohesionEvaluator):
         self.config = config
         self.discriminator = discriminator
 
-    def evaluate(self, images):
-        return self.discriminator(images, training=True)
+    def evaluate(self, inputs):
+        return self.discriminator(inputs, training=True)
     
     def calculate_generator_loss(self, fake_predicted):
         # calculates lsgan loss for the generator
@@ -1317,8 +1318,15 @@ def build_cohesion_discriminator(config):
     image_size = config.image_size
     channels = config.inner_channels
 
-    input_images = layers.Input(shape=(domains, image_size, image_size, channels), name="input_images")
-    x = layers.Reshape((image_size, image_size, domains * channels))(input_images)
+    images_input = layers.Input(shape=(domains, image_size, image_size, channels), name="input_images")
+    source_images_input = layers.Input(shape=(domains, image_size, image_size, channels), name="source_images")
+    inpaint_mask_input = layers.Input(shape=(image_size, image_size, 1), name="inpaint_mask")
+    x = layers.Concatenate(axis=-1)([
+        layers.Reshape((image_size, image_size, domains * channels))(images_input),
+        layers.Reshape((image_size, image_size, domains * channels))(source_images_input),
+        inpaint_mask_input])
+    # x (shape=[b, s, s, d * (c + c) + 1])
+
     init = tf.random_normal_initializer(0., 0.02)
     number_of_filters = [32, 64, 128, 256]
     x = layers.Conv2D(number_of_filters[0], kernel_size=4, strides=1, padding="same", kernel_initializer=init)(x)
@@ -1334,4 +1342,4 @@ def build_cohesion_discriminator(config):
     x = layers.Flatten()(x)
     x = layers.Dense(1, kernel_initializer=init)(x)
     # lsgan: unbounded real number, should be 1 for real images and 0 for fake
-    return models.Model(inputs=input_images, outputs=x, name="CohesionDiscriminator")
+    return models.Model(inputs=[images_input, source_images_input, inpaint_mask_input], outputs=x, name="CohesionDiscriminator")
