@@ -299,7 +299,7 @@ class OptionParser(metaclass=SingletonMeta):
             in self.values.dataset_names
         ])
         setattr(self.values, "domain_folders", [f"{i}-{name}" for i, name in enumerate(self.values.domains)])
-        if "run_string" not in vars(self.values):
+        if self.values.run_string is None:
             setattr(self.values, "run_string", datetime.datetime.now().strftime("%Y%m%d-%H%M%S"))
 
         dataset_mask = list(
