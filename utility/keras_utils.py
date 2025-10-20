@@ -1363,9 +1363,9 @@ def check_nans(tensor, name):
     return tf.debugging.check_numerics(tensor, f"NaN in {name}")
 
 
-class DetectAbsentImages(layers.Layer):
+class DetectPresentImages(layers.Layer):
     def __init__(self, **kwargs):
-        super(DetectAbsentImages, self).__init__(**kwargs)
+        super(DetectPresentImages, self).__init__(**kwargs)
 
     def call(self, x):
         # x (shape=[b, d, s, s, c])

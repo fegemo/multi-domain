@@ -227,6 +227,11 @@ class OptionParser(metaclass=SingletonMeta):
         self.parser.add_argument("--generator-scales", help="Number of scales for the multi-scale "
                                                             "generator used in SpriteGAN", default=3,
                                  type=int)
+        
+        # --- sprite specific options
+        self.parser.add_argument("--retro-feed", help="Enables the retro feed mechanism in SpriteGAN's "
+                                                      "generator which, when generator-scales>1, concatenates " 
+                                                      "the intermediate outputs back for the next scale", action="store_true", default=False)
 
         # --- all: regarding the datasets to use for training and evaluation
         self.parser.add_argument("--rmxp", action="store_true", default=False, help="Uses RPG Maker XP dataset")

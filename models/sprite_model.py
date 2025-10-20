@@ -100,7 +100,7 @@ class SpriteEditorModel(RemicModel):
             raise ValueError(f"The provided {config.discriminator} type of discriminator has not been implemented")
 
     def get_annealing_layers(self):
-        return [self.generator.quantization]
+        return self.generator.quantization_layers if self.config.palette_quantization else []
 
     def encode(self, images, domain_availability, training=True):
         """
@@ -1092,6 +1092,8 @@ def build_monolith_generator(config):
     palette_quantization = config.palette_quantization
     initial_temperature = config.temperature
     capacity = config.capacity
+    feature_augmentation = config.feature_augmentation
+    retro_feed = generator_scales > 1 and config.retro_feed
 
     # define the inputs
     masked_images_input = layers.Input(shape=(domains, image_size, image_size, channels), name="source_images")
@@ -1100,16 +1102,29 @@ def build_monolith_generator(config):
     domain_availability_input = layers.Input(shape=(domains,), name="domain_availability")
     noise_input = layers.Input(shape=(noise_length,), name="noise")
 
+    masked_images = masked_images_input
+    if feature_augmentation == "flipY":
+        reshaped_input = layers.Lambda(lambda input_batch: tf.reshape(input_batch, (-1, image_size, image_size, channels)))(masked_images)
+        flipped_input = layers.Lambda(lambda input_batch: tf.image.flip_left_right(input_batch))(reshaped_input)
+        flipped_input = layers.Lambda(lambda input_batch: tf.reshape(input_batch, (-1, domains, image_size, image_size, channels)))(flipped_input)
+        masked_images = layers.Concatenate(axis=1)([masked_images, flipped_input])
+
     # processes the domain availability and the noise to generate embeddings
     # they are used to condition the generator
-    domain_embedding = layers.Dense(film_length)(domain_availability_input)
-    noise_embedding = layers.Dense(film_length)(noise_input)
+    domain_availability_channelized = layers.CategoryEncoding(num_tokens=domains, output_mode="multi_hot")(
+        domain_availability_input)
+    domain_availability_channelized = keras_utils.TileLayer(image_size)(domain_availability_channelized)
+    domain_availability_channelized = keras_utils.TileLayer(image_size)(domain_availability_channelized)
 
-    # mix the source images with the inpaint mask
-    # reshape the inpaint_mask_input to allow concatenation
-    x = keras_utils.ConcatenateMask()([masked_images_input, inpaint_mask_input])
-    # x (shape=[b, d, s, s, c + 1])
-    x = layers.Reshape((image_size, image_size, domains * (channels + 1)))(x)
+    # processes the domain availability and the noise to generate embeddings
+    # they are used to condition the generator
+    domain_embedding = layers.Dense(film_length, activation="leaky_relu")(domain_availability_input)
+    domain_embedding = layers.Dense(film_length, activation="leaky_relu")(domain_embedding)
+    noise_embedding = layers.Dense(film_length, activation="leaky_relu")(noise_input)
+    noise_embedding = layers.Dense(film_length, activation="leaky_relu")(noise_embedding)
+
+    masked_images = layers.Reshape((image_size, image_size, -1))(masked_images)
+    x = layers.Concatenate(axis=-1)([masked_images, inpaint_mask_input, domain_availability_channelized])
 
     number_of_filters = [f * capacity for f in [32, 64, 128, 256]]
     init = tf.random_normal_initializer(0., 0.02)
@@ -1127,11 +1142,12 @@ def build_monolith_generator(config):
         x = layers.Conv2D(filters * 2, kernel_size=4, strides=2, padding="same", kernel_initializer=init,
                           use_bias=False)(x)
         x = layers.GroupNormalization(groups=filters, epsilon=0.00001)(x)
-        x = layers.ReLU()(x)
+        x = layers.LeakyReLU()(x)
 
     # bottleneck
+    x = keras_utils.FiLMLayer()([x, domain_embedding])
     x = resblock(x, number_of_filters[-1] * 2, 4, init)
-    x = layers.ReLU()(x)
+    x = layers.LeakyReLU()(x)
 
     # decoder blocks with intermediate outputs and skip connections
     outputs = []
@@ -1140,14 +1156,14 @@ def build_monolith_generator(config):
         # upsample
         x = layers.Conv2DTranspose(filters, kernel_size=4, strides=2, padding="same", kernel_initializer=init,
                                    use_bias=False)(x)
-        x = layers.ReLU()(x)
-        x = keras_utils.FiLMLayer()([x, domain_embedding])
+        x = layers.LeakyReLU()(x)
         x = keras_utils.FiLMLayer()([x, noise_embedding])
         x = layers.Concatenate()([x, skip_connections.pop()])
 
         x = resblock(x, filters * 2, 4, init)
-        x = layers.ReLU()(x)
+        x = layers.LeakyReLU()(x)
 
+        quantization_layers = []
         if generator_scales > 1:
             reverse_i = len(number_of_filters) - i
             if generator_scales >= reverse_i > 1:
@@ -1158,7 +1174,20 @@ def build_monolith_generator(config):
                 output_layer_name = f"intermediate_output_{current_size}x{current_size}"
                 intermediate_output = layers.Reshape((domains, current_size, current_size, channels),
                                                      name=output_layer_name)(intermediate_output)
+                
+                if palette_quantization:
+                    # quantize the intermediate output to the palette
+                    quantization_layer = keras_utils.DifferentiablePaletteQuantization(
+                        initial_temperature, name=f"quantized_images_{current_size}x{current_size}")
+                    intermediate_output = quantization_layer([intermediate_output, target_palette_input])
+                    quantization_layers += [quantization_layer]
+                
                 outputs.append(intermediate_output)
+                
+                if retro_feed:
+                    # concatenate the intermediate output back to the feature map so it can be used by the next scale
+                    reshaped_intermediate = layers.Reshape((current_size, current_size, domains * channels))(intermediate_output)
+                    x = layers.Concatenate(axis=-1)([x, reshaped_intermediate])
 
     pre_output = layers.Conv2D(domains * channels, kernel_size=4, padding="same", kernel_initializer=init)(x)
     pre_output = layers.Activation("tanh")(pre_output)
@@ -1172,6 +1201,7 @@ def build_monolith_generator(config):
             initial_temperature, name="quantized-images")
         final_output = quantization_layer([pre_output, target_palette_input])
         inputs = [masked_images_input, inpaint_mask_input, target_palette_input, domain_availability_input, noise_input]
+        quantization_layers += [quantization_layer]
     else:
         # change the dimensions so the domains come first, then height, width and channels
         final_output = layers.Reshape((domains, image_size, image_size, channels),
@@ -1188,7 +1218,7 @@ def build_monolith_generator(config):
     )
 
     if palette_quantization:
-        model.quantization = quantization_layer
+        model.quantization_layers = quantization_layers
 
     return model
 

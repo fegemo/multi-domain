@@ -764,7 +764,7 @@ def r3mic_unified_content_encoder(config):
     if domain_availability_embedding > 0:
         # we want to find embeddings that represent which domains are made available to the content encoder
         # first, we find out which images were provided... then we train some embeddings
-        dae = keras_utils.DetectAbsentImages()(input_layer)
+        dae = keras_utils.DetectPresentImages()(input_layer)
         # dae (b, d) where b is the batch size and d is the number of domains
         dae_embedding = layers.Dense(domain_availability_embedding, activation="leaky_relu")(dae)
         dae_embedding = layers.Dense(domain_availability_embedding, activation="leaky_relu")(dae_embedding)
@@ -1167,6 +1167,6 @@ def sprite_r3gan_generator(config):
     )
 
     if palette_quantization:
-        model.quantization = quantization_layer
+        model.quantization_layers = [quantization_layer]
 
     return model
