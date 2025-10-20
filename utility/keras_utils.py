@@ -600,6 +600,9 @@ def create_random_inpaint_mask(batch, n_holes=4):
             # Create mask by combining shapes
             mask_i = squared_distances < squared_radii[:, tf.newaxis, tf.newaxis]  # Shape: [n_holes, 64, 64]
             mask = tf.reduce_any(mask_i, axis=0)  # Shape: [64, 64]
+
+            # The mask can only be inside the character area
+            mask = tf.logical_and(mask, combined_alpha > 0)
             return tf.cast(mask, tf.float32)
 
         # Return zero mask if no character pixels
@@ -608,17 +611,23 @@ def create_random_inpaint_mask(batch, n_holes=4):
     masks_list = tf.map_fn(generate_mask_for_character, batch)
 
     # stack masks and expand dimensions
-    masks = tf.stack(masks_list, axis=0)  # Shape: [batch_size, 64, 64]
-    masks = tf.expand_dims(masks, axis=1)  # Add domain dimension: [batch_size, 1, 64, 64]
-    masks = tf.expand_dims(masks, axis=-1)  # Add channel dimension: [batch_size, 1, 64, 64, 1]
+    inpaint_masks = tf.stack(masks_list, axis=0)  # Shape: [batch_size, 64, 64]
+    inpaint_masks = tf.expand_dims(inpaint_masks, axis=1)  # Add domain dimension: [batch_size, 1, 64, 64]
+    inpaint_masks = tf.expand_dims(inpaint_masks, axis=-1)  # Add channel dimension: [batch_size, 1, 64, 64, 1]
 
     # replicate mask across all 4 directions
-    masks = tf.tile(masks, [1, number_of_domains, 1, 1, 1])  # Shape: [batch_size, 4, 64, 64, 1]
+    inpaint_masks = tf.tile(inpaint_masks, [1, number_of_domains, 1, 1, 1])  # Shape: [batch_size, 4, 64, 64, 1]
 
-    # replace the RGBA values of the batch where the mask is 1 with -1
-    masked_batch = tf.where(masks == 1.0, -1.0, batch)  # Shape: [batch_size, 4, 64, 64, 4]
+    # finds which domains are present or absent (all pixels == 0)
+    present_domain_masks = DetectPresentImages()(batch)  # Shape: [batch_size, 4]
+    present_domain_masks = present_domain_masks[:, :, tf.newaxis, tf.newaxis, tf.newaxis]  # Shape: [batch_size, 4, 1, 1, 1]
 
-    return masked_batch, masks[:, 0, ...]  # return only one domain mask (e.g., first domain), as they are the same
+    # replace the RGBA values of the batch where the mask is 1 with -1, but only for present domains
+    # apply the inpainting mask to the batch
+    masked_batch = tf.where((present_domain_masks * inpaint_masks) == 1.0, -1.0, batch)  # Shape: [batch_size, 4, 64, 64, 4]
+
+    return masked_batch, inpaint_masks[:, 0, ...]  # return only one domain mask (e.g., first domain), as they are the same
+
 
 
 class ConcatenateMask(layers.Layer):
